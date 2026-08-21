@@ -58,22 +58,39 @@ export const FAMILIES = ["linear", "poisson", "logit", "probit"];
 // `allowSynthetic` (feCols only): accept a `"a×b"` combined-FE label as valid
 // when every `×`-separated part is a real header — ModelConfiguration.jsx
 // builds these labels at estimation time, they are never literal columns.
+// NOT VALIDATED: whether "a×b" is actually a declared interaction on THIS
+// panel (that needs ctx.panel.interactionCols threaded through, which no
+// caller currently supplies) or that it has exactly two parts. A bogus
+// "wage×educ" with no such interaction round-trips silently; the failure
+// surfaces at estimation time instead. Considered and deliberately deferred.
 // `nullable` (feCols only): `null` is a MEANINGFUL spec value ("use the
 // estimator's own FE default", see ModelingTab.jsx `effectiveFeCols`) and is
 // preserved as `null`, not folded into `[]` ("no FE").
+// `def` may be a FUNCTION of ctx instead of a literal, for a field whose real
+// ModelingTab default is dataset-dependent (factorVars: "every non-numeric
+// column", not a fixed value — see the field itself). Array/object literal
+// defs are frozen so an in-place mutation on the table's own instance throws
+// instead of silently corrupting every future reset; `applySpec` always
+// clones (and resolves function defs) before handing one to a setter — see
+// `resolveDef`.
 export const MODEL_SPEC_FIELDS = [
   { key: "model",             kind: "enum", ctxValues: "modelIds", def: "OLS",    setter: "setModel",  role: "Estimator" },
   { key: "family",            kind: "enum", values: FAMILIES,      def: "linear", setter: "setFamily", role: "Outcome family" },
 
   { key: "yVar",              kind: "column",     setter: "setYVar",       wrapped: true, def: null, role: "Outcome (Y)" },
-  { key: "xVars",             kind: "columns",    setter: "setXVars",      def: [],   role: "Regressors (X)" },
-  { key: "wVars",             kind: "columns",    setter: "setWVars",      def: [],   role: "Controls (W)" },
-  { key: "zVars",             kind: "columns",    setter: "setZVars",      def: [],   role: "Instruments (Z)" },
+  { key: "xVars",             kind: "columns",    setter: "setXVars",      def: Object.freeze([]),   role: "Regressors (X)" },
+  { key: "wVars",             kind: "columns",    setter: "setWVars",      def: Object.freeze([]),   role: "Controls (W)" },
+  { key: "zVars",             kind: "columns",    setter: "setZVars",      def: Object.freeze([]),   role: "Instruments (Z)" },
   { key: "weightVar",         kind: "column",     setter: "setWeightVar",  wrapped: true, def: null, role: "Weights" },
 
-  { key: "factorVars",        kind: "columns",    setter: "setFactorVars", def: [],   role: "Factor variables" },
-  { key: "factorRefs",        kind: "columnMap",  setter: "setFactorRefs", def: {},   role: "Factor reference category" },
-  { key: "interactionTerms",  kind: "termList",   setter: "setInteractionTerms", def: [], role: "Interaction term" },
+  // Real ModelingTab default is `headers.filter(h => !numericCols.includes(h))`
+  // — every non-numeric column of THIS dataset, not a fixed value. No literal
+  // can express that, so `def` is a function of ctx; Task 3 passes
+  // `defaultFactorVars` in ctx. Falls back to `[]` only if the caller omits it.
+  { key: "factorVars",        kind: "columns",    setter: "setFactorVars",
+    def: (ctx) => ctx.defaultFactorVars ?? [], role: "Factor variables" },
+  { key: "factorRefs",        kind: "columnMap",  setter: "setFactorRefs", def: Object.freeze({}),   role: "Factor reference category" },
+  { key: "interactionTerms",  kind: "termList",   setter: "setInteractionTerms", def: Object.freeze([]), role: "Interaction term" },
   { key: "noIntercept",       kind: "scalar",     setter: "setNoIntercept", def: false, role: "Regression through the origin" },
 
   { key: "feCols",            kind: "columns",    setter: "setSelectedFeCols", stateKey: "selectedFeCols",
@@ -99,7 +116,7 @@ export const MODEL_SPEC_FIELDS = [
 
   { key: "poissonEntityCol",  kind: "column",     setter: "setPoissonEntityCol", def: "", role: "Poisson entity" },
   { key: "poissonOffsetCol",  kind: "column",     setter: "setPoissonOffsetCol", def: "", role: "Poisson offset" },
-  { key: "poissonExtraFE",    kind: "columns",    setter: "setPoissonExtraFE",   def: [], role: "Poisson extra FE" },
+  { key: "poissonExtraFE",    kind: "columns",    setter: "setPoissonExtraFE",   def: Object.freeze([]), role: "Poisson extra FE" },
 
   { key: "cohortCol",         kind: "column",     setter: "setCohortCol", wrapped: true, def: null, role: "Cohort" },
   { key: "periodCol",         kind: "column",     setter: "setPeriodCol", wrapped: true, def: null, role: "Period" },
@@ -110,7 +127,7 @@ export const MODEL_SPEC_FIELDS = [
   { key: "csTreatCol",        kind: "column",     setter: "setCsTreatCol",  wrapped: true, def: null, role: "CS first-treatment period" },
   { key: "csEntityCol",       kind: "column",     setter: "setCsEntityCol", wrapped: true, def: null, role: "CS entity" },
   { key: "csTimeCol",         kind: "column",     setter: "setCsTimeCol",   wrapped: true, def: null, role: "CS time" },
-  { key: "csXCols",           kind: "columns",    setter: "setCsXCols",     def: [], role: "CS covariates" },
+  { key: "csXCols",           kind: "columns",    setter: "setCsXCols",     def: Object.freeze([]), role: "CS covariates" },
   { key: "csCompGroup",       kind: "scalar",     setter: "setCsCompGroup",   def: "nevertreated", role: "CS comparison group" },
   { key: "csRelMin",          kind: "scalar",     setter: "setCsRelMin",      def: "",  role: "CS min relative period" },
   { key: "csRelMax",          kind: "scalar",     setter: "setCsRelMax",      def: "",  role: "CS max relative period" },
@@ -171,7 +188,13 @@ export function collectSpec(state = {}) {
     if (typeof v === "function") continue;
     switch (f.kind) {
       case "columns":
+        // factorVars really is a Set in ModelingTab state (`.has`/`.size` are
+        // used against it directly) — accept it here rather than relying on
+        // every future call site to remember `[...factorVars]` itself, which
+        // is exactly the class of bug that dropped this field silently once
+        // already.
         if (Array.isArray(v)) spec[f.key] = v.filter(c => typeof c === "string");
+        else if (v instanceof Set) spec[f.key] = [...v].filter(c => typeof c === "string");
         // `null` is a meaningful value only for `nullable` fields (feCols: "use
         // the estimator's own default"). Serialise it explicitly rather than
         // dropping the key, or that distinction is lost the moment a spec is
@@ -199,6 +222,19 @@ export function collectSpec(state = {}) {
   return spec;
 }
 
+// Resolves a field's default for a given call: runs a function-valued `def`
+// against ctx (factorVars: dataset-dependent), then CLONES arrays/objects so
+// the table's own (frozen) instance is never handed to a setter. Without the
+// clone, `a.xVars === <the table's def>` would be true and one in-place
+// `.push` anywhere downstream would permanently poison every later reset —
+// verified by mutation testing, see the harness's "def identity" section.
+function resolveDef(f, ctx) {
+  const raw = typeof f.def === "function" ? f.def(ctx) : f.def;
+  if (Array.isArray(raw)) return [...raw];
+  if (raw && typeof raw === "object") return { ...raw };
+  return raw;
+}
+
 // ── applySpec ────────────────────────────────────────────────────────────────
 // Writes a spec into the sidebar via `setters` (keyed by the field's `setter`
 // name). This is a REPLACE, not a merge: every declared field is written on
@@ -224,6 +260,12 @@ export function collectSpec(state = {}) {
 //               this function does NOT claim to validate levels without it
 // }
 export function applySpec(spec = {}, setters = {}, ctx = {}) {
+  // Untrusted-file-import path: a hand-edited or malformed model.json can put
+  // ANYTHING at the top level. `{}` default only catches undefined; a
+  // primitive or array spec (`"OLS"`, `42`, `true`, `[1,2,3]`) would make
+  // `f.key in spec` throw. Treat anything that isn't a plain object as empty
+  // — every field then resets to its default, same as a spec with no keys.
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) spec = {};
   const headers    = new Set(ctx.headers ?? []);
   const datasetIds = new Set(ctx.datasetIds ?? []);
   const panel       = ctx.panel ?? null;
@@ -251,10 +293,19 @@ export function applySpec(spec = {}, setters = {}, ctx = {}) {
       // Absent from the incoming spec: reset to this field's default rather
       // than leaving whatever the PREVIOUS applySpec call (or user click)
       // left in place. panelRef has no setter — nothing to reset.
-      if (f.kind !== "panelRef") write(f, f.def);
+      if (f.kind !== "panelRef") write(f, resolveDef(f, ctx));
       continue;
     }
     const v = spec[f.key];
+
+    // A key present with an explicit `undefined` value (a hand-built JS spec
+    // object, not JSON — JSON has no `undefined`) carries no information;
+    // treat it exactly like the key being absent rather than writing
+    // `undefined` straight into a setter.
+    if (v === undefined) {
+      if (f.kind !== "panelRef") write(f, resolveDef(f, ctx));
+      continue;
+    }
 
     switch (f.kind) {
       case "panelRef": {
@@ -270,17 +321,17 @@ export function applySpec(spec = {}, setters = {}, ctx = {}) {
         // spatialGeomCol to ""), and normalising here would make a round-trip
         // fail on a field the user never touched.
         if (v == null || v === "") { write(f, f.wrapped ? null : v); break; }
-        if (typeof v !== "string") { report(f, v, "bad-shape"); write(f, f.def); break; }
+        if (typeof v !== "string") { report(f, v, "bad-shape"); write(f, resolveDef(f, ctx)); break; }
         if (headers.has(v)) write(f, v);
-        else { report(f, v, "no-column"); write(f, f.def); }
+        else { report(f, v, "no-column"); write(f, resolveDef(f, ctx)); }
         break;
       }
       case "columns": {
         if (v === null) {
           if (f.nullable) { write(f, null); break; }
-          report(f, v, "bad-shape"); write(f, f.def); break;
+          report(f, v, "bad-shape"); write(f, resolveDef(f, ctx)); break;
         }
-        if (!Array.isArray(v)) { report(f, v, "bad-shape"); write(f, f.def); break; }
+        if (!Array.isArray(v)) { report(f, v, "bad-shape"); write(f, resolveDef(f, ctx)); break; }
         const kept = v.filter(c => isValidFeCol(f, c));
         const lost = v.filter(c => !isValidFeCol(f, c));
         if (lost.length) report(f, lost.join(", "), "no-column");
@@ -289,7 +340,7 @@ export function applySpec(spec = {}, setters = {}, ctx = {}) {
       }
       case "columnMap": {
         if (!v || typeof v !== "object" || Array.isArray(v)) {
-          report(f, v, "bad-shape"); write(f, f.def); break;
+          report(f, v, "bad-shape"); write(f, resolveDef(f, ctx)); break;
         }
         const kept = {};
         const lostCols = [];
@@ -307,7 +358,7 @@ export function applySpec(spec = {}, setters = {}, ctx = {}) {
         break;
       }
       case "termList": {
-        if (!Array.isArray(v)) { report(f, v, "bad-shape"); write(f, f.def); break; }
+        if (!Array.isArray(v)) { report(f, v, "bad-shape"); write(f, resolveDef(f, ctx)); break; }
         // A term is validated as a UNIT: a half-term would render as an
         // editable but meaningless row and expandInteractions would build a
         // product against a missing operand.
@@ -327,31 +378,39 @@ export function applySpec(spec = {}, setters = {}, ctx = {}) {
         break;
       }
       case "datasetRef": {
-        if (!v) { write(f, f.def); break; }
+        if (!v) { write(f, resolveDef(f, ctx)); break; }
         if (datasetIds.has(v)) write(f, v);
-        else { report(f, v, "no-dataset"); write(f, f.def); }
+        else { report(f, v, "no-dataset"); write(f, resolveDef(f, ctx)); }
         break;
       }
       case "enum": {
+        // A non-primitive enum value (`{model: {a:1}}`) is malformed input,
+        // not "an id we don't recognise" — report it as such rather than
+        // burying it under the generic "unknown-value" reason.
+        if (v !== null && typeof v === "object") {
+          report(f, v, "bad-shape"); write(f, resolveDef(f, ctx)); break;
+        }
         // `model` supplies its vocabulary via ctx.modelIds instead of a
         // static `values` list (the estimator id set lives in helpers.js /
-        // EstimatorSidebar.jsx, not here). When the caller doesn't pass it,
-        // write the value through unvalidated rather than clearing a
-        // perfectly good spec on a caller omission.
+        // EstimatorSidebar.jsx, not here). When the caller doesn't pass a
+        // REAL, non-empty vocabulary, write the value through unvalidated
+        // rather than clearing a perfectly good spec — an empty array is a
+        // plausible transient (dataset still loading), not "supplied and your
+        // id is unknown".
         if (f.ctxValues) {
           const values = ctx[f.ctxValues];
-          if (!values) { write(f, v); break; }
+          if (!Array.isArray(values) || values.length === 0) { write(f, v); break; }
           if (values.includes(v)) write(f, v);
-          else { report(f, v, "unknown-value"); write(f, f.def); }
+          else { report(f, v, "unknown-value"); write(f, resolveDef(f, ctx)); }
           break;
         }
         if ((f.values ?? []).includes(v)) write(f, v);
-        else { report(f, v, "unknown-value"); write(f, f.def); }
+        else { report(f, v, "unknown-value"); write(f, resolveDef(f, ctx)); }
         break;
       }
       default: {
         if (isPrimitive(v)) write(f, v);
-        else { report(f, v, "bad-shape"); write(f, f.def); }
+        else { report(f, v, "bad-shape"); write(f, resolveDef(f, ctx)); }
         break;
       }
     }

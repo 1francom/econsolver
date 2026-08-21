@@ -3,8 +3,15 @@
 //   node src/components/modeling/__validation__/modelSpecValidation.mjs
 // Prints [pass]/[FAIL] per check + a summary; exits 1 if anything fails.
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
 import { MODEL_SPEC_FIELDS, SE_TYPES, collectSpec, applySpec, specFormula } from "../modelSpec.js";
 import { buildModelAvail } from "../helpers.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const MODELING_TAB = resolve(HERE, "../../ModelingTab.jsx");
 
 let pass = 0, fail = 0;
 const check = (n, c, extra) => {
@@ -46,6 +53,62 @@ section("field-table shape (review item 9)");
   check("every field declares an explicit role",
     MODEL_SPEC_FIELDS.every(f => typeof f.role === "string" && f.role.length > 0),
     MODEL_SPEC_FIELDS.filter(f => !f.role).map(f => f.key).join(", "));
+}
+
+// ── review item 5: static `def`s must stay synced with ModelingTab.jsx's real
+// useState initializers. Same technique as
+// src/services/export/__validation__/plotTileFacetValidation.mjs (reads
+// PlotBuilder.jsx as text to keep TILE_SCHEMES in sync with plotScript.js) —
+// ModelingTab.jsx is a .jsx file the node harness cannot import, so this
+// reads it as TEXT and parses each `const [x, setX] = useState(<literal>);`
+// initializer. Every value in the ~444-608 spec-state block is a JSON-legal
+// literal (`[]`, `""`, `"OLS"`, `false`, `3`, `-1`, `null`, …), so JSON.parse
+// on the captured group is exact, not an approximation.
+section("static defs are synced with ModelingTab.jsx's real useState initializers (review item 5)");
+{
+  const src = readFileSync(MODELING_TAB, "utf8");
+  const re = /const \[(\w+),\s*set\w+\s*\]\s*=\s*useState\(([^)]*)\);/g;
+  const parsed = {};
+  let m;
+  while ((m = re.exec(src))) {
+    const [, name, rawVal] = m;
+    try { parsed[name] = JSON.parse(rawVal.trim()); }
+    catch { /* non-literal initializer (factorVars' computed Set, activeTab's tabOrder[0], …) — skip */ }
+  }
+  check("parser actually found ModelingTab.jsx's useState block (sanity — not a silently-empty regex)",
+    Object.keys(parsed).length > 20, Object.keys(parsed).length);
+
+  // Fields whose `def` is intentionally a FUNCTION of ctx (a dataset-dependent
+  // default with no fixed literal to compare against) are exempt from this
+  // literal-vs-literal check — listed explicitly so the exemption is a
+  // deliberate decision, not something that silently stops being checked.
+  const FUNCTION_DEF_EXEMPT = new Set(["factorVars"]);
+
+  let checkedCount = 0;
+  for (const f of MODEL_SPEC_FIELDS) {
+    if (f.kind === "panelRef") continue;   // no setter, no useState to compare against
+    const stateName = f.stateKey ?? f.key;
+    if (FUNCTION_DEF_EXEMPT.has(f.key)) {
+      check(`${f.key}: def is a function (exempt from literal sync check)`, typeof f.def === "function");
+      continue;
+    }
+    if (!(stateName in parsed)) {
+      check(`${f.key}: found "${stateName}"'s useState default in ModelingTab.jsx`, false, "parser did not find it — literal initializer, or field renamed?");
+      continue;
+    }
+    checkedCount++;
+    const real = parsed[stateName];
+    // `def` is stored in unwrapped/bare SPEC shape; wrapped fields' real
+    // ModelingTab default is always `[]`, whose bare-spec equivalent is `null`
+    // (mirrors modelSpec.js's own `unwrap()`).
+    const expected = f.wrapped ? (Array.isArray(real) ? (real[0] ?? null) : (real ?? null)) : real;
+    check(`${f.key}: table def matches ModelingTab.jsx's real useState default`,
+      JSON.stringify(f.def) === JSON.stringify(expected),
+      `table def ${JSON.stringify(f.def)} vs ModelingTab.jsx's ${JSON.stringify(real)} (state var "${stateName}")`);
+  }
+  const expectedCheckedCount = MODEL_SPEC_FIELDS.filter(f => f.kind !== "panelRef" && !FUNCTION_DEF_EXEMPT.has(f.key)).length;
+  check("every non-exempt, non-panelRef field was actually compared (not silently 0)",
+    checkedCount === expectedCheckedCount, `${checkedCount} of ${expectedCheckedCount}`);
 }
 
 // A full sidebar state, one fixture per estimator group. Values are chosen to
@@ -388,6 +451,133 @@ section("factorRefs level validated only when ctx.levels is supplied");
   check("with ctx.levels, a known level is kept",
     out3.factorRefs.year === "2010", JSON.stringify(out3.factorRefs));
   check("known level not reported", r3.unapplied.every(m => m.key !== "factorRefs"));
+}
+
+// ── re-review item 1: factorVars' def is dataset-dependent, not a fixed [] ───
+section("factorVars def is a function of ctx, and collectSpec accepts a Set");
+{
+  // ModelingTab state really is a Set (`.has`/`.size` used against it
+  // directly) — collectSpec must not require every call site to remember
+  // `[...factorVars]` itself.
+  const spec = collectSpec({ factorVars: new Set(["year", "firm"]) });
+  check("collectSpec serialises a Set the same as an array",
+    JSON.stringify(spec.factorVars.slice().sort()) === JSON.stringify(["firm", "year"]),
+    JSON.stringify(spec.factorVars));
+}
+{
+  // A spec that never mentions factorVars (every legacy pin, every
+  // estimationDispatch-shaped partial) must reset to THIS DATASET's real
+  // default — every non-numeric column — not to [], which would silently
+  // demote every string column to "not a factor" and feed it into the design
+  // matrix as Number(...) instead of dummies.
+  const out = { factorVars: ["stale"] };
+  applySpec({ model: "OLS" }, makeSetters(out),
+    { headers: ALL_COLS, datasetIds: [], defaultFactorVars: ["year", "firm"] });
+  check("factorVars resets to ctx.defaultFactorVars when the spec omits it",
+    JSON.stringify(out.factorVars.slice().sort()) === JSON.stringify(["firm", "year"]),
+    JSON.stringify(out.factorVars));
+}
+{
+  // Caller omitted ctx.defaultFactorVars entirely — falls back to [] rather
+  // than throwing, but this is the DEGRADED case, not the normal one.
+  const out = { factorVars: ["stale"] };
+  applySpec({ model: "OLS" }, makeSetters(out), { headers: ALL_COLS, datasetIds: [] });
+  check("factorVars falls back to [] only when ctx.defaultFactorVars is omitted",
+    JSON.stringify(out.factorVars) === "[]", JSON.stringify(out.factorVars));
+}
+
+// ── re-review item 2: def objects are cloned, and the table's own copies ─────
+//    are frozen so an in-place mutation fails loudly instead of poisoning
+//    every future reset.
+section("def objects are cloned per call and the table's own instances are frozen");
+{
+  const outA = {};
+  const outB = {};
+  applySpec({}, makeSetters(outA), { headers: ALL_COLS, datasetIds: [] });
+  applySpec({}, makeSetters(outB), { headers: ALL_COLS, datasetIds: [] });
+  check("two successive resets of xVars are not the same array reference",
+    outA.xVars !== outB.xVars);
+  check("two successive resets are still value-equal", JSON.stringify(outA.xVars) === JSON.stringify(outB.xVars));
+
+  outA.xVars.push("mutated-in-place");
+  const outC = {};
+  applySpec({}, makeSetters(outC), { headers: ALL_COLS, datasetIds: [] });
+  check("mutating one reset's array does NOT poison a later reset",
+    JSON.stringify(outC.xVars) === "[]", JSON.stringify(outC.xVars));
+
+  const outD = {};
+  applySpec({}, makeSetters(outD), { headers: ALL_COLS, datasetIds: [] });
+  outD.factorRefs.poisoned = "yes";
+  const outE = {};
+  applySpec({}, makeSetters(outE), { headers: ALL_COLS, datasetIds: [] });
+  check("mutating one reset's object (factorRefs) does NOT poison a later reset",
+    !("poisoned" in outE.factorRefs), JSON.stringify(outE.factorRefs));
+}
+{
+  const xVarsField = MODEL_SPEC_FIELDS.find(f => f.key === "xVars");
+  let threw = false;
+  try { xVarsField.def.push("mutated"); } catch { threw = true; }
+  check("mutating the table's own xVars def array throws (frozen, strict mode)", threw);
+
+  const factorRefsField = MODEL_SPEC_FIELDS.find(f => f.key === "factorRefs");
+  let threw2 = false;
+  try { factorRefsField.def.poisoned = "yes"; } catch { threw2 = true; }
+  check("mutating the table's own factorRefs def object throws (frozen, strict mode)", threw2);
+}
+
+// ── re-review item 3: applySpec must not throw on a non-object top-level spec ─
+section("applySpec never throws when spec ITSELF is malformed (not just a field)");
+{
+  const badSpecs = ["OLS", 42, true, [1, 2, 3], null];
+  for (const bad of badSpecs) {
+    let threw = false;
+    const out = { model: "stale", xVars: ["stale"] };
+    try { applySpec(bad, makeSetters(out), { headers: ALL_COLS, datasetIds: [], modelIds: MODEL_IDS }); }
+    catch { threw = true; }
+    check(`applySpec(${JSON.stringify(bad)}, …) does not throw`, !threw);
+    if (!threw) {
+      check(`applySpec(${JSON.stringify(bad)}, …) resets state to defaults, same as {}`,
+        out.model === "OLS" && JSON.stringify(out.xVars) === "[]",
+        `model=${out.model}, xVars=${JSON.stringify(out.xVars)}`);
+    }
+  }
+}
+
+// ── re-review item 4: enum guard tightened both directions ───────────────────
+section("enum guard: empty modelIds skips validation, undefined resets, non-primitive is bad-shape");
+{
+  // ctx.modelIds: [] is a plausible transient (dataset still loading) — must
+  // NOT be read as "vocabulary supplied, and your id is unknown".
+  const out = {};
+  const { unapplied } = applySpec({ model: "FE" }, makeSetters(out), { headers: ALL_COLS, datasetIds: [], modelIds: [] });
+  check("empty modelIds does not clear a valid model value", out.model === "FE", out.model);
+  check("empty modelIds does not report model as unapplied", !unapplied.some(m => m.key === "model"));
+}
+{
+  // The key IS present but its value is `undefined` — must be treated exactly
+  // like the key being absent (reset to def), never written through as
+  // literal `undefined`.
+  const out = { model: "stale" };
+  const { unapplied } = applySpec({ model: undefined }, makeSetters(out),
+    { headers: ALL_COLS, datasetIds: [], modelIds: MODEL_IDS });
+  check("explicit undefined resets model to its default, not to undefined",
+    out.model === "OLS", out.model);
+  check("undefined-valued key is not reported (treated as absent, not invalid)",
+    !unapplied.some(m => m.key === "model"));
+}
+{
+  const out = {};
+  const { unapplied } = applySpec({ model: { nested: true } }, makeSetters(out),
+    { headers: ALL_COLS, datasetIds: [], modelIds: MODEL_IDS });
+  check("non-primitive model value reported as bad-shape, not unknown-value",
+    unapplied.some(m => m.key === "model" && m.reason === "bad-shape"), JSON.stringify(unapplied));
+  check("non-primitive model value cleared to def", out.model === "OLS", out.model);
+}
+{
+  const out = {};
+  const { unapplied } = applySpec({ family: undefined }, makeSetters(out), { headers: ALL_COLS, datasetIds: [] });
+  check("explicit undefined resets family to its default", out.family === "linear", out.family);
+  check("undefined family not reported", !unapplied.some(m => m.key === "family"));
 }
 
 section("specFormula");
