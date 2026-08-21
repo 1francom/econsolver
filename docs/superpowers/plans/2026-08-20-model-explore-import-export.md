@@ -1073,6 +1073,60 @@ git commit -m "feat(export): artifactIO — build/parse model.json and plots.jso
 
 ---
 
+## Task 4b: `artifactIO` hardening — OUTSTANDING, do before Task 5
+
+Task 4 shipped (`411708df`) and its harness is green at 21 checks, but an adversarial review
+ran 80 probes against it and found real holes. One of them — `specFormula` throwing on a
+duck-typed array — is already fixed (`b707eea4`). **The rest are outstanding.** They are
+listed here rather than in a chat log because the review that found them is not durable.
+
+The module's best property, confirmed empirically, is that its vocabularies are
+**deny-by-default**: an empty or missing `modelIds`/`geoms` rejects the file rather than
+waving it through. Preserve that while fixing the rest — and pin it with a test, because
+without one, someone "fixing" the annoyance with `if (!ids.size) skip` gets a green harness
+while recreating this repo's `condToSQL` → `default: return "TRUE"` bug.
+
+### Critical
+- **`parseModelFile` never validates `m.spec`.** `m.spec?.seType` optional-chains past a
+  string, array or null, so `{"type":"OLS","spec":null}` returns `ok:true`. Reject a
+  non-plain-object spec, naming the model: `Model "Baseline": spec is not an object.`
+
+### Important
+- **`vocab: null` throws** instead of returning `{ok:false}` — `vocab = {}` is a default
+  parameter, so it only fires on `undefined`. A caller passing a not-yet-loaded ref turns a
+  file import into a render crash. Use `vocab ?? {}` inside both bodies.
+- **`version` is stamped and never read.** `version: 2`, `"banana"`, and absent all parse
+  `ok:true`, so a future v2 that renames a spec key is silently misparsed. Reject a version
+  newer than this build writes; treat a missing version as 1.
+- **`__proto__` survives the build → file → parse round trip.** No pollution is reachable
+  today (spread is safe, `Object.prototype` verified untouched), but `Object.assign({}, entry)`
+  DOES pollute, and that is the documented downstream shape. Strip `__proto__`/`constructor`/
+  `prototype` in both parsers and in `buildPlotsFile`'s strip list.
+- **`buildPlotsFile` strips session-local identity only at the top level.** `PLOT_STRIP` hits a
+  shallow `{...e}`, so `layers[].datasetId`, `layers[].datasetName` and nested `meta.datasetId`
+  travel intact — against the module's own comment. `datasetName` is often a real filename, so
+  this is a privacy leak in a file users email each other. Strip recursively.
+- **Error messages are uncapped**: 50 000 unknown ids produced a 538 960-character error
+  string. Cap at ~5 distinct values + "and N more", truncate each to ~40 chars, and sanitise —
+  `kind: "<img src=x onerror=alert(1)>"` is currently echoed verbatim.
+
+### Message quality
+- A valid id in the wrong shape reports as an unknown id (`{"type":["OLS"]}` →
+  `Unknown estimator: OLS.`), because `String(v)` erases the difference. The user sees OLS in
+  the sidebar and has nowhere to go. `applySpec` already separates `bad-shape` from
+  `unknown-value` — follow it. Same for `layers:[null]` → `Unknown geom: undefined.`
+- Name which entry failed (index + label), and report all failing categories rather than
+  returning on the first.
+
+### Harness gaps (21 checks is too thin)
+Deny-by-default vocabularies (highest value); non-string input; `version`; wrong-typed `spec`;
+the parse → `specFormula` handoff; prototype keys; nested stripping; deep round-trip equality;
+`parsePlotsFile` with non-JSON; null/non-object plot entries and layers; build-side robustness
+(`buildModelFile(null)` throws today — guard it or document that the build side trusts its
+caller, then assert whichever); plots round-trip beyond `geom`.
+
+---
+
 ## Task 5: Model export/import UI
 
 **Files:**
