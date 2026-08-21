@@ -111,6 +111,43 @@ section("static defs are synced with ModelingTab.jsx's real useState initializer
     checkedCount === expectedCheckedCount, `${checkedCount} of ${expectedCheckedCount}`);
 }
 
+// ── SPEC_SETTERS completeness (Task 3) ───────────────────────────────────────
+// applySpec writes a field only if `setters[f.setter]` exists — a field whose
+// setter is absent from ModelingTab.jsx's SPEC_SETTERS table silently stops
+// restoring, with no error anywhere. Same text-parsing technique as the def
+// sync check above (and plotTileFacetValidation.mjs): read ModelingTab.jsx as
+// TEXT, extract the keys of the `const SPEC_SETTERS = useMemo(() => ({ … }))`
+// object literal, and assert every non-null `setter` in MODEL_SPEC_FIELDS is
+// among them.
+section("SPEC_SETTERS in ModelingTab.jsx covers every field's setter (Task 3)");
+{
+  const src = readFileSync(MODELING_TAB, "utf8");
+  const start = src.indexOf("const SPEC_SETTERS");
+  const open  = start >= 0 ? src.indexOf("({", start) : -1;
+  const close = open  >= 0 ? src.indexOf("}), [", open) : -1;
+  check("found the SPEC_SETTERS object literal in ModelingTab.jsx (sanity — not a silently-empty parse)",
+    start >= 0 && open >= 0 && close > open, `start=${start} open=${open} close=${close}`);
+
+  const body = close > open ? src.slice(open + 2, close) : "";
+  // Keys are either shorthand (`setModel,`) or `key: <expr>` (setFactorVars
+  // is wrapped to re-Set the array). Both start a line-ish token before a
+  // `,` or `:`; capture identifiers in key position only.
+  const keys = new Set();
+  for (const m of body.matchAll(/(?:^|[,{]\s*)\s*(set[A-Za-z0-9_]*)\s*(?=[,:}])/g)) keys.add(m[1]);
+  check("parsed a plausible number of SPEC_SETTERS keys", keys.size > 40, keys.size);
+
+  const needed = MODEL_SPEC_FIELDS.filter(f => f.setter).map(f => f.setter);
+  const missing = needed.filter(s => !keys.has(s));
+  check("every non-null MODEL_SPEC_FIELDS setter is a key of SPEC_SETTERS",
+    missing.length === 0, `missing: ${missing.join(", ")}`);
+
+  // The reverse direction: an entry in SPEC_SETTERS naming no declared field
+  // is dead weight (or a typo'd rename that left the real one uncovered).
+  const extra = [...keys].filter(k => !needed.includes(k));
+  check("SPEC_SETTERS has no key that no field declares",
+    extra.length === 0, `extra: ${extra.join(", ")}`);
+}
+
 // A full sidebar state, one fixture per estimator group. Values are chosen to
 // be REAL headers from ALL_COLS below so the "nothing unapplied" round-trip
 // check is meaningful, not vacuous.

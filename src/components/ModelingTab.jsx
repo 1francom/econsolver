@@ -75,7 +75,8 @@ import * as modelBuffer from "../services/modelBuffer.js";
 import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
 import ModelComparison  from "./modeling/ModelComparison.jsx";
 
-import EstimatorSidebar, { FAMILY_SUPPORT } from "../components/modeling/EstimatorSidebar.jsx";
+import EstimatorSidebar, { FAMILY_SUPPORT, MODELS } from "../components/modeling/EstimatorSidebar.jsx";
+import { collectSpec, applySpec } from "./modeling/modelSpec.js";
 import VariableSelector, { FOLD_W_INTO_X } from "../components/modeling/VariableSelector.jsx";
 import { useContainerWidth } from "../hooks/useContainerWidth.js";
 import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
@@ -601,6 +602,47 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [timeVar,     setTimeVar]     = useState(null);
   const [maxLag,      setMaxLag]      = useState(null);
 
+  // Fields reported as unapplied by the last applySpec call (pin restore or
+  // model.json import). Rendered as a banner above the model buffer bar.
+  const [specNotice, setSpecNotice] = useState(null);
+
+  // Setter table consumed by applySpec — keys are the `setter` names declared
+  // in MODEL_SPEC_FIELDS (modelSpec.js). Every non-null `setter` in that table
+  // MUST appear here or its field silently stops restoring; the harness
+  // (__validation__/modelSpecValidation.mjs) parses this literal as text and
+  // fails if any is missing. `factorVars` is a Set in ModelingTab state, so
+  // its setter re-wraps the array applySpec hands it.
+  // useMemo so the object identity is stable across renders.
+  const SPEC_SETTERS = useMemo(() => ({
+    setModel, setFamily, setYVar, setXVars, setWVars, setZVars, setWeightVar,
+    setFactorVars: (arr) => setFactorVars(new Set(arr ?? [])),
+    setFactorRefs, setInteractionTerms, setNoIntercept,
+    setSelectedFeCols,
+    setTreatVar, setPostVar,
+    setRunningVar, setCutoff, setBwMode, setBwManual, setKernel, setPolyOrder,
+    setTreatedUnit, setSynthTreatTime, setTreatTimeCol, setKPre, setKPost,
+    setPoissonEntityCol, setPoissonOffsetCol, setPoissonExtraFE,
+    setCohortCol, setPeriodCol, setSaUnitCol, setSaControlMode, setSaRefPeriod,
+    setCsTreatCol, setCsEntityCol, setCsTimeCol, setCsXCols, setCsCompGroup,
+    setCsRelMin, setCsRelMax, setCsEstMethod, setCsBasePeriod, setCsAnticipation,
+    setCsInfMethod, setCsNBoot, setCsSeed, setCsDefaultView,
+    setSpatialModel, setSpatialWeightsMode, setSpatialGeomCol, setSpatialWeightsDatasetId,
+    setSpatialWeightsType, setSpatialWeightsStyle, setSpatialWeightsK, setSpatialWeightsD,
+    setSpatialWeightsICol, setSpatialWeightsJCol, setSpatialWeightsWCol,
+    setSeType, setClusterVar, setClusterVar2, setTimeVar, setMaxLag,
+  }), []);
+
+  // Validation context for applySpec: which columns/datasets/estimator ids are
+  // real in THIS session, plus the dataset-dependent factorVars default (the
+  // same expression the factorVars useState initializer uses).
+  const SPEC_CTX = useMemo(() => ({
+    headers,
+    datasetIds: (availableDatasets || []).map(d => d.id),
+    panel,
+    modelIds: MODELS.map(m => m.id),
+    defaultFactorVars: headers.filter(h => !numericCols.includes(h)),
+  }), [headers, availableDatasets, panel, numericCols]);
+
   const seOpts = useMemo(() => ({
     seType, clusterVar, clusterVar2,
     timeVar: timeVar ?? panel?.timeCol ?? null,
@@ -894,7 +936,29 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     // seType/clusterVar are captured PER MODEL at estimation time so each pinned
     // model exports with the SE it was actually run with (not the current global
     // selector). Without this, pinned models silently default to classical.
-    const specExtras = { factorVars: [...factorVars], factorRefs: { ...factorRefs }, interactionTerms, xVarsRaw: [...xVars], wVarsRaw: [...wVars], filename: cleanedData?.filename ?? null, seType, clusterVar, clusterVar2, noIntercept };
+    // collectSpec is the single owner of what a spec contains (modelSpec.js).
+    // xVarsRaw/wVarsRaw/filename are NOT spec fields — they are replication
+    // metadata the exporters read, so they stay stamped alongside it.
+    const specExtras = {
+      ...collectSpec({
+        model, family, yVar, xVars, wVars, zVars, weightVar,
+        factorVars, factorRefs, interactionTerms, noIntercept,
+        selectedFeCols: effectiveFeCols,
+        entityCol: panel?.entityCol ?? null, timeCol: panel?.timeCol ?? null,
+        treatVar, postVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
+        treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost,
+        poissonEntityCol, poissonOffsetCol, poissonExtraFE,
+        cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
+        csTreatCol, csEntityCol, csTimeCol, csXCols, csCompGroup, csRelMin, csRelMax,
+        csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView,
+        spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
+        spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD,
+        spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol,
+        seType, clusterVar, clusterVar2, timeVar, maxLag,
+      }),
+      xVarsRaw: [...xVars], wVarsRaw: [...wVars],
+      filename: cleanedData?.filename ?? null,
+    };
     if (dispatch?.result?.spec)      Object.assign(dispatch.result.spec,      specExtras);
     if (dispatch?.result?.fe?.spec)  Object.assign(dispatch.result.fe.spec,   specExtras);
     if (dispatch?.result?.fd?.spec)  Object.assign(dispatch.result.fd.spec,   specExtras);
@@ -903,7 +967,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
     if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
     return dispatch;
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, noIntercept, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, factorRefs, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights, cleanedData, datasetId]);
+  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, noIntercept, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, factorRefs, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD, spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol, timeVar, maxLag, resolveSpatialWeights, cleanedData, datasetId]);
 
   // ── DuckDB full-table pull ────────────────────────────────────────────────
   // For DuckDB-backed datasets `rows` is only a 500-row preview — every JS
@@ -3836,6 +3900,38 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           <CoefficientTestPanel models={pinnedModels} liveResult={result} />
         )}
 
+        {/* ── Unapplied spec fields (pin restore / model.json import) ── */}
+        {specNotice && (
+          <div style={{
+            margin: "0 0 0.6rem", padding: "0.55rem 0.75rem",
+            background: C.surface2, border: `1px solid ${C.gold}`, borderLeft: `3px solid ${C.gold}`,
+            borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+            color: C.textDim, lineHeight: 1.6,
+          }}>
+            <div style={{ color: C.gold, marginBottom: 4 }}>
+              {specNotice.length} field{specNotice.length !== 1 ? "s" : ""} could not be applied
+            </div>
+            {specNotice.map((m, i) => (
+              <div key={i}>
+                {m.role}: <span style={{ color: C.text }}>{String(m.value)}</span>
+                {" — "}
+                {m.reason === "no-column"      ? "not in this dataset"
+                 : m.reason === "no-dataset"    ? "no such dataset in this session"
+                 : m.reason === "no-level"      ? "not a level of this column"
+                 : m.reason === "bad-shape"     ? "malformed in the file — reset to default"
+                 : m.reason === "panel-mismatch" ? "this dataset declares a different panel index"
+                 : "unrecognised value"}
+              </div>
+            ))}
+            <button onClick={() => setSpecNotice(null)}
+              style={{ marginTop: 6, padding: "0.18rem 0.55rem", background: "transparent",
+                border: `1px solid ${C.border2}`, color: C.textDim, borderRadius: 2,
+                cursor: "pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily }}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* ── Model Buffer Bar ── */}
         <ModelBufferBar
           models={pinnedModels}
@@ -3847,28 +3943,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             if (!r) return;
             setResult(r);
             setActiveBufferId(id);
-            // Also refill the sidebar from the pinned model's spec so the user
-            // can just hit "Estimate" to get a full, unrimmed re-computation
-            // (pinned models are trimmed — no raw arrays, so plots that need
-            // row-level data, e.g. RDD scatter/McCrary, can't render from the
-            // pinned copy alone). Only fields trimResult actually preserves —
-            // seType/clusterVar aren't reliably stored on results today, so
-            // SE settings are deliberately left untouched rather than silently
-            // reset to "classical".
-            const s = r.spec ?? {};
-            if (r.type) setModel(r.type);
-            setYVar(s.yVar ? [s.yVar] : []);
-            setXVars(s.xVars ?? []);
-            setWVars(s.wVars ?? []);
-            setZVars(s.zVars ?? []);
-            setTreatVar(s.treatVar ? [s.treatVar] : []);
-            setRunningVar(s.runningVar ? [s.runningVar] : []);
-            setPostVar(s.postVar ? [s.postVar] : []);
-            setCutoff(s.cutoff != null ? String(s.cutoff) : "");
-            setKernel(s.kernel ?? "triangular");
-            setPolyOrder(s.polyOrder ?? 1);
-            if (s.bandwidth != null) { setBwMode("manual"); setBwManual(String(s.bandwidth)); }
-            else { setBwMode("ik"); setBwManual(""); }
+            // Refill the sidebar from the pinned model's spec so the user can
+            // hit Estimate for a full, untrimmed re-computation (pinned models
+            // are trimmed — no raw arrays, so plots needing row-level data
+            // cannot render from the pinned copy alone). applySpec is the same
+            // path the model.json import uses; there is no second restorer.
+            const { unapplied } = applySpec(r.spec ?? {}, SPEC_SETTERS, SPEC_CTX);
+            setSpecNotice(unapplied.length ? unapplied : null);
           }}
           onRemove={(id) => {
             modelBuffer.remove(id);
