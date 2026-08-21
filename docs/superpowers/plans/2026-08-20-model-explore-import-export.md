@@ -592,6 +592,13 @@ At the top of `src/components/ModelingTab.jsx`, alongside the other `./modeling/
 import { collectSpec, applySpec } from "./modeling/modelSpec.js";
 ```
 
+`MODELS` is also needed for `SPEC_CTX` below — extend the existing import at
+`ModelingTab.jsx:78`, which currently pulls only `FAMILY_SUPPORT`:
+
+```js
+import EstimatorSidebar, { FAMILY_SUPPORT, MODELS } from "../components/modeling/EstimatorSidebar.jsx";
+```
+
 **Name collision:** `ModelingTab.jsx:813` already has a local `const modelSpec = useMemo(...)`
 feeding `generateCoachingSignals`. Import the *functions*, as above — do not import the
 module namespace as `modelSpec`, and do not rename the existing local.
@@ -613,7 +620,12 @@ with:
     const specExtras = {
       ...collectSpec({
         model, family, yVar, xVars, wVars, zVars, weightVar,
-        factorVars, factorRefs, interactionTerms, noIntercept,
+        // factorVars is a Set in ModelingTab state (`useState(() => new Set(...))`,
+        // read via .has/.size at :1040/:1100). collectSpec's `columns` branch tests
+        // Array.isArray, so passing the Set raw drops factors from every spec
+        // silently. Spread on the way in; the setter re-wraps on the way out.
+        factorVars: [...factorVars],
+        factorRefs, interactionTerms, noIntercept,
         selectedFeCols: effectiveFeCols,
         entityCol: panel?.entityCol ?? null, timeCol: panel?.timeCol ?? null,
         treatVar, postVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
@@ -625,7 +637,11 @@ with:
         spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
         spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD,
         spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol,
-        seType, clusterVar, clusterVar2,
+        // timeVar/maxLag are the other two thirds of seOpts (ModelingTab.jsx:601-608).
+        // They MUST be collected: they now carry a `def`, so a spec that omits them
+        // makes applySpec reset them to null on every restore — actively clearing
+        // the user's HAC settings rather than merely failing to carry them.
+        seType, clusterVar, clusterVar2, timeVar, maxLag,
       }),
       xVarsRaw: [...xVars], wVarsRaw: [...wVars],
       filename: cleanedData?.filename ?? null,
@@ -657,11 +673,7 @@ At `ModelingTab.jsx:3845`, replace the whole `onRestore={(id) => { … }}` prop 
             // are trimmed — no raw arrays, so plots needing row-level data
             // cannot render from the pinned copy alone). applySpec is the same
             // path the model.json import uses; there is no second restorer.
-            const { unapplied } = applySpec(r.spec ?? {}, SPEC_SETTERS, {
-              headers,
-              datasetIds: (availableDatasets || []).map(d => d.id),
-              panel,
-            });
+            const { unapplied } = applySpec(r.spec ?? {}, SPEC_SETTERS, SPEC_CTX);
             setSpecNotice(unapplied.length ? unapplied : null);
           }}
 ```
@@ -679,8 +691,11 @@ Immediately after the `clusterVar2` state declaration (`ModelingTab.jsx:600`), a
   // in MODEL_SPEC_FIELDS. useMemo so it is stable across renders.
   const SPEC_SETTERS = useMemo(() => ({
     setModel, setFamily, setYVar, setXVars, setWVars, setZVars, setWeightVar,
-    setFactorVars, setFactorRefs, setInteractionTerms, setNoIntercept,
-    setSelectedFeCols,
+    // applySpec hands `columns` fields an ARRAY, but factorVars state is a Set —
+    // writing the array straight through would break .has/.size at :1040/:1100.
+    setFactorVars: (arr) => setFactorVars(new Set(arr ?? [])),
+    setFactorRefs, setInteractionTerms, setNoIntercept,
+    setSelectedFeCols, setTimeVar, setMaxLag,
     setTreatVar, setPostVar,
     setRunningVar, setCutoff, setBwMode, setBwManual, setKernel, setPolyOrder,
     setTreatedUnit, setSynthTreatTime, setTreatTimeCol, setKPre, setKPost,
@@ -694,6 +709,25 @@ Immediately after the `clusterVar2` state declaration (`ModelingTab.jsx:600`), a
     setSpatialWeightsICol, setSpatialWeightsJCol, setSpatialWeightsWCol,
     setSeType, setClusterVar, setClusterVar2,
   }), []);
+
+  // Context applySpec validates against. ONE definition, shared by the pin-restore
+  // path and the model.json import — they must agree or the two paths accept
+  // different specs.
+  //   modelIds           — without it, an unknown estimator id writes straight
+  //                        through to setModel unvalidated.
+  //   defaultFactorVars  — factorVars' real default is dataset-dependent (all
+  //                        non-numeric columns, ModelingTab.jsx:444), so no static
+  //                        `def` can express it. Omitting this makes a spec that
+  //                        carries no factorVars reset every string column to
+  //                        "not a factor", which puts it in the design matrix as
+  //                        Number(...) instead of dummies.
+  const SPEC_CTX = useMemo(() => ({
+    headers,
+    datasetIds: (availableDatasets || []).map(d => d.id),
+    panel,
+    modelIds: MODELS.map(m => m.id),
+    defaultFactorVars: headers.filter(h => !numericCols.includes(h)),
+  }), [headers, availableDatasets, panel, numericCols]);
 ```
 
 - [ ] **Step 6: Render the notice banner**
@@ -1190,11 +1224,7 @@ Then insert immediately **before** the `{specNotice && (` block added in Task 3 
           models={pinnedModels}
           filenameBase={(cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100)}
           onApply={(spec) => {
-            const { unapplied } = applySpec(spec, SPEC_SETTERS, {
-              headers,
-              datasetIds: (availableDatasets || []).map(d => d.id),
-              panel,
-            });
+            const { unapplied } = applySpec(spec, SPEC_SETTERS, SPEC_CTX);
             setSpecNotice(unapplied.length ? unapplied : null);
           }}
         />
