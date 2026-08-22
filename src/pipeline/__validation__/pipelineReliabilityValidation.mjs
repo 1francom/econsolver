@@ -21,6 +21,7 @@ import { dirname, join } from "node:path";
 import { applyStep, runPipeline } from "../runner.js";
 import { auditPipeline } from "../auditor.js";
 import { STEP_REGISTRY, STEP_TYPES, defaultStep } from "../registry.js";
+import { checkPipelinePortability } from "../portability.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -350,6 +351,41 @@ section('T7 · dataset-reference fields declared type:"dataset"');
   check('every *DatasetId / rightId schema field is type:"dataset"',
     offenders.length === 0, offenders.join(", "));
   check("the guard actually found fields to check", declared >= 12, `declared=${declared}`);
+}
+
+{
+  const steps = [
+    { type: "join",  rightId: "ds_gone", leftKey: "id", rightKey: "id", how: "left" },
+    { type: "log",   col: "wage", nn: "log_wage" },
+    { type: "sp_nearest", refDatasetId: "self", latCol: "lat", lonCol: "lon" },
+    { type: "patch", ri: 3, col: "wage", value: 1 },
+    { type: "patch", ri: 4, col: "wage", value: 2 },
+  ];
+  const r = checkPipelinePortability(steps, {
+    datasetIds: ["ds_here"], targetDatasetId: "ds_here", payloadDatasetId: "ds_other",
+  });
+  check("unresolvable ref reported with step index + field",
+    r.unresolved.length === 1 && r.unresolved[0].index === 0 &&
+    r.unresolved[0].field === "rightId" && r.unresolved[0].value === "ds_gone",
+    JSON.stringify(r.unresolved));
+  check("\"self\" sentinel not flagged", !r.unresolved.some(u => u.value === "self"));
+  check("row-identity steps counted when dataset differs", r.rowIdentityDropped === 2,
+    String(r.rowIdentityDropped));
+  check("kept steps exclude the dropped patches",
+    r.steps.length === 3 && !r.steps.some(s => s.type === "patch"),
+    r.steps.map(s => s.type).join(", "));
+
+  const same = checkPipelinePortability(steps, {
+    datasetIds: ["ds_here"], targetDatasetId: "ds_here", payloadDatasetId: "ds_here",
+  });
+  check("row-identity steps KEPT when re-importing into the same dataset",
+    same.rowIdentityDropped === 0 && same.steps.filter(s => s.type === "patch").length === 2);
+
+  const noStamp = checkPipelinePortability(steps, {
+    datasetIds: ["ds_here"], targetDatasetId: "ds_here", payloadDatasetId: null,
+  });
+  check("no datasetId stamp is treated as a different dataset (conservative)",
+    noStamp.rowIdentityDropped === 2);
 }
 
 // ─── SUMMARY ──────────────────────────────────────────────────────────────────
