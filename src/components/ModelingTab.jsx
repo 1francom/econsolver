@@ -74,6 +74,7 @@ import ReportingModule from "../ReportingModule.jsx";
 import * as modelBuffer from "../services/modelBuffer.js";
 import ModelBufferBar   from "./modeling/ModelBufferBar.jsx";
 import ModelComparison  from "./modeling/ModelComparison.jsx";
+import ModelIOButtons   from "./modeling/ModelIOButtons.jsx";
 
 import EstimatorSidebar, { FAMILY_SUPPORT, MODELS } from "../components/modeling/EstimatorSidebar.jsx";
 import { collectSpec, applySpec } from "./modeling/modelSpec.js";
@@ -3921,6 +3922,16 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         {pinnedModels.length > 0 && (
           <CoefficientTestPanel models={pinnedModels} liveResult={result} />
         )}
+
+        {/* ── Model spec export / import ── */}
+        <ModelIOButtons
+          models={pinnedModels}
+          filenameBase={(cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100)}
+          onApply={(spec) => {
+            const { unapplied } = applySpec(spec, SPEC_SETTERS, SPEC_CTX);
+            setSpecNotice(unapplied.length ? unapplied : null);
+          }}
+        />
 
         {/* ── Unapplied spec fields (pin restore / model.json import) ── */}
         {specNotice && (
