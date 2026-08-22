@@ -1391,7 +1391,7 @@ In `PlotBuilder.jsx`, immediately after the `New` button (`~:1950`), insert:
                 padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 cursor: plotHistory.length > 0 ? "pointer" : "not-allowed",
                 background: "none", color: plotHistory.length > 0 ? C.textMuted : C.border,
-                border: `1px solid ${plotHistory.length > 0 ? C.border : C.border}`,
+                border: `1px solid ${C.border}`,
               }}>↓ Export</button>
             <button onClick={() => { setPlotIOError(""); plotFileRef.current?.click(); }}
               title="Append plots from a previously-exported plots.json"
