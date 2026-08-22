@@ -1938,6 +1938,23 @@ git commit -m "docs(plan): mark model/explore import-export implementation compl
 
 ## Task 12: Import estimates and pins every spec, not just the picked one
 
+> **AMENDED after implementation and quality review.** The core extraction (12.1/12.2 —
+> `runEstimationOnRows`, `buildEstimationConfigFromSpec`) shipped clean: verified byte-for-byte
+> against the original `_runEstimation` body, the untouched dep array, `factorVars` producing a
+> real `Set` on every path, and a full reproduction of `resolveSpatialWeights` including its
+> `summary` object. The bug was in the NEW code, not the extraction: `importModelsFromFile`
+> called `buildEstimationConfigFromSpec(m.spec ?? {}, SPEC_CTX)` — passing only `m.spec`, never
+> `m.type`/`m.family`, which `parseModelFile` already validates at the top level. Since
+> `applySpec` resets an absent key to its `def` **without reporting it** (a reset isn't a
+> failure), and `model`'s `def` is `"OLS"`, every spec missing `spec.model` silently estimated
+> as OLS. That's not an edge case — **every pin saved before `modelSpec.js` existed has no
+> `spec.model` key**, so an Export→Import round trip on an existing pin set failed with "Select
+> at least one regressor" instead of running the model it actually was. The pin-restore path
+> (`ModelingTab.jsx:~4076`) had already hit and fixed this exact bug by seeding from `r.type`;
+> this task built a second restorer that forgot the fix its own neighbouring comment described.
+> Also found: bulk import can silently evict up to 8 existing pinned models (`modelBuffer`'s
+> FIFO cap) with no mention in the banner. Both fixed; see the commit for the final code.
+
 **Franco's correction after Tasks 1-11 shipped**, from real use: a `model.json` with N specs
 required reopening the file N times — pick one from the modal, fill the sidebar, press
 Estimate, pin manually, repeat. Since the whole point of several specs in one file is
