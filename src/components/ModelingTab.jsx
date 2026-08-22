@@ -2292,6 +2292,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             ]},
             { heading: "After estimating", items: [
               "Pin a result to the Model Buffer (◈ icon) — pinned specs compare side by side",
+              "Export models writes the spec of every pinned model to a JSON file; Import models loads one back into the sidebar so you can re-estimate it on your own data — specs travel, coefficients do not, so press Estimate after importing",
               "Diagnostics: heteroskedasticity, autocorrelation, normality and multicollinearity tests",
               "Extract: write fitted values, residuals or estimated fixed effects back as dataset columns",
               "Coefficient test: post-estimation hypothesis tests on a pinned model, joint tests included",

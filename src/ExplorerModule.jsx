@@ -2638,6 +2638,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             "facet_wrap: split into one panel per level of a column, with a column-count control",
             "Histogram and density take either a bin count or a bin width — bin width uses ggplot's centred edges",
             "Export as SVG or PNG, or copy the equivalent R / Python / Stata plot script",
+            "History bar ↓ Export saves every plot in the history to a JSON file; ↑ Import appends plots from one — save the plot you are building first, Export only writes what is already in the history",
           ]},
           { heading: "Carrying results forward", items: [
             "The ◈ pin button on a table or chart sends it to the Report tab",
