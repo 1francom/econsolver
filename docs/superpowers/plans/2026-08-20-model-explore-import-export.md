@@ -1954,6 +1954,22 @@ git commit -m "docs(plan): mark model/explore import-export implementation compl
 > this task built a second restorer that forgot the fix its own neighbouring comment described.
 > Also found: bulk import can silently evict up to 8 existing pinned models (`modelBuffer`'s
 > FIFO cap) with no mention in the banner. Both fixed; see the commit for the final code.
+>
+> **One residual, deliberate limitation surfaced while fixing the estimator seed, worth
+> knowing rather than assuming solved:** the seed recovers WHICH estimator a legacy pin
+> (created before `modelSpec.js` existed) used, but not its regressor list. `wrapResult`
+> writes a legacy pin's `spec.xVars` as the EXPANDED design matrix (factor dummies,
+> interaction products) — never `xVarsRaw`, which is what `MODEL_SPEC_FIELDS` reads. A legacy
+> FE pin now correctly resolves `cfg.model === "FE"` and then fails with "Select at least one
+> regressor" — the *right* diagnosis of a *real* gap, not a misdiagnosis under the wrong
+> estimator. Deliberately NOT patched with an `xVarsRaw ?? spec.xVars` fallback: those values
+> are dummy/interaction column names, not the user's original selections, and feeding them
+> back as raw regressors would either report every one as `no-column` or silently estimate
+> something that looks plausible while having dropped the factor structure. The MODERN
+> round trip — a pin created after this feature landed, which does carry `xVarsRaw` — is
+> verified byte-for-byte identical end to end. Fixing legacy pins fully would need reverse-
+> engineering original selections from expanded names, which is a different, harder problem
+> than this task's scope (giving Model the round-trip Clean already has, going forward).
 
 **Franco's correction after Tasks 1-11 shipped**, from real use: a `model.json` with N specs
 required reopening the file N times — pick one from the modal, fill the sidebar, press
