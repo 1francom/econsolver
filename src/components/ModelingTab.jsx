@@ -429,6 +429,22 @@ function fmtSpecValue(v) {
   return s.length > 60 ? s.slice(0, 60) + "…" : s;
 }
 
+// Prose for an applySpec `unapplied` entry's `reason`. Single owner: BOTH the
+// pin-restore banner (specNotice) and the model.json import banner
+// (importSummary) render these, and a second copy would drift — the import
+// path shipped rendering raw ids ("unknown-value", "panel-mismatch") for
+// exactly that reason.
+function specReasonText(reason) {
+  switch (reason) {
+    case "no-column":      return "not in this dataset";
+    case "no-dataset":     return "no such dataset in this session";
+    case "no-level":       return "not a level of this column";
+    case "bad-shape":      return "malformed in the file — reset to default";
+    case "panel-mismatch": return "this dataset declares a different panel index";
+    default:               return "unrecognised value";
+  }
+}
+
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export default function ModelingTab({ cleanedData, availableDatasets = [], onBack, onResultChange, onSessionStateChange, onCoachQuestion, onExtract, pid, datasetId, onSwitchDataset }) {
   const { C, T } = useTheme();
@@ -1083,40 +1099,64 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const importModelsFromFile = useCallback(async (models) => {
     if (!models?.length) return;
     setImportSummary(null);
+    // A stale red estimation error from a previous run must not sit above a
+    // successful import banner (estimate() clears it for the same reason).
+    setErr(null);
     setRunning(true);
     try {
       const baseRows = await getFullRows();
+      // The model buffer is a fixed-size FIFO, so importing a full file can
+      // evict pins the user already had — permanently, since it persists.
+      // Measured, not assumed: `before + added - after` needs no knowledge of
+      // the cap, so the cap can change without this going stale.
+      const before = modelBuffer.count();
       const failures = [];
       const notes = [];
       let added = 0;
       let lastId = null;
       for (const m of models) {
         const name = m.label || m.type || "imported model";
-        const { cfg, unapplied } = buildEstimationConfigFromSpec(m.spec ?? {}, SPEC_CTX);
-        const dispatch = runEstimationOnRows(baseRows, cfg,
-          { filename: cleanedData?.filename ?? null, datasetId });
-        if (dispatch?.error || !dispatch?.result) {
-          failures.push({ name, error: dispatch?.error ?? "Estimation failed." });
-          continue;
-        }
-        const label = `${dispatch.result.type} · ${m.label || "imported"}`;
-        const id = modelBuffer.add({ ...dispatch.result, label });
-        added++;
-        lastId = id;
-        // A spec whose columns only partially resolved still estimated (on
-        // what was left) — a NOTE, not a failure, so the user knows the pinned
-        // result is not exactly what the file specified.
-        if (unapplied.length) {
-          notes.push({
-            name: label,
-            error: unapplied
-              .map(u => `${u.role}: ${u.reason === "no-column" ? "not in this dataset" : u.reason}`)
-              .join("; "),
-          });
+        // This loop consumes an UNTRUSTED file. Everything on the path is
+        // guarded today, but a throw here would abandon every remaining spec
+        // silently — the exact failure mode this whole feature exists to
+        // avoid. Catch per spec, report it by name, keep going.
+        try {
+          // `spec.model` did not exist before modelSpec.js landed, and no
+          // engine writes it — so every pin already in a user's IndexedDB has
+          // a spec with no `model` key. applySpec resets an absent key to its
+          // `def` ("OLS") and reports NOTHING, so an RDD spec would estimate
+          // as OLS in complete silence. Seed the estimator and family from the
+          // file's validated top level, exactly as onRestore does from `r.type`
+          // — `spec.model`/`spec.family` still win when present, and an
+          // unrecognised `m.type` still surfaces as `unknown-value`.
+          const { cfg, unapplied } = buildEstimationConfigFromSpec(
+            { model: m.type, family: m.family, ...(m.spec ?? {}) }, SPEC_CTX);
+          const dispatch = runEstimationOnRows(baseRows, cfg,
+            { filename: cleanedData?.filename ?? null, datasetId });
+          if (dispatch?.error || !dispatch?.result) {
+            failures.push({ name, error: dispatch?.error ?? "Estimation failed." });
+            continue;
+          }
+          const label = `${dispatch.result.type} · ${m.label || "imported"}`;
+          const id = modelBuffer.add({ ...dispatch.result, label });
+          added++;
+          lastId = id;
+          // A spec whose fields only partially resolved still estimated (on
+          // what was left) — a NOTE, not a failure, so the user knows the
+          // pinned result is not exactly what the file specified.
+          if (unapplied.length) {
+            notes.push({
+              name: label,
+              error: unapplied.map(u => `${u.role}: ${specReasonText(u.reason)}`).join("; "),
+            });
+          }
+        } catch (e) {
+          failures.push({ name, error: e?.message || "Unexpected error while estimating this spec." });
         }
       }
+      const evicted = Math.max(0, before + added - modelBuffer.count());
       setBufferVersion(v => v + 1);
-      setImportSummary({ added, total: models.length, failures, notes });
+      setImportSummary({ added, total: models.length, failures, notes, evicted });
       if (lastId) {
         const r = modelBuffer.get(lastId);
         if (r) { setResult(r); setActiveBufferId(lastId); }
@@ -3966,15 +4006,21 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         />
 
         {/* ── Import summary: every spec estimated + pinned, failures named ── */}
-        {importSummary && (
+        {importSummary && (() => {
+          // Accent keys off failures OR notes: a batch where every spec pinned
+          // but half of them lost fields is NOT clean, and a teal banner would
+          // say it was. Eviction alone doesn't warrant the warning accent —
+          // nothing about the import went wrong, the buffer is just full.
+          const imperfect = importSummary.failures.length || importSummary.notes.length;
+          return (
           <div style={{
             marginTop: "0.5rem", marginBottom: "0.6rem", padding: "0.5rem 0.7rem",
             background: C.surface,
-            border: `1px solid ${importSummary.failures.length ? C.gold + "40" : C.teal + "40"}`,
-            borderLeft: `3px solid ${importSummary.failures.length ? C.gold : C.teal}`,
+            border: `1px solid ${imperfect ? C.gold + "40" : C.teal + "40"}`,
+            borderLeft: `3px solid ${imperfect ? C.gold : C.teal}`,
             borderRadius: 4, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, lineHeight: 1.6,
           }}>
-            <div style={{ color: importSummary.failures.length ? C.gold : C.teal }}>
+            <div style={{ color: imperfect ? C.gold : C.teal }}>
               {importSummary.added}/{importSummary.total} models imported and pinned
               {importSummary.failures.length ? ` · ${importSummary.failures.length} could not be estimated` : ""}
             </div>
@@ -3992,8 +4038,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 settings did not apply: {n.error}
               </div>
             ))}
+            {/* The buffer is a fixed-size FIFO and its eviction is permanent
+                (it persists), so a bulk import quietly destroying the user's
+                existing pins has to be said out loud. */}
+            {importSummary.evicted > 0 && (
+              <div style={{ marginTop: 4, color: C.gold }}>
+                {importSummary.evicted} older pinned model{importSummary.evicted !== 1 ? "s" : ""} pushed
+                out of the model buffer to make room.
+              </div>
+            )}
           </div>
-        )}
+          );
+        })()}
 
         {/* ── Unapplied spec fields (pin restore) ── */}
         {specNotice && (
@@ -4029,12 +4085,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   <div key={i}>
                     {m.role}: <span style={{ color: C.text }}>{fmtSpecValue(m.value)}</span>
                     {" — "}
-                    {m.reason === "no-column"      ? "not in this dataset"
-                     : m.reason === "no-dataset"    ? "no such dataset in this session"
-                     : m.reason === "no-level"      ? "not a level of this column"
-                     : m.reason === "bad-shape"     ? "malformed in the file — reset to default"
-                     : m.reason === "panel-mismatch" ? "this dataset declares a different panel index"
-                     : "unrecognised value"}
+                    {specReasonText(m.reason)}
                   </div>
                 ))}
               </>;
@@ -4062,8 +4113,13 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             // Refill the sidebar from the pinned model's spec so the user can
             // hit Estimate for a full, untrimmed re-computation (pinned models
             // are trimmed — no raw arrays, so plots needing row-level data
-            // cannot render from the pinned copy alone). applySpec is the same
-            // path the model.json import uses; there is no second restorer.
+            // cannot render from the pinned copy alone). The model.json import
+            // no longer shares this path — it resolves each spec through
+            // buildEstimationConfigFromSpec (which wraps the same applySpec)
+            // and estimates instead of filling the sidebar. The `model` seed
+            // below is therefore duplicated there ON PURPOSE, and both call
+            // sites must keep it: dropping it in either one silently restores
+            // or estimates an unrelated estimator.
             //
             // `spec.model` did not exist before modelSpec.js landed, and no
             // engine writes it — so EVERY pin already persisted in a user's

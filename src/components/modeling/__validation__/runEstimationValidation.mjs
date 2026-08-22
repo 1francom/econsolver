@@ -18,6 +18,7 @@
 import { dispatchEstimation } from "../runners/estimationDispatch.js";
 import { collectSpec } from "../modelSpec.js";
 import { runEstimationOnRows, buildEstimationConfigFromSpec } from "../runEstimation.js";
+import { buildModelFile } from "../../../services/export/artifactIO.js";
 
 let pass = 0, fail = 0;
 const check = (n, c, extra) => {
@@ -433,6 +434,110 @@ const CTX = {
   check("loop: spec 2's factor dummies did NOT leak into spec 1's design matrix",
     !(outs[0]?.result?.spec?.xVars ?? []).some(v => v.startsWith("region_")),
     ser(outs[0]?.result?.spec?.xVars));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+section("12.3 — the import call site seeds model/family from the file's top level");
+
+// EXACTLY what ModelingTab.importModelsFromFile builds for each entry. Kept as
+// one function so this harness and the real call site cannot drift: if that
+// line changes, this must change with it. `spec.model` intentionally WINS over
+// `m.type` (spread order) — a spec that recorded its own estimator is more
+// specific than the envelope's copy of it.
+const seedSpec = (m) => ({ model: m.type, family: m.family, ...(m.spec ?? {}) });
+
+{
+  // A pin created BEFORE modelSpec.js landed: the engine wrote the spec, so it
+  // has no `model` key (no engine writes one) and no `xVarsRaw`. Every pin
+  // already sitting in a user's IndexedDB model_buffer looks like this.
+  const legacyPin = {
+    type: "FE", label: "legacy fe",
+    spec: { yVar: "wage", xVars: ["educ"], wVars: [], entityCol: "id", timeCol: "year", feCols: ["id"] },
+  };
+  const entry = buildModelFile([legacyPin]).models[0];
+  check("buildModelFile carries the estimator at the TOP level for a legacy pin",
+    entry.type === "FE", ser(entry.type));
+  check("buildModelFile defaults family to linear when the spec has none",
+    entry.family === "linear", ser(entry.family));
+  check("the legacy pin's spec really has no `model` key (this is the trap)",
+    !("model" in entry.spec), ser(Object.keys(entry.spec)));
+
+  // The BUG this section pins: passing `m.spec` alone silently resets `model`
+  // to its default ("OLS") and applySpec reports NOTHING, because an absent
+  // key resetting to its def is by design not a failure.
+  const unseeded = buildEstimationConfigFromSpec(entry.spec, CTX);
+  check("NEGATIVE CONTROL: an unseeded spec silently becomes OLS",
+    unseeded.cfg.model === "OLS", ser(unseeded.cfg.model));
+  check("NEGATIVE CONTROL: and applySpec reports nothing about it",
+    !unseeded.unapplied.some(u => u.key === "model"), ser(unseeded.unapplied));
+
+  // The fix: seed from the envelope, exactly as the pin-restore path already
+  // does (`{ model: r.type, ...rawSpec }`, ModelingTab.jsx:~4076).
+  const seeded = buildEstimationConfigFromSpec(seedSpec(entry), CTX);
+  check("seeded spec recovers the estimator from the file's top-level type",
+    seeded.cfg.model === "FE", ser(seeded.cfg.model));
+  check("seeded spec recovers the outcome family",
+    seeded.cfg.family === "linear", ser(seeded.cfg.family));
+}
+
+{
+  // `spec.model` is more specific than the envelope's `type`, so it must win.
+  const entry = { type: "OLS", family: "linear", spec: { model: "FE", yVar: "wage", xVarsRaw: ["educ"] } };
+  check("spec.model wins over the envelope's type (spread order)",
+    buildEstimationConfigFromSpec(seedSpec(entry), CTX).cfg.model === "FE");
+
+  // An envelope type this build does not know must still be REPORTED, not
+  // silently swallowed by the seed.
+  const bogus = { type: "NOT_AN_ESTIMATOR", family: "linear", spec: { yVar: "wage", xVarsRaw: ["educ"] } };
+  const out = buildEstimationConfigFromSpec(seedSpec(bogus), CTX);
+  check("an unknown envelope type is reported as unknown-value, not applied",
+    out.unapplied.some(u => u.key === "model" && u.reason === "unknown-value"), ser(out.unapplied));
+  check("...and falls back to the default rather than to garbage",
+    out.cfg.model === "OLS", ser(out.cfg.model));
+
+  // A missing family must not become `undefined` in the cfg.
+  const noFam = { type: "OLS", spec: { yVar: "wage", xVarsRaw: ["educ"] } };
+  check("an absent family resolves to the declared default, not undefined",
+    buildEstimationConfigFromSpec(seedSpec(noFam), CTX).cfg.family === "linear");
+}
+
+{
+  // Full round trip on a MODERN pin (one estimated after modelSpec.js landed,
+  // so its spec carries model/family/xVarsRaw): export → seed → estimate must
+  // reproduce the live-state result exactly.
+  const rows = olsRows();
+  const live = runEstimationOnRows(rows, cfgFromState(OLS_STATE),
+    { filename: "wages.csv", datasetId: "ds_1" });
+  const pin = { type: live.result.type, label: "modern", spec: live.result.spec };
+  const entry = buildModelFile([pin]).models[0];
+  const { cfg, unapplied } = buildEstimationConfigFromSpec(seedSpec(entry), CTX);
+  check("modern pin round-trips with nothing unapplied", unapplied.length === 0, ser(unapplied));
+  const back = runEstimationOnRows(rows, cfg, { filename: "wages.csv", datasetId: "ds_1" });
+  check("export → import round trip reproduces the live result byte-for-byte",
+    ser(back) === ser(live), ser(back).slice(0, 300) + " vs " + ser(live).slice(0, 300));
+}
+
+{
+  // HONEST LIMIT, pinned so nobody later believes the seed fixed more than it
+  // did: seeding recovers the ESTIMATOR, but a legacy spec still has no
+  // `xVarsRaw` (the engine only ever wrote the EXPANDED `xVars`). So a legacy
+  // OLS/FE pin recovers its identity and then fails for the REAL reason —
+  // there are no regressors in the file to recover. `spec.xVars` is
+  // deliberately NOT used as a fallback: it holds factor dummies and
+  // interaction products, which are not columns of the dataset and would
+  // silently estimate a different model (see modelSpec.js's xVarsRaw comment).
+  const entry = buildModelFile([{
+    type: "FE", label: "legacy fe",
+    spec: { yVar: "wage", xVars: ["educ"], entityCol: "id", timeCol: "year", feCols: ["id"] },
+  }]).models[0];
+  const { cfg } = buildEstimationConfigFromSpec(seedSpec(entry),
+    { ...CTX, panel: { entityCol: "id", timeCol: "year" } });
+  check("legacy pin: estimator recovered", cfg.model === "FE", ser(cfg.model));
+  check("legacy pin: xVars is empty because the file has no xVarsRaw to recover",
+    Array.isArray(cfg.xVars) && cfg.xVars.length === 0, ser(cfg.xVars));
+  const out = runEstimationOnRows(olsRows(), cfg, {});
+  check("legacy pin: still fails, but now under the RIGHT estimator and for the right reason",
+    out?.error === "Select at least one regressor." && !out?.result, ser(out?.error));
 }
 
 console.log(`\nrunEstimation: ${pass} passed, ${fail} failed`);
