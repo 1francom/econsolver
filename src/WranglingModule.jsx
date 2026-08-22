@@ -665,8 +665,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             </div>
             <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}
               datasetName={filename ? filename.replace(/\.[^.]+$/, "") : "dataset"}
-              allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}/>
-            <ImportPipelineButton currentLength={pipeline.length} onImport={replacePipeline} />
+              allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}
+              datasetId={pid}/>
+            <ImportPipelineButton currentLength={pipeline.length} onImport={replacePipeline}
+              currentDatasetId={pid}
+              datasetIds={(allDatasets || []).map(d => d.id)} />
             {onSaveSubset && (
               <div style={{ position:"relative" }}>
                 <button
