@@ -329,6 +329,29 @@ section("T6 · audit trail completeness");
     entries.every(e => e.status !== "error"), entries.filter(e => e.status === "error").map(e => e.type).join(", "));
 }
 
+// ─── T7 — DATASET-REFERENCE FIELDS ARE DECLARED ───────────────────────────────
+// A step field holding another dataset's id is not portable across sessions:
+// the id comes from genId() in DataStudio. ImportPipelineButton derives its
+// portability check from these declarations, so a field left as type:"text"
+// silently reintroduces an unchecked reference. Keyed on the field NAME shape,
+// not on a hand-kept list — the same reasoning as the rogue-operator guard.
+section('T7 · dataset-reference fields declared type:"dataset"');
+{
+  const REF_KEY = /^(right|.*Dataset)Id$/;
+  const offenders = [];
+  let declared = 0;
+  for (const entry of STEP_REGISTRY) {
+    for (const f of entry.schema ?? []) {
+      if (!REF_KEY.test(f.key)) continue;
+      if (f.type === "dataset") declared++;
+      else offenders.push(`${entry.type}.${f.key} (type:"${f.type}")`);
+    }
+  }
+  check('every *DatasetId / rightId schema field is type:"dataset"',
+    offenders.length === 0, offenders.join(", "));
+  check("the guard actually found fields to check", declared >= 12, `declared=${declared}`);
+}
+
 // ─── SUMMARY ──────────────────────────────────────────────────────────────────
 console.log(`\npipelineReliability: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
