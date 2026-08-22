@@ -2,28 +2,32 @@
 // Export/Import for pinned model SPECS — the Model-side sibling of Clean's
 // ExportMenu + ImportPipelineButton.
 //
-// Importing carries the RECIPE, never the result: it fills the sidebar and the
-// user presses Estimate against their own data. Nothing is pinned, nothing is
-// estimated automatically, and no foreign coefficients enter the model buffer.
+// Importing carries the RECIPE, never the result: every spec in the file is
+// estimated against the CURRENT dataset and pinned, so no foreign coefficients
+// ever enter the model buffer — what you see pinned was computed here.
+//
+// There is no pick-one modal: a file with N specs exists to be COMPARED, and
+// the Model Buffer Bar's ◀ ▶ navigation is that comparison surface. The parent
+// (ModelingTab.importModelsFromFile) reports any spec that fails by name
+// rather than dropping it.
 //
 // Props:
-//   models        — pinned EstimationResult[] (for export)
-//   filenameBase  — download name stem
-//   onApply(spec) — called with the chosen spec; the parent runs applySpec
+//   models              — pinned EstimationResult[] (for export)
+//   filenameBase        — download name stem
+//   onImportAll(models) — called with parseModelFile's full `models` array
 
 import { useRef, useState } from "react";
 import { useTheme } from "./shared.jsx";
 import { MODELS } from "./EstimatorSidebar.jsx";
-import { SE_TYPE_IDS, FAMILIES, specFormula } from "./modelSpec.js";
+import { SE_TYPE_IDS, FAMILIES } from "./modelSpec.js";
 import { buildModelFile, parseModelFile, downloadJSON } from "../../services/export/artifactIO.js";
 
 const VOCAB = { modelIds: MODELS.map(m => m.id), seTypeIds: SE_TYPE_IDS, families: FAMILIES };
 
-export default function ModelIOButtons({ models = [], filenameBase = "models", onApply }) {
+export default function ModelIOButtons({ models = [], filenameBase = "models", onImportAll }) {
   const { C, T } = useTheme();
   const fileRef = useRef(null);
-  const [error, setError]   = useState("");
-  const [picker, setPicker] = useState(null);   // { models, source }
+  const [error, setError] = useState("");
 
   const btn = (active) => ({
     padding: "0.28rem 0.65rem", borderRadius: 3, cursor: "pointer",
@@ -46,7 +50,9 @@ export default function ModelIOButtons({ models = [], filenameBase = "models", o
       const res = parseModelFile(reader.result, VOCAB);
       if (!res.ok) { setError(res.error); return; }
       setError("");
-      setPicker({ models: res.models, source: f.name });
+      // Every spec, not one picked spec — the parent estimates them all
+      // against the current dataset and pins whatever succeeds.
+      onImportAll?.(res.models);
     };
     reader.readAsText(f);
   }
@@ -61,7 +67,7 @@ export default function ModelIOButtons({ models = [], filenameBase = "models", o
       </button>
 
       <button onClick={() => { setError(""); fileRef.current?.click(); }} style={btn(true)}
-        title="Load a previously-exported model.json into the estimator sidebar"
+        title="Estimate every spec in a previously-exported model.json against this dataset and pin the results"
         onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; e.currentTarget.style.color = C.teal; }}
         onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textDim; }}>
         ↑ Import models
@@ -83,58 +89,6 @@ export default function ModelIOButtons({ models = [], filenameBase = "models", o
             Dismiss
           </button>
         </div>
-      )}
-
-      {/* Pick-one modal: a spec has to occupy THE sidebar, which is singular. */}
-      {picker && (
-        <>
-          <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 200 }}
-            onClick={() => setPicker(null)} />
-          <div style={{
-            position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
-            background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 6,
-            padding: "1.2rem 1.4rem", minWidth: 420, maxWidth: 620, maxHeight: "70vh",
-            overflowY: "auto", zIndex: 201, boxShadow: "0 12px 40px #000c",
-          }}>
-            <div style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.18em",
-              textTransform: "uppercase", marginBottom: 4, fontFamily: T.code.fontFamily }}>
-              Load a model spec
-            </div>
-            <div style={{ fontSize: T.caption.fontSize, color: C.textMuted,
-              fontFamily: T.code.fontFamily, marginBottom: 12 }}>
-              From {picker.source}. This fills the sidebar — press Estimate to run it on the
-              current dataset. Nothing is pinned and no coefficients are imported.
-            </div>
-            {picker.models.map((m, i) => (
-              <button key={i}
-                onClick={() => { onApply?.(m.spec ?? {}); setPicker(null); }}
-                style={{
-                  width: "100%", textAlign: "left", display: "block",
-                  padding: "0.6rem 0.75rem", marginBottom: 6,
-                  background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3,
-                  color: C.text, cursor: "pointer", fontFamily: T.code.fontFamily,
-                }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = C.teal; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; }}>
-                <div style={{ fontSize: T.code.fontSize }}>
-                  <span style={{ color: C.gold }}>{m.type}</span>
-                  {m.label ? <span style={{ color: C.textDim }}> · {m.label}</span> : null}
-                </div>
-                <div style={{ fontSize: T.caption.fontSize, color: C.textMuted, marginTop: 2 }}>
-                  {specFormula(m.spec ?? {})}
-                </div>
-              </button>
-            ))}
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-              <button onClick={() => setPicker(null)}
-                style={{ padding: "0.4rem 0.85rem", background: "transparent",
-                  border: `1px solid ${C.border2}`, color: C.textDim, borderRadius: 3,
-                  cursor: "pointer", fontSize: T.code.fontSize, fontFamily: T.code.fontFamily }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </>
       )}
     </div>
   );

@@ -77,7 +77,7 @@ import ModelComparison  from "./modeling/ModelComparison.jsx";
 import ModelIOButtons   from "./modeling/ModelIOButtons.jsx";
 
 import EstimatorSidebar, { FAMILY_SUPPORT, MODELS } from "../components/modeling/EstimatorSidebar.jsx";
-import { collectSpec, applySpec } from "./modeling/modelSpec.js";
+import { applySpec } from "./modeling/modelSpec.js";
 import VariableSelector, { FOLD_W_INTO_X } from "../components/modeling/VariableSelector.jsx";
 import { useContainerWidth } from "../hooks/useContainerWidth.js";
 import ModelConfiguration  from "../components/modeling/ModelConfiguration.jsx";
@@ -119,7 +119,7 @@ import { buildAttgtLatex, attgtPValue } from "../services/export/latexTable.js";
 import {
   buildModelAvail, buildModelHint, resolveEstimator,
 } from "./modeling/helpers.js";
-import { dispatchEstimation } from "./modeling/runners/estimationDispatch.js";
+import { runEstimationOnRows, buildEstimationConfigFromSpec } from "./modeling/runEstimation.js";
 
 // ─── CS RESULTS PANEL (Callaway-Sant'Anna) ────────────────────────────────────
 // Tabbed result panel for CallawayCS estimation. Separated from the IIFE
@@ -619,9 +619,18 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   const [timeVar,     setTimeVar]     = useState(null);
   const [maxLag,      setMaxLag]      = useState(null);
 
-  // Fields reported as unapplied by the last applySpec call (pin restore or
-  // model.json import). Rendered as a banner above the model buffer bar.
+  // Fields reported as unapplied by the last applySpec call (pin restore).
+  // Rendered as a banner above the model buffer bar. The
+  // model.json import no longer feeds this: it estimates and pins instead of
+  // filling the sidebar, and reports through importSummary below.
   const [specNotice, setSpecNotice] = useState(null);
+
+  // Result of the last model.json import — { added, total, failures, notes },
+  // the same shape as subsetRunSummary so the banner below mirrors its
+  // rendering. `failures` are specs that did NOT estimate; `notes` are specs
+  // that DID estimate but on fewer fields than the file asked for. Kept as two
+  // lists, not one, so a soft note is never read as a failed model.
+  const [importSummary, setImportSummary] = useState(null);
 
   // Setter table consumed by applySpec — keys are the `setter` names declared
   // in MODEL_SPEC_FIELDS (modelSpec.js). Every non-null `setter` in that table
@@ -658,6 +667,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     panel,
     modelIds: MODELS.map(m => m.id),
     defaultFactorVars: headers.filter(h => !numericCols.includes(h)),
+    // buildEstimationConfigFromSpec rebuilds resolveSpatialWeights from the
+    // spec alone, so it needs the actual dataset rows a spatial spec's
+    // triples-weights id points at — not just the id list above.
+    availableDatasets: availableDatasets ?? [],
   }), [headers, availableDatasets, panel, numericCols]);
 
   const seOpts = useMemo(() => ({
@@ -931,66 +944,28 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // ── PURE ESTIMATION HELPER (no setState) ────────────────────────────────────
   // Returns { result, panelFE, panelFD } on success, { error } on failure.
   // dataRows is passed explicitly so runAllSubsets can call it on filtered data.
-  const _runEstimation = useCallback((dataRows) => {
-    const dispatch = dispatchEstimation(dataRows, {
-      yVar, xVars, wVars, factorVars, factorRefs,
-      interactionTerms,
-      model, family, weightVar, seOpts, seType, panel, noIntercept,
-      zVars, postVar, treatVar,
-      runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
-      treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost,
-      feCols: effectiveFeCols,
-      poissonEntityCol, poissonOffsetCol, poissonExtraFE,
-      cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
-      csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax,
-      csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView,
-      spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
-      resolveSpatialWeights,
-    });
-    // Enrich result spec with raw var lists + factor/interaction info for replication scripts.
-    // `filename` records WHICH session dataset the model was estimated on — replication
-    // scripts must load + run the model against this dataset, not the Report tab's active one.
-    // seType/clusterVar are captured PER MODEL at estimation time so each pinned
-    // model exports with the SE it was actually run with (not the current global
-    // selector). Without this, pinned models silently default to classical.
-    // collectSpec is the single owner of what a spec contains (modelSpec.js) —
-    // including xVarsRaw/wVarsRaw, whose SPEC keys are deliberately distinct
-    // from the engine's expanded `spec.xVars`/`spec.wVars` so this Object.assign
-    // never clobbers them. `filename` is NOT a spec field — it is replication
-    // metadata the exporters read, so it stays stamped alongside it.
-    const specExtras = {
-      ...collectSpec({
-        model, family, yVar, xVars, wVars, zVars, weightVar,
-        factorVars, factorRefs, interactionTerms, noIntercept,
-        // `feCols` is declared `nullable` (null = "use the estimator's own FE
-        // default"), but this call site passes the RESOLVED list on purpose:
-        // the recipe must record the FE set the model actually ran with, so
-        // the collect side never emits null here. Do not "fix" this to
-        // selectedFeCols — the nullable branch is for imported/legacy specs.
-        selectedFeCols: effectiveFeCols,
-        entityCol: panel?.entityCol ?? null, timeCol: panel?.timeCol ?? null,
-        treatVar, postVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
-        treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost,
-        poissonEntityCol, poissonOffsetCol, poissonExtraFE,
-        cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod,
-        csTreatCol, csEntityCol, csTimeCol, csXCols, csCompGroup, csRelMin, csRelMax,
-        csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView,
-        spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
-        spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD,
-        spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol,
-        seType, clusterVar, clusterVar2, timeVar, maxLag,
-      }),
-      filename: cleanedData?.filename ?? null,
-    };
-    if (dispatch?.result?.spec)      Object.assign(dispatch.result.spec,      specExtras);
-    if (dispatch?.result?.fe?.spec)  Object.assign(dispatch.result.fe.spec,   specExtras);
-    if (dispatch?.result?.fd?.spec)  Object.assign(dispatch.result.fd.spec,   specExtras);
-    const _dsTag = datasetId ?? null;
-    if (dispatch?.result)     dispatch.result.datasetId    = _dsTag;
-    if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
-    if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
-    return dispatch;
-  }, [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, noIntercept, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, factorRefs, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD, spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol, timeVar, maxLag, resolveSpatialWeights, cleanedData, datasetId]);
+  // The BODY of this now lives in ./modeling/runEstimation.js as a pure
+  // function of an EXPLICIT config. This wrapper only marshals React state
+  // into that config — the bulk model.json import builds one config per spec
+  // and calls the same core, so the two paths cannot drift apart (Task 12).
+  const _runEstimation = useCallback((dataRows) => runEstimationOnRows(dataRows, {
+    yVar, xVars, wVars, factorVars, factorRefs, interactionTerms,
+    model, family, weightVar, seOpts, seType, panel, noIntercept,
+    zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
+    treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, feCols: effectiveFeCols,
+    poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol,
+    saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol,
+    csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation,
+    csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode,
+    spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights,
+    // Not read by dispatchEstimation itself, but by runEstimationOnRows's
+    // internal collectSpec call — omitting any of these silently drops that
+    // field from every pinned model's exported spec.
+    clusterVar, clusterVar2, timeVar, maxLag,
+    spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD,
+    spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol,
+  }, { filename: cleanedData?.filename ?? null, datasetId }),
+  [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, noIntercept, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, factorRefs, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD, spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol, timeVar, maxLag, resolveSpatialWeights, cleanedData, datasetId]);
 
   // ── DuckDB full-table pull ────────────────────────────────────────────────
   // For DuckDB-backed datasets `rows` is only a 500-row preview — every JS
@@ -1091,6 +1066,65 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       setRunning(false);
     }
   }, [subsets, getFullRows, headers, fullPipeline, branchPointIdx, pipelineCtx, _runEstimation]);
+
+  // ── IMPORT MODELS: estimate + pin every spec in a model.json ─────────────
+  // Mirrors runAllSubsets' failure-collection discipline: never silently drop
+  // a spec that fails to estimate. Unlike runAllSubsets, the SPEC varies per
+  // iteration (not just the rows), so this cannot reuse _runEstimation
+  // directly — it builds a config PER SPEC via buildEstimationConfigFromSpec
+  // and calls the same pure core (runEstimationOnRows) _runEstimation wraps,
+  // with no sidebar writes and no renders in between. Applying each spec
+  // through the setters and then calling _runEstimation would NOT work:
+  // React batches state updates, so _runEstimation's closure would still hold
+  // the previous spec on every iteration.
+  //
+  // Coefficients are never imported. Every pinned result below comes from a
+  // real estimation run against the CURRENT dataset.
+  const importModelsFromFile = useCallback(async (models) => {
+    if (!models?.length) return;
+    setImportSummary(null);
+    setRunning(true);
+    try {
+      const baseRows = await getFullRows();
+      const failures = [];
+      const notes = [];
+      let added = 0;
+      let lastId = null;
+      for (const m of models) {
+        const name = m.label || m.type || "imported model";
+        const { cfg, unapplied } = buildEstimationConfigFromSpec(m.spec ?? {}, SPEC_CTX);
+        const dispatch = runEstimationOnRows(baseRows, cfg,
+          { filename: cleanedData?.filename ?? null, datasetId });
+        if (dispatch?.error || !dispatch?.result) {
+          failures.push({ name, error: dispatch?.error ?? "Estimation failed." });
+          continue;
+        }
+        const label = `${dispatch.result.type} · ${m.label || "imported"}`;
+        const id = modelBuffer.add({ ...dispatch.result, label });
+        added++;
+        lastId = id;
+        // A spec whose columns only partially resolved still estimated (on
+        // what was left) — a NOTE, not a failure, so the user knows the pinned
+        // result is not exactly what the file specified.
+        if (unapplied.length) {
+          notes.push({
+            name: label,
+            error: unapplied
+              .map(u => `${u.role}: ${u.reason === "no-column" ? "not in this dataset" : u.reason}`)
+              .join("; "),
+          });
+        }
+      }
+      setBufferVersion(v => v + 1);
+      setImportSummary({ added, total: models.length, failures, notes });
+      if (lastId) {
+        const r = modelBuffer.get(lastId);
+        if (r) { setResult(r); setActiveBufferId(lastId); }
+      }
+    } finally {
+      setRunning(false);
+    }
+  }, [getFullRows, SPEC_CTX, cleanedData, datasetId]);
 
   // ── ESTIMATE (single run on full rows) ───────────────────────────────────────
   const estimate = useCallback(async () => {
@@ -2292,7 +2326,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
             ]},
             { heading: "After estimating", items: [
               "Pin a result to the Model Buffer (◈ icon) — pinned specs compare side by side",
-              "Export models writes the spec of every pinned model to a JSON file; Import models loads one back into the sidebar so you can re-estimate it on your own data — specs travel, coefficients do not, so press Estimate after importing",
+              "Export models writes the spec of every pinned model to a JSON file. Import models estimates every spec in the file against the current dataset and pins whatever succeeds — specs travel, coefficients do not, so what you see pinned was computed here, not copied from the file. A spec that can't run against this dataset is reported, not silently dropped",
               "Diagnostics: heteroskedasticity, autocorrelation, normality and multicollinearity tests",
               "Extract: write fitted values, residuals or estimated fixed effects back as dataset columns",
               "Coefficient test: post-estimation hypothesis tests on a pinned model, joint tests included",
@@ -3928,13 +3962,40 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
         <ModelIOButtons
           models={pinnedModels}
           filenameBase={(cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100)}
-          onApply={(spec) => {
-            const { unapplied } = applySpec(spec, SPEC_SETTERS, SPEC_CTX);
-            setSpecNotice(unapplied.length ? unapplied : null);
-          }}
+          onImportAll={importModelsFromFile}
         />
 
-        {/* ── Unapplied spec fields (pin restore / model.json import) ── */}
+        {/* ── Import summary: every spec estimated + pinned, failures named ── */}
+        {importSummary && (
+          <div style={{
+            marginTop: "0.5rem", marginBottom: "0.6rem", padding: "0.5rem 0.7rem",
+            background: C.surface,
+            border: `1px solid ${importSummary.failures.length ? C.gold + "40" : C.teal + "40"}`,
+            borderLeft: `3px solid ${importSummary.failures.length ? C.gold : C.teal}`,
+            borderRadius: 4, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, lineHeight: 1.6,
+          }}>
+            <div style={{ color: importSummary.failures.length ? C.gold : C.teal }}>
+              {importSummary.added}/{importSummary.total} models imported and pinned
+              {importSummary.failures.length ? ` · ${importSummary.failures.length} could not be estimated` : ""}
+            </div>
+            {importSummary.failures.map((f, i) => (
+              <div key={`f${i}`} style={{ marginTop: 4, color: C.textMuted }}>
+                <span style={{ color: C.red }}>{f.name}</span>: {f.error}
+              </div>
+            ))}
+            {/* Soft notes: these DID estimate and DID get pinned — they just ran
+                on fewer fields than the file asked for. Kept visually distinct
+                from failures above so "pinned" is never confused with "failed". */}
+            {importSummary.notes.map((n, i) => (
+              <div key={`n${i}`} style={{ marginTop: 4, color: C.textMuted }}>
+                <span style={{ color: C.gold }}>{n.name}</span> — pinned, but some
+                settings did not apply: {n.error}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Unapplied spec fields (pin restore) ── */}
         {specNotice && (
           <div style={{
             margin: "0 0 0.6rem", padding: "0.55rem 0.75rem",
