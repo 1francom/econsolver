@@ -24,6 +24,7 @@ import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js
 import { buildGgplot, buildMatplotlibPlot, buildStataPlot, resolvePlotPreamble } from "../services/export/plotScript.js";
 import { toDfVar } from "../pipeline/exporter.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
+import { buildPlotsFile, parsePlotsFile, downloadJSON } from "../services/export/artifactIO.js";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
 const arrMax = (a, fb = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fb;
@@ -79,7 +80,7 @@ function loadLeaflet() {
 }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const GEOMS = [
+export const GEOMS = [
   { id: "point",     label: "Point"     },
   { id: "line",      label: "Line"      },
   { id: "bar",       label: "Bar"       },
@@ -111,7 +112,7 @@ function isDivergingScheme(id) {
   return !!TILE_SCHEMES.find(s => s.id === id)?.diverging;
 }
 
-const PALETTE_PRESETS = [
+export const PALETTE_PRESETS = [
   { id: "",             label: "Manual"      },
   { id: "teal-gold",    label: "Teal-Gold"   },
   { id: "tableau10",    label: "Tableau"     },
@@ -1692,6 +1693,42 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     if (histPid) savePlotHistory(histPid, next).catch(() => {});
   }, [plotHistory, histIdx, layers.length, currentPlotEntry, histPid, datasetId, datasetName]);
 
+  // ── plots.json export / import ─────────────────────────────────────────────
+  const plotFileRef = useRef(null);
+  const [plotIOError, setPlotIOError] = useState("");
+
+  const exportPlots = useCallback(() => {
+    if (!plotHistory.length) return;
+    const base = (datasetName || "dataset").replace(/[^\w.-]/g, "_").slice(0, 100);
+    downloadJSON(buildPlotsFile(plotHistory), `${base}_plots.json`);
+  }, [plotHistory, datasetName]);
+
+  const importPlots = useCallback((text) => {
+    const res = parsePlotsFile(text, {
+      geoms:   GEOMS.map(g => g.id),
+      schemes: PALETTE_PRESETS.map(p => p.id),
+    });
+    if (!res.ok) { setPlotIOError(res.error); return; }
+    setPlotIOError("");
+    // Append, never replace: unlike the pipeline import there is no History
+    // panel to undo with. Fresh ids + the CURRENT datasetId — a foreign id
+    // would point at a dataset that does not exist in this session.
+    const incoming = res.plots.map((e, i) => ({
+      ...e,
+      id:          "ph_" + Math.random().toString(36).slice(2, 8),
+      name:        e.name || `Imported ${i + 1}`,
+      datasetId:   datasetId ?? null,
+      datasetName: datasetName ?? null,
+      savedAt:     Date.now(),
+    }));
+    const next = [...plotHistory, ...incoming];
+    setPlotHistory(next);
+    if (histPid) savePlotHistory(histPid, next).catch(() => {});
+    loadPlotEntry(incoming[0]);
+    setHistIdx(plotHistory.length);
+    setHistOpen(true);
+  }, [plotHistory, histPid, datasetId, datasetName, loadPlotEntry]);
+
   const copyPlotScript = useCallback(() => {
     if (layers.length === 0) return;
     const entry = currentPlotEntry();
@@ -1951,6 +1988,30 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                 padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
                 background: "none", color: C.textMuted, border: `1px solid ${C.border}`,
               }}>New</button>
+            <button onClick={exportPlots} disabled={plotHistory.length === 0}
+              title={plotHistory.length ? "Download every saved plot as plots.json" : "Save a plot first"}
+              style={{
+                padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                cursor: plotHistory.length > 0 ? "pointer" : "not-allowed",
+                background: "none", color: plotHistory.length > 0 ? C.textMuted : C.border,
+                border: `1px solid ${plotHistory.length > 0 ? C.border : C.border}`,
+              }}>↓ Export</button>
+            <button onClick={() => { setPlotIOError(""); plotFileRef.current?.click(); }}
+              title="Append plots from a previously-exported plots.json"
+              style={{
+                padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                cursor: "pointer", background: "none", color: C.textMuted, border: `1px solid ${C.border}`,
+              }}>↑ Import</button>
+            <input ref={plotFileRef} type="file" accept=".json,application/json"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (!f) return;
+                const reader = new FileReader();
+                reader.onload = () => importPlots(reader.result);
+                reader.readAsText(f);
+              }}
+              style={{ display: "none" }} />
             <select value={scriptLanguage} onChange={event => setScriptLanguage(event.target.value)} title="Replication script language"
               style={{
                 padding: "3px 5px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
@@ -1969,6 +2030,23 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                 border: `1px solid ${copiedLanguage === scriptLanguage ? C.teal : C.border}`,
               }}>{copiedLanguage === scriptLanguage ? "Copied ✓" : "Copy"}</button>
           </div>
+
+          {plotIOError && (
+            <div style={{
+              padding: "0.35rem 0.6rem", background: C.surface2,
+              border: `1px solid ${C.red}`, borderLeft: `3px solid ${C.red}`, borderRadius: 3,
+              color: C.red, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+              maxWidth: 420, lineHeight: 1.5,
+            }}>
+              ⚠ {plotIOError}
+              <button onClick={() => setPlotIOError("")}
+                style={{ marginLeft: 8, padding: "0.1rem 0.45rem", background: "transparent",
+                  border: `1px solid ${C.border2}`, color: C.textDim, borderRadius: 2,
+                  cursor: "pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily }}>
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {visibleLayers.length > 0 && (
             <div style={{ marginLeft: "auto" }}>
