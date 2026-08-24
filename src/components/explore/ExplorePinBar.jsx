@@ -8,7 +8,9 @@ import { useState, useRef } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 import { downloadGridPNG } from "../../services/export/plotExporter.js";
 
-const KIND_ICON = {
+// Exported so ArtifactViewerPanel can render the same icon for an Explore pin's
+// summary card instead of a second, drifting copy of this lookup.
+export const KIND_ICON = {
   summary:       "⊞",
   head:          "⊟",
   tail:          "⊟",

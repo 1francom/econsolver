@@ -12,14 +12,26 @@
 // carries. Maps appear in the same ordered list as a summary card with an "open"
 // action: MapCanvas drives a Leaflet instance whose lifecycle inside a resizing
 // panel is its own hazard, and that is a deliberate v1 boundary.
+//
+// Explore pins (ExplorePinBar's histogram/timeseries/ACF/summary-table pins,
+// stored via getExplorePins — a THIRD sibling of getPlotHistory/getMapHistory
+// in plotHistory.js that this panel simply never read) get the same
+// summary-card treatment, for two separate reasons: their params are a
+// heterogeneous per-`kind` shape with no shared renderer (unlike PlotBuilder's
+// uniform `layers[]`), and — unlike a saved plot — a pin carries no
+// `datasetId` to resolve rows against, since ExplorePinBar pins are implicitly
+// scoped to whichever dataset Explore was open on. Each pin's own `label` is
+// already the human-readable description ExplorePinBar itself displays, so the
+// card needs no per-kind copy of its own.
 
 import { useState, useEffect, useMemo } from "react";
 import { useTheme } from "../../ThemeContext.jsx";
 import FloatingPanel from "./FloatingPanel.jsx";
 import { PlotCanvas } from "../PlotBuilder.jsx";
-import { getPlotHistory, getMapHistory } from "../../services/Persistence/plotHistory.js";
+import { getPlotHistory, getMapHistory, getExplorePins } from "../../services/Persistence/plotHistory.js";
 import { getArtifactOrder, makeArtifactId, orderArtifacts } from "../../services/Persistence/artifactOrder.js";
 import { readPanelPref, writePanelPref } from "./panelPrefs.js";
+import { KIND_ICON } from "../explore/ExplorePinBar.jsx";
 
 const PANEL_WIDTH = 460;
 const BODY_HEIGHT = 360;
@@ -51,14 +63,18 @@ export default function ArtifactViewerPanel({ pid, datasets = [], outputs = {}, 
     if (!pid) return;
     let cancelled = false;
     (async () => {
-      const [plots, maps, order] = await Promise.all([
+      const [plots, maps, explorePins, order] = await Promise.all([
         getPlotHistory(pid).catch(() => []),
         getMapHistory(pid).catch(() => []),
+        getExplorePins(pid).catch(() => []),
         getArtifactOrder(pid).catch(() => []),
       ]);
       const items = [
         ...(plots ?? []).map(e => ({ kind: "plot", artifactId: makeArtifactId("plot", e.id), savedAt: e.savedAt ?? 0, entry: e })),
         ...(maps  ?? []).map(e => ({ kind: "map",  artifactId: makeArtifactId("map",  e.id), savedAt: e.savedAt ?? 0, entry: e })),
+        // ExplorePinBar mints `id` from Date.now(), which already sorts
+        // chronologically like the other kinds' explicit `savedAt`.
+        ...(explorePins ?? []).map(e => ({ kind: "explore", artifactId: makeArtifactId("explore", String(e.id)), savedAt: e.id ?? 0, entry: e })),
       ];
       if (!cancelled) setArtifacts(orderArtifacts(items, order));
     })();
@@ -127,7 +143,7 @@ export default function ArtifactViewerPanel({ pid, datasets = [], outputs = {}, 
       <div style={{ padding: "0.5rem 0.7rem" }}>
         {artifacts.length === 0 && (
           <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
-            No saved plots or maps in this project yet.
+            No saved plots, maps, or Explore pins in this project yet.
           </div>
         )}
 
@@ -140,7 +156,7 @@ export default function ArtifactViewerPanel({ pid, datasets = [], outputs = {}, 
                 flex: 1, fontSize: T.caption.fontSize, color: C.text,
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}>
-                {current.entry.name ?? current.kind}
+                {current.entry.name ?? current.entry.label ?? current.kind}
               </span>
               {/* Minimize rather than close: you are about to look at this
                   artifact full size, so the panel should get out of the way —
@@ -199,6 +215,20 @@ export default function ArtifactViewerPanel({ pid, datasets = [], outputs = {}, 
               }}>
                 Map · {(current.entry.layers ?? []).length} layer(s).
                 Use <span style={{ color: C.textDim }}>open</span> to view it on the Spatial tab.
+              </div>
+            )}
+
+            {current.kind === "explore" && (
+              <div style={{
+                border: `1px solid ${C.border}`, borderRadius: 4, padding: "0.7rem",
+                fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.5,
+              }}>
+                {KIND_ICON[current.entry.kind] ?? "⬡"} {current.entry.label}
+                <div style={{ marginTop: 4 }}>
+                  Pinned from Explore. Use <span style={{ color: C.textDim }}>open</span> to view
+                  it there — this panel does not re-render Explore's descriptive plots and tables
+                  live.
+                </div>
               </div>
             )}
           </>

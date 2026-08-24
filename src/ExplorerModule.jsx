@@ -2597,7 +2597,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         )}
         <HintBox title="Explore" sections={[
           { heading: "Artifacts panel", items: [
-            "◫ in the top bar opens a floating panel listing every saved plot and map in this project",
+            "◫ in the top bar opens a floating panel listing every saved plot, map and pinned Explore analysis in this project",
             "It stays on screen across tabs — keep a chart visible while you build a model",
             "◀ ▶ walks them in the project's artifact order, the same order the replication bundle emits",
           ]},

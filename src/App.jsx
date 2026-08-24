@@ -3351,6 +3351,12 @@ export default function App() {
                 onCloseArtifactViewer={() => setArtifactViewerOpen(false)}
                 onOpenArtifact={(a) => {
                   if (a.kind === "map") { navigateToTab("spatial"); return; }
+                  // ExplorePinBar pins carry no datasetId (they're implicitly
+                  // scoped to whatever dataset Explore was open on when
+                  // pinned) — unlike a saved plot there is no cross-dataset
+                  // pointer to park, so this can only navigate, matching the
+                  // "map" branch's own simplicity.
+                  if (a.kind === "explore") { navigateToTab("explore"); return; }
                   // Reuses the existing cross-dataset plot-open path: park the
                   // id, switch Explore to the plot's own dataset, and let
                   // PlotBuilder pick it up once that dataset's history loads.
