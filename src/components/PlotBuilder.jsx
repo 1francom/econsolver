@@ -1693,6 +1693,36 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     if (histPid) savePlotHistory(histPid, next).catch(() => {});
   }, [plotHistory, histIdx, layers.length, currentPlotEntry, histPid, datasetId, datasetName]);
 
+  // ── Save as new — fork the canvas instead of overwriting ────────────────────
+  // `savePlot` OVERWRITES whenever a history entry is loaded, which is R's
+  // "edit the original's code and replace it". This is R's other flow: copy the
+  // code, change something, keep both. Without it the only way to keep an
+  // original AND a variant is to hit New and rebuild the whole plot by hand.
+  //
+  // Forking the CANVAS (not the saved entry) is deliberate: you normally
+  // realise you want to keep both AFTER making the change, not before.
+  //
+  // Moving histIdx to the new entry is load-bearing, not bookkeeping — leaving
+  // it on the original means the next plain Save writes the forked state over
+  // the very plot this exists to protect.
+  const saveAsNewPlot = useCallback(() => {
+    if (layers.length === 0) return;
+    const from = histIdx !== null ? plotHistory[histIdx] : null;
+    const entry = {
+      id:      "ph_" + Math.random().toString(36).slice(2, 8),
+      name:    from?.name ? `${from.name} (copy)` : `Plot ${plotHistory.length + 1}`,
+      ...currentPlotEntry(),
+      datasetId:   datasetId ?? null,
+      datasetName: datasetName ?? null,
+      savedAt: Date.now(),
+    };
+    const next = [...plotHistory, entry];
+    setPlotHistory(next);
+    setHistIdx(next.length - 1);
+    setHistOpen(true);
+    if (histPid) savePlotHistory(histPid, next).catch(() => {});
+  }, [plotHistory, histIdx, layers.length, currentPlotEntry, histPid, datasetId, datasetName]);
+
   // ── plots.json export / import ─────────────────────────────────────────────
   const plotFileRef = useRef(null);
   const [plotIOError, setPlotIOError] = useState("");
@@ -1977,12 +2007,28 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                 disabled={histIdx === null}
                 style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: histIdx !== null ? C.textMuted : C.border, cursor: histIdx !== null ? "pointer" : "default", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 6px", lineHeight: 1 }}>→</button>
             </>)}
-            <button onClick={savePlot} disabled={layers.length === 0} title="Save current plot to history"
+            <button onClick={savePlot} disabled={layers.length === 0}
+              title={histIdx !== null
+                ? `Overwrite “${plotHistory[histIdx]?.name ?? "this plot"}” with what is on the canvas`
+                : "Save current plot to history"}
               style={{
                 padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: layers.length > 0 ? "pointer" : "not-allowed",
                 background: layers.length > 0 ? C.teal : "none", color: layers.length > 0 ? C.bg : C.border,
                 border: `1px solid ${layers.length > 0 ? C.teal : C.border}`,
               }}>Save</button>
+            {/* Only meaningful while editing a saved plot — with a fresh canvas
+                it would do exactly what Save already does. The bar already
+                shows/hides its nav controls on state this way. */}
+            {histIdx !== null && (
+              <button onClick={saveAsNewPlot} disabled={layers.length === 0}
+                title="Keep both — save the canvas as a new plot, leaving the original untouched"
+                style={{
+                  padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  cursor: layers.length > 0 ? "pointer" : "not-allowed",
+                  background: "none", color: layers.length > 0 ? C.textMuted : C.border,
+                  border: `1px solid ${C.border}`,
+                }}>Save as new</button>
+            )}
             <button onClick={newPlot} title="Clear builder to start a new plot"
               style={{
                 padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
