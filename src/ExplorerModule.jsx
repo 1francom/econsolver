@@ -2597,7 +2597,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         )}
         <HintBox title="Explore" sections={[
           { heading: "Artifacts panel", items: [
-            "◫ in the top bar opens a floating panel listing every saved plot and map in this project",
+            "◫ in the top bar opens a floating panel listing every saved plot, map and pinned Explore analysis in this project",
             "It stays on screen across tabs — keep a chart visible while you build a model",
             "◀ ▶ walks them in the project's artifact order, the same order the replication bundle emits",
           ]},
@@ -2633,11 +2633,14 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           ]},
           { heading: "Plot Builder", items: [
             "Layer-based chart editor — stack as many layers as you need on one canvas",
-            "12 geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, h-line, v-line",
+            "Geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, h-line, v-line",
             "Aesthetic mappings (x, y, colour), stacking and jitter, palette presets, axis and label controls",
             "facet_wrap: split into one panel per level of a column, with a column-count control",
             "Histogram and density take either a bin count or a bin width — bin width uses ggplot's centred edges",
+            "Saved plots store the recipe, not a picture — they redraw against the current data, and that is why they can be exported as a runnable script",
+            "Save overwrites the plot you loaded from the history; Save as new forks it into its own entry, so you can keep an original and a variant side by side",
             "Export as SVG or PNG, or copy the equivalent R / Python / Stata plot script",
+            "History bar ↓ Export saves every plot in the history to a JSON file; ↑ Import appends plots from one — save the plot you are building first, Export only writes what is already in the history",
           ]},
           { heading: "Carrying results forward", items: [
             "The ◈ pin button on a table or chart sends it to the Report tab",

@@ -9,21 +9,39 @@
 //   - Every step must have a string `type` in STEP_TYPES.
 //   - Unknown types are reported and the import is aborted so the user is
 //     never silently left with steps that no-op against an outdated runner.
+//   - Dataset references and row-identity steps that don't survive a transfer
+//     (see pipeline/portability.js) are reported but do NOT abort the import —
+//     the rest of the pipeline still applies.
 //
 // Props:
-//   currentLength    — pipeline.length, used to decide whether to confirm.
-//   onImport(steps)  — replace the current pipeline atomically.
+//   currentLength     — pipeline.length, used to decide whether to confirm.
+//   onImport(steps)   — replace the current pipeline atomically.
+//   currentDatasetId  — id of the dataset the import will apply to.
+//   datasetIds        — ids of every dataset known in this session, for
+//                        resolving merge/spatial dataset references.
 
 import { useRef, useState } from "react";
 import { useTheme } from "./shared.jsx";
 import { STEP_TYPES } from "../../pipeline/registry.js";
 import { isSafeExpr, exprFieldsOf } from "../../pipeline/exprGuard.js";
+import { checkPipelinePortability } from "../../pipeline/portability.js";
 
-function ImportPipelineButton({ currentLength = 0, onImport }) {
+// Human-readable portability report, or null when everything transferred.
+function buildNotice(port) {
+  const lines = [];
+  for (const u of port.unresolved)
+    lines.push(`step ${u.index + 1} · ${u.type} → ${u.field}: no such dataset in this session`);
+  if (port.rowIdentityDropped)
+    lines.push(`${port.rowIdentityDropped} row-level edit${port.rowIdentityDropped !== 1 ? "s" : ""} dropped — they belong to another dataset`);
+  return lines.length ? lines : null;
+}
+
+function ImportPipelineButton({ currentLength = 0, onImport, currentDatasetId = null, datasetIds = [] }) {
   const { C, T } = useTheme();
   const fileRef = useRef(null);
   const [error, setError]     = useState("");
-  const [pending, setPending] = useState(null); // { steps, source } awaiting confirm
+  const [pending, setPending] = useState(null); // { steps, source, port } awaiting confirm
+  const [notice, setNotice]   = useState(null); // portability report after an applied import
 
   function pick() {
     setError("");
@@ -71,18 +89,31 @@ function ImportPipelineButton({ currentLength = 0, onImport }) {
         }
       }
 
+      // Portability: dataset references and row-identity steps do not survive a
+      // transfer between sessions. Neither aborts the import — a pipeline is
+      // usually mostly portable — but neither is applied silently either.
+      const port = checkPipelinePortability(steps, {
+        datasetIds,
+        targetDatasetId:  currentDatasetId,
+        payloadDatasetId: Array.isArray(parsed) ? null : (parsed?.datasetId ?? null),
+      });
+
       // If current pipeline is empty, just apply. Otherwise gate behind confirm.
       if (currentLength === 0) {
-        onImport(steps);
+        onImport(port.steps);
+        setNotice(buildNotice(port));
       } else {
-        setPending({ steps, source: f.name });
+        setPending({ steps: port.steps, source: f.name, port });
       }
     };
     reader.readAsText(f);
   }
 
   function confirmReplace() {
-    if (pending) onImport(pending.steps);
+    if (pending) {
+      onImport(pending.steps);
+      setNotice(buildNotice(pending.port));
+    }
     setPending(null);
   }
 
@@ -120,6 +151,28 @@ function ImportPipelineButton({ currentLength = 0, onImport }) {
               style={{ padding:"0.18rem 0.55rem", background:"transparent",
                 border:`1px solid ${C.border2}`, color:C.textDim,
                 borderRadius:2, cursor:"pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily }}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Inline portability notice (dataset refs / row-identity steps dropped) */}
+      {notice && (
+        <div style={{
+          position: "absolute", right: 0, top: "calc(100% + 4px)",
+          padding: "0.5rem 0.75rem", background: C.surface2,
+          border: `1px solid ${C.gold}`, borderLeft: `3px solid ${C.gold}`,
+          borderRadius: 3, color: C.textDim, fontFamily: T.code.fontFamily,
+          fontSize: T.caption.fontSize, maxWidth: 340, lineHeight: 1.5, zIndex: 100,
+        }}>
+          <div style={{ color: C.gold, marginBottom: 4 }}>Imported with notes</div>
+          {notice.map((l, i) => <div key={i}>{l}</div>)}
+          <div style={{ marginTop: 6 }}>
+            <button onClick={() => setNotice(null)}
+              style={{ padding: "0.18rem 0.55rem", background: "transparent",
+                border: `1px solid ${C.border2}`, color: C.textDim, borderRadius: 2,
+                cursor: "pointer", fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily }}>
               Dismiss
             </button>
           </div>

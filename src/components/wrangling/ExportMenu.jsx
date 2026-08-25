@@ -8,12 +8,14 @@
 //   filename    — original filename (used as base for download names)
 //   datasetName — human-readable name for the active dataset
 //   allDatasets — { id: { name, filename } } — for resolving join/append names
+//   datasetId   — id of the dataset these steps were built on; stamped into the
+//                 exported pipeline.json for cross-session portability checks
 
 import { useState } from "react";
 import { useTheme } from "./shared.jsx";
 import { generateCleanScript } from "../../pipeline/exporter.js";
 
-function ExportMenu({ rows, headers, pipeline, filename, datasetName, allDatasets = {} }) {
+function ExportMenu({ rows, headers, pipeline, filename, datasetName, allDatasets = {}, datasetId = null }) {
   const { C, T } = useTheme();
   const [open, setOpen] = useState(false);
   // SECURITY (SECURITY_AUDIT_2026-08-02.md B-1): filename/datasetName can come from an
@@ -62,6 +64,10 @@ function ExportMenu({ rows, headers, pipeline, filename, datasetName, allDataset
     const payload = {
       version: 1,
       filename,
+      // Which dataset these steps were built on. Read by ImportPipelineButton to
+      // decide whether row-identity steps (patch/inject_column, which match on
+      // this dataset's __ri) can be replayed or must be dropped.
+      datasetId,
       exportedAt: new Date().toISOString(),
       steps: pipeline,
     };

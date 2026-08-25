@@ -665,8 +665,11 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             </div>
             <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}
               datasetName={filename ? filename.replace(/\.[^.]+$/, "") : "dataset"}
-              allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}/>
-            <ImportPipelineButton currentLength={pipeline.length} onImport={replacePipeline} />
+              allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}
+              datasetId={pid}/>
+            <ImportPipelineButton currentLength={pipeline.length} onImport={replacePipeline}
+              currentDatasetId={pid}
+              datasetIds={(allDatasets || []).map(d => d.id)} />
             {onSaveSubset && (
               <div style={{ position:"relative" }}>
                 <button
@@ -748,6 +751,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Undo, redo and delete individual steps from the Pipeline column on the right — collapse it with ⟩ when you need the space",
             "Steps are auto-saved and restored when you reopen the project",
             "The pipeline is what gets exported as an R / Python / Stata script — it is the record of what you did",
+            "Import pipeline applies a previously-exported pipeline.json — steps that reference another dataset, and cell edits made in the Data Viewer, are reported rather than replayed when they cannot be resolved against the dataset you are importing into",
           ]},
           { heading: "AI command bar", items: [
             "Describe a change in plain English and it is translated into real pipeline steps",

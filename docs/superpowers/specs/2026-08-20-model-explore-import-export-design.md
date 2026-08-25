@@ -31,9 +31,9 @@ So this is mostly plumbing plus one real correctness fix (§3).
 | Question | Decision |
 |---|---|
 | Unit of exchange | **One file per module.** `model.json` and `plots.json`, each with its own Export/Import control. No `workspace.json` bundle. |
-| What a model file carries | **The recipe, not the result.** Importing fills the sidebar; the user presses Estimate against *their* data. No foreign coefficients enter the model buffer. |
+| What a model file carries | **The recipe, not the result.** Importing RUNS the recipe: every spec in the file is estimated against *the current dataset* and pinned. No foreign coefficients enter the model buffer — every pinned number was computed here. *(Revised in Task 12; originally "importing fills the sidebar and the user presses Estimate".)* |
 | Missing columns on import | **Apply partially + banner.** Fields whose column is absent are left empty and named explicitly by role. Never a silent partial spec. |
-| Multiple items in one file | **Explore appends, Model picks.** Plots are appended to `plotHistory` (non-destructive; the existing history picker is the tray). Models open a modal listing the N specs; the user picks one. |
+| Multiple items in one file | **Both append.** Plots are appended to `plotHistory` (non-destructive; the existing history picker is the tray). Models are ALL estimated and pinned to the model buffer, whose ◀ ▶ navigation is the tray. *(Revised in Task 12; originally "Model picks" via a modal — the point of N specs in one file is comparing them, and reopening the file N times to do that was the defect Franco reported.)* |
 | Derived datasets | **Out of scope** — separate spec (§8), together with Spatial maps. |
 | Spatial steps in `pipeline.json` | **Already captured** — no unification needed; the gap is portability, not coverage (§7). |
 
@@ -136,11 +136,21 @@ message instead of a confusing field-level error.
 
 - **Export** — `↓ Export models` beside `ModelBufferBar`. Writes the specs of all pins.
   Disabled when the buffer is empty.
-- **Import** — `↑ Import models` beside the same bar. Validate → modal listing the N specs
-  (label, estimator, and a `y ~ x1 + x2` preview built from the spec) → user picks one →
-  `applySpec` fills the sidebar → banner if anything was dropped → the user presses
-  Estimate. **Nothing is pinned and nothing is estimated automatically.** To try another
-  spec, reopen the file; no new persistent state is introduced.
+- **Import** — `↑ Import models` beside the same bar. Validate → for EVERY spec in the file:
+  `buildEstimationConfigFromSpec` resolves it into an estimation config (reusing `applySpec`'s
+  validation, but writing into a plain collector instead of React state), then
+  `runEstimationOnRows` — the same pure core the live Estimate button calls — estimates it
+  against the current dataset and the result is pinned to the model buffer. **No modal, no
+  sidebar fill, no manual Estimate.** The last successful import becomes the active result;
+  the buffer bar's ◀ ▶ is how you move between them. A summary banner reports
+  `N/M models imported and pinned`, naming every spec that failed to estimate and, separately,
+  every spec that estimated on fewer fields than the file asked for. **Coefficients are still
+  never imported** — the recipe travels, the numbers are recomputed here.
+  - *Why not "apply each spec via the setters, then call `_runEstimation`"?* React batches
+    state updates, so `_runEstimation`'s closure would still hold the PREVIOUS spec on every
+    iteration. That is why the estimation core was made a pure function of an explicit config
+    (`src/components/modeling/runEstimation.js`) with `_runEstimation` reduced to a thin
+    wrapper around it — one core, two call sites, no possibility of drift.
 
 ### Explore
 
@@ -180,6 +190,13 @@ the import with the offending list, rather than applying something that will no-
 - **Both**: `JSON.parse` in `try/catch` and a file-size cap, as today.
 
 ### Partial application
+
+**A field naming a column in a *referenced* dataset is not a `column`.** The spatial
+weights `i`/`j`/`w` fields name columns of the weights dataset that
+`spatialWeightsDatasetId` points at, read as `ds.rows.map(r => r[iCol])`
+(`ModelingTab.jsx:625-631`). Checking them against the active dataset's headers would
+report every imported spatial spec as broken and clear valid values, so they are `scalar`.
+Only the `datasetRef` itself is verifiable here; what lives inside that dataset is not.
 
 `applySpec` returns `missing[]`; the banner names the role, not just the column:
 `yVar: log_gdp — not in this dataset`. `datasetRef` fields (`spatialWeightsDatasetId`) are

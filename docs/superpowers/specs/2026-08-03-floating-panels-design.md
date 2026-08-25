@@ -133,6 +133,31 @@ Little to validate numerically — this is UI.
   including the empty-order case.
 - No browser validation (project rule); Franco does the browser pass.
 
+**Addendum, 2026-08-22 (Franco's report):** the panel showed "No saved plots or maps" despite
+a pinned Explore Time Series analysis sitting in `ExplorePinBar` at the bottom of the same
+screen. Root cause was scoped-out at v1, not a regression: `getExplorePins`/`saveExplorePins`
+already existed as a third sibling of `getPlotHistory`/`getMapHistory` in `plotHistory.js` —
+same file, same IndexedDB store, same project-scoped `pid` convention — but this panel's fetch
+`useEffect` never called it. Explore's descriptive-stat/time-series pins (`{kind, label,
+params}`, rendered by `ExplorePinBar`'s own `renderPinnedPlot`, a function local to
+`ExplorerModule`'s closure) are structurally unlike a PlotBuilder entry — heterogeneous params
+per `kind`, and no stored `datasetId` to resolve rows against, since a pin is implicitly scoped
+to whatever dataset Explore was open on. Given `renderPinnedPlot` isn't a reusable, stateless
+renderer, Explore pins get the identical "summary card + open" treatment §5's Maps already use
+for the identical reason class (no generic renderer available) — reusing `ExplorePinBar`'s own
+`KIND_ICON` map (now exported) rather than a second copy, and the pin's own `label` (already
+the human-readable string `ExplorePinBar` itself displays) instead of hand-written per-kind
+copy. `App.jsx`'s `onOpenArtifact` gained a matching `kind === "explore"` branch that only
+navigates to Explore (no dataset-switch attempt, mirroring the Map branch's own simplicity,
+since there is no `datasetId` to switch on). **Found in passing, deliberately not fixed:** this
+plan's own §1 table lists "models" alongside plots/maps as Artifact Viewer content, and the
+completed implementation plan's task notes describe "Maps/models" as sharing the v1
+summary-card boundary — but no `kind === "model"` branch was ever built; pinned models are
+used only for replication-bundle ORDERING (`ReportingModule.jsx`'s `makeArtifactId("model",
+…)`), never for browsing here. Not touched now because pinned models already have a dedicated,
+richer browsing surface (`ModelBufferBar`'s own ◀ ▶, labels, and restore-into-sidebar) that a
+generic summary card would duplicate rather than improve — a decision for Franco, not a bug.
+
 ## 7 · Help copy
 
 Per the CLAUDE.md convention, a new thing the user opens from the UI updates the module's

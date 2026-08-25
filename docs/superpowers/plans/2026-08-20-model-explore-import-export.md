@@ -43,6 +43,43 @@
 
 ## Task 1: `modelSpec.js` — the canonical spec table
 
+> **SUPERSEDED IN PART — read this before using the code blocks below.** Task 1 shipped, was
+> quality-reviewed, and the review found real defects that were fixed in a follow-up commit.
+> The code blocks in this task are the *first* draft; the file on disk is the truth. The
+> amendments, all of which the reviewer reproduced with runnable repros:
+> - `feCols` gained `allowSynthetic` — `selectedFeCols` can hold `"state×year"`, a label built
+>   at `ModelConfiguration.jsx:90` that is not a real column until estimation, and `columns`
+>   filtering was silently downgrading a validated nested-FE spec to plain one-way FE.
+> - Every field gained a `def`, and `applySpec` now writes it for fields absent from the spec.
+>   Without it `applySpec` was a **merge onto the current sidebar, not a set** — restoring a
+>   partial spec kept the previous model's `seType` and bandwidth.
+> - `collectSpec` now serialises an explicit `null` for `columns`, because `selectedFeCols:
+>   null` ("use the estimator's default FE") and `[]` ("none") are different states.
+> - Added the two missing HAC fields, `timeVar` and `maxLag` — `seOpts` is a 5-tuple and the
+>   table declared 3.
+> - `applySpec` no longer throws on malformed input (it is the untrusted-file path), normalises
+>   on write as `collectSpec` does on read, clears to `def` and reports on `enum`/`scalar`
+>   failure, and validates `model`/`family` as enums.
+> - `factorRefs` levels are validated when `ctx.levels` is supplied; the doc comment states
+>   plainly that they are not validated otherwise.
+> - Returned `missing` renamed to **`unapplied`** — it carries `panel-mismatch` and
+>   `unknown-value` too. Tasks 3 and 5 below already use the new name.
+> - Harness now drives the round-trip from the fixture keys and asserts a full key-set
+>   snapshot, so deleting a field fails the harness instead of just producing fewer checks.
+>
+> **A second review round, after Task 3 wired it in, forced two more:**
+> - **X and W travel under `xVarsRaw`/`wVarsRaw`, not `xVars`/`wVars`.** `estimationDispatch.js`
+>   sets `spec.xVars` to the **expanded** design matrix (factor dummies, interaction products);
+>   the sidebar list is the raw one. That is exactly why the old `specExtras` wrote separate
+>   `xVarsRaw`/`wVarsRaw` keys. Spreading `collectSpec` over `result.spec` clobbered the
+>   expanded arrays, and SunAbraham's export read `spec.xVars` to get its cohort/period/unit
+>   filtered controls — so it started emitting the period column as a control. Fixed with the
+>   table's existing `stateKey` mechanism: `{ key: "xVarsRaw", stateKey: "xVars", … }`. Every
+>   exporter keeps its current contract untouched, and `specFormula` reads the raw keys.
+> - **Legacy pins recover their estimator from `r.type`** — see Task 3's `onRestore`. `cutoff`
+>   deliberately keeps the sidebar's *string*, not the engine's parsed number: it restores into
+>   a text input, and the emitters interpolate it.
+
 **Files:**
 - Create: `src/components/modeling/modelSpec.js`
 - Create: `src/components/modeling/__validation__/modelSpecValidation.mjs`
@@ -328,9 +365,15 @@ export const MODEL_SPEC_FIELDS = [
   { key: "spatialWeightsStyle",    kind: "scalar",     setter: "setSpatialWeightsStyle" },
   { key: "spatialWeightsK",        kind: "scalar",     setter: "setSpatialWeightsK" },
   { key: "spatialWeightsD",        kind: "scalar",     setter: "setSpatialWeightsD" },
-  { key: "spatialWeightsICol",     kind: "column",     setter: "setSpatialWeightsICol", role: "Weights i column" },
-  { key: "spatialWeightsJCol",     kind: "column",     setter: "setSpatialWeightsJCol", role: "Weights j column" },
-  { key: "spatialWeightsWCol",     kind: "column",     setter: "setSpatialWeightsWCol", role: "Weights w column" },
+  // NOT kind:"column". These name columns in the WEIGHTS dataset — the one
+  // spatialWeightsDatasetId points at — not in the dataset being modelled:
+  // resolveSpatialWeights reads them as ds.rows.map(r => r[iCol])
+  // (ModelingTab.jsx:625-631). Header-checking them against the active dataset
+  // would make every imported spatial spec falsely report "i — not in this
+  // dataset" and then clear a perfectly valid value.
+  { key: "spatialWeightsICol",     kind: "scalar",     setter: "setSpatialWeightsICol" },
+  { key: "spatialWeightsJCol",     kind: "scalar",     setter: "setSpatialWeightsJCol" },
+  { key: "spatialWeightsWCol",     kind: "scalar",     setter: "setSpatialWeightsWCol" },
 
   { key: "seType",            kind: "enum", values: SE_TYPE_IDS, setter: "setSeType" },
   { key: "clusterVar",        kind: "column",     setter: "setClusterVar",  role: "Cluster variable" },
@@ -562,6 +605,17 @@ At the top of `src/components/ModelingTab.jsx`, alongside the other `./modeling/
 import { collectSpec, applySpec } from "./modeling/modelSpec.js";
 ```
 
+`MODELS` is also needed for `SPEC_CTX` below — extend the existing import at
+`ModelingTab.jsx:78`, which currently pulls only `FAMILY_SUPPORT`:
+
+```js
+import EstimatorSidebar, { FAMILY_SUPPORT, MODELS } from "../components/modeling/EstimatorSidebar.jsx";
+```
+
+**Name collision:** `ModelingTab.jsx:813` already has a local `const modelSpec = useMemo(...)`
+feeding `generateCoachingSignals`. Import the *functions*, as above — do not import the
+module namespace as `modelSpec`, and do not rename the existing local.
+
 - [ ] **Step 2: Replace the `specExtras` line**
 
 At `ModelingTab.jsx:897`, replace:
@@ -579,7 +633,12 @@ with:
     const specExtras = {
       ...collectSpec({
         model, family, yVar, xVars, wVars, zVars, weightVar,
-        factorVars, factorRefs, interactionTerms, noIntercept,
+        // factorVars is a Set in ModelingTab state (`useState(() => new Set(...))`,
+        // read via .has/.size at :1040/:1100). collectSpec's `columns` branch tests
+        // Array.isArray, so passing the Set raw drops factors from every spec
+        // silently. Spread on the way in; the setter re-wraps on the way out.
+        factorVars: [...factorVars],
+        factorRefs, interactionTerms, noIntercept,
         selectedFeCols: effectiveFeCols,
         entityCol: panel?.entityCol ?? null, timeCol: panel?.timeCol ?? null,
         treatVar, postVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
@@ -591,9 +650,12 @@ with:
         spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId,
         spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD,
         spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol,
-        seType, clusterVar, clusterVar2,
+        // timeVar/maxLag are the other two thirds of seOpts (ModelingTab.jsx:601-608).
+        // They MUST be collected: they now carry a `def`, so a spec that omits them
+        // makes applySpec reset them to null on every restore — actively clearing
+        // the user's HAC settings rather than merely failing to carry them.
+        seType, clusterVar, clusterVar2, timeVar, maxLag,
       }),
-      xVarsRaw: [...xVars], wVarsRaw: [...wVars],
       filename: cleanedData?.filename ?? null,
     };
 ```
@@ -623,12 +685,15 @@ At `ModelingTab.jsx:3845`, replace the whole `onRestore={(id) => { … }}` prop 
             // are trimmed — no raw arrays, so plots needing row-level data
             // cannot render from the pinned copy alone). applySpec is the same
             // path the model.json import uses; there is no second restorer.
-            const { missing } = applySpec(r.spec ?? {}, SPEC_SETTERS, {
-              headers,
-              datasetIds: (availableDatasets || []).map(d => d.id),
-              panel,
-            });
-            setSpecNotice(missing.length ? missing : null);
+            // `model: r.type` first, so spec.model wins when present but a pin
+            // saved BEFORE this table existed still recovers its estimator.
+            // Those specs have no `model` key — the old specExtras never wrote
+            // one — and applySpec resets an absent key to its def, silently, so
+            // without this an RDD pin restores as OLS while the result panel
+            // still says "RDD Results".
+            const { unapplied } = applySpec(
+              { model: r.type, ...(r.spec ?? {}) }, SPEC_SETTERS, SPEC_CTX);
+            setSpecNotice(unapplied.length ? unapplied : null);
           }}
 ```
 
@@ -645,8 +710,11 @@ Immediately after the `clusterVar2` state declaration (`ModelingTab.jsx:600`), a
   // in MODEL_SPEC_FIELDS. useMemo so it is stable across renders.
   const SPEC_SETTERS = useMemo(() => ({
     setModel, setFamily, setYVar, setXVars, setWVars, setZVars, setWeightVar,
-    setFactorVars, setFactorRefs, setInteractionTerms, setNoIntercept,
-    setSelectedFeCols,
+    // applySpec hands `columns` fields an ARRAY, but factorVars state is a Set —
+    // writing the array straight through would break .has/.size at :1040/:1100.
+    setFactorVars: (arr) => setFactorVars(new Set(arr ?? [])),
+    setFactorRefs, setInteractionTerms, setNoIntercept,
+    setSelectedFeCols, setTimeVar, setMaxLag,
     setTreatVar, setPostVar,
     setRunningVar, setCutoff, setBwMode, setBwManual, setKernel, setPolyOrder,
     setTreatedUnit, setSynthTreatTime, setTreatTimeCol, setKPre, setKPost,
@@ -660,6 +728,25 @@ Immediately after the `clusterVar2` state declaration (`ModelingTab.jsx:600`), a
     setSpatialWeightsICol, setSpatialWeightsJCol, setSpatialWeightsWCol,
     setSeType, setClusterVar, setClusterVar2,
   }), []);
+
+  // Context applySpec validates against. ONE definition, shared by the pin-restore
+  // path and the model.json import — they must agree or the two paths accept
+  // different specs.
+  //   modelIds           — without it, an unknown estimator id writes straight
+  //                        through to setModel unvalidated.
+  //   defaultFactorVars  — factorVars' real default is dataset-dependent (all
+  //                        non-numeric columns, ModelingTab.jsx:444), so no static
+  //                        `def` can express it. Omitting this makes a spec that
+  //                        carries no factorVars reset every string column to
+  //                        "not a factor", which puts it in the design matrix as
+  //                        Number(...) instead of dummies.
+  const SPEC_CTX = useMemo(() => ({
+    headers,
+    datasetIds: (availableDatasets || []).map(d => d.id),
+    panel,
+    modelIds: MODELS.map(m => m.id),
+    defaultFactorVars: headers.filter(h => !numericCols.includes(h)),
+  }), [headers, availableDatasets, panel, numericCols]);
 ```
 
 - [ ] **Step 6: Render the notice banner**
@@ -684,6 +771,8 @@ Immediately before the `<ModelBufferBar` element (`ModelingTab.jsx:~3839`), add:
                 {" — "}
                 {m.reason === "no-column"      ? "not in this dataset"
                  : m.reason === "no-dataset"    ? "no such dataset in this session"
+                 : m.reason === "no-level"      ? "not a level of this column"
+                 : m.reason === "bad-shape"     ? "malformed in the file — reset to default"
                  : m.reason === "panel-mismatch" ? "this dataset declares a different panel index"
                  : "unrecognised value"}
               </div>
@@ -984,6 +1073,60 @@ git commit -m "feat(export): artifactIO — build/parse model.json and plots.jso
 
 ---
 
+## Task 4b: `artifactIO` hardening — OUTSTANDING, do before Task 5
+
+Task 4 shipped (`411708df`) and its harness is green at 21 checks, but an adversarial review
+ran 80 probes against it and found real holes. One of them — `specFormula` throwing on a
+duck-typed array — is already fixed (`b707eea4`). **The rest are outstanding.** They are
+listed here rather than in a chat log because the review that found them is not durable.
+
+The module's best property, confirmed empirically, is that its vocabularies are
+**deny-by-default**: an empty or missing `modelIds`/`geoms` rejects the file rather than
+waving it through. Preserve that while fixing the rest — and pin it with a test, because
+without one, someone "fixing" the annoyance with `if (!ids.size) skip` gets a green harness
+while recreating this repo's `condToSQL` → `default: return "TRUE"` bug.
+
+### Critical
+- **`parseModelFile` never validates `m.spec`.** `m.spec?.seType` optional-chains past a
+  string, array or null, so `{"type":"OLS","spec":null}` returns `ok:true`. Reject a
+  non-plain-object spec, naming the model: `Model "Baseline": spec is not an object.`
+
+### Important
+- **`vocab: null` throws** instead of returning `{ok:false}` — `vocab = {}` is a default
+  parameter, so it only fires on `undefined`. A caller passing a not-yet-loaded ref turns a
+  file import into a render crash. Use `vocab ?? {}` inside both bodies.
+- **`version` is stamped and never read.** `version: 2`, `"banana"`, and absent all parse
+  `ok:true`, so a future v2 that renames a spec key is silently misparsed. Reject a version
+  newer than this build writes; treat a missing version as 1.
+- **`__proto__` survives the build → file → parse round trip.** No pollution is reachable
+  today (spread is safe, `Object.prototype` verified untouched), but `Object.assign({}, entry)`
+  DOES pollute, and that is the documented downstream shape. Strip `__proto__`/`constructor`/
+  `prototype` in both parsers and in `buildPlotsFile`'s strip list.
+- **`buildPlotsFile` strips session-local identity only at the top level.** `PLOT_STRIP` hits a
+  shallow `{...e}`, so `layers[].datasetId`, `layers[].datasetName` and nested `meta.datasetId`
+  travel intact — against the module's own comment. `datasetName` is often a real filename, so
+  this is a privacy leak in a file users email each other. Strip recursively.
+- **Error messages are uncapped**: 50 000 unknown ids produced a 538 960-character error
+  string. Cap at ~5 distinct values + "and N more", truncate each to ~40 chars, and sanitise —
+  `kind: "<img src=x onerror=alert(1)>"` is currently echoed verbatim.
+
+### Message quality
+- A valid id in the wrong shape reports as an unknown id (`{"type":["OLS"]}` →
+  `Unknown estimator: OLS.`), because `String(v)` erases the difference. The user sees OLS in
+  the sidebar and has nowhere to go. `applySpec` already separates `bad-shape` from
+  `unknown-value` — follow it. Same for `layers:[null]` → `Unknown geom: undefined.`
+- Name which entry failed (index + label), and report all failing categories rather than
+  returning on the first.
+
+### Harness gaps (21 checks is too thin)
+Deny-by-default vocabularies (highest value); non-string input; `version`; wrong-typed `spec`;
+the parse → `specFormula` handoff; prototype keys; nested stripping; deep round-trip equality;
+`parsePlotsFile` with non-JSON; null/non-object plot entries and layers; build-side robustness
+(`buildModelFile(null)` throws today — guard it or document that the build side trusts its
+caller, then assert whichever); plots round-trip beyond `geom`.
+
+---
+
 ## Task 5: Model export/import UI
 
 **Files:**
@@ -1154,12 +1297,8 @@ Then insert immediately **before** the `{specNotice && (` block added in Task 3 
           models={pinnedModels}
           filenameBase={(cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100)}
           onApply={(spec) => {
-            const { missing } = applySpec(spec, SPEC_SETTERS, {
-              headers,
-              datasetIds: (availableDatasets || []).map(d => d.id),
-              panel,
-            });
-            setSpecNotice(missing.length ? missing : null);
+            const { unapplied } = applySpec(spec, SPEC_SETTERS, SPEC_CTX);
+            setSpecNotice(unapplied.length ? unapplied : null);
           }}
         />
 ```
@@ -1252,7 +1391,7 @@ In `PlotBuilder.jsx`, immediately after the `New` button (`~:1950`), insert:
                 padding: "3px 8px", borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
                 cursor: plotHistory.length > 0 ? "pointer" : "not-allowed",
                 background: "none", color: plotHistory.length > 0 ? C.textMuted : C.border,
-                border: `1px solid ${plotHistory.length > 0 ? C.border : C.border}`,
+                border: `1px solid ${C.border}`,
               }}>↓ Export</button>
             <button onClick={() => { setPlotIOError(""); plotFileRef.current?.click(); }}
               title="Append plots from a previously-exported plots.json"
@@ -1794,6 +1933,474 @@ Expected: build exits 0; three harnesses each report `0 failed`.
 git add ClaudePlan.md
 git commit -m "docs(plan): mark model/explore import-export implementation complete"
 ```
+
+---
+
+## Task 12: Import estimates and pins every spec, not just the picked one
+
+> **AMENDED after implementation and quality review.** The core extraction (12.1/12.2 —
+> `runEstimationOnRows`, `buildEstimationConfigFromSpec`) shipped clean: verified byte-for-byte
+> against the original `_runEstimation` body, the untouched dep array, `factorVars` producing a
+> real `Set` on every path, and a full reproduction of `resolveSpatialWeights` including its
+> `summary` object. The bug was in the NEW code, not the extraction: `importModelsFromFile`
+> called `buildEstimationConfigFromSpec(m.spec ?? {}, SPEC_CTX)` — passing only `m.spec`, never
+> `m.type`/`m.family`, which `parseModelFile` already validates at the top level. Since
+> `applySpec` resets an absent key to its `def` **without reporting it** (a reset isn't a
+> failure), and `model`'s `def` is `"OLS"`, every spec missing `spec.model` silently estimated
+> as OLS. That's not an edge case — **every pin saved before `modelSpec.js` existed has no
+> `spec.model` key**, so an Export→Import round trip on an existing pin set failed with "Select
+> at least one regressor" instead of running the model it actually was. The pin-restore path
+> (`ModelingTab.jsx:~4076`) had already hit and fixed this exact bug by seeding from `r.type`;
+> this task built a second restorer that forgot the fix its own neighbouring comment described.
+> Also found: bulk import can silently evict up to 8 existing pinned models (`modelBuffer`'s
+> FIFO cap) with no mention in the banner. Both fixed; see the commit for the final code.
+>
+> **One residual, deliberate limitation surfaced while fixing the estimator seed, worth
+> knowing rather than assuming solved:** the seed recovers WHICH estimator a legacy pin
+> (created before `modelSpec.js` existed) used, but not its regressor list. `wrapResult`
+> writes a legacy pin's `spec.xVars` as the EXPANDED design matrix (factor dummies,
+> interaction products) — never `xVarsRaw`, which is what `MODEL_SPEC_FIELDS` reads. A legacy
+> FE pin now correctly resolves `cfg.model === "FE"` and then fails with "Select at least one
+> regressor" — the *right* diagnosis of a *real* gap, not a misdiagnosis under the wrong
+> estimator. Deliberately NOT patched with an `xVarsRaw ?? spec.xVars` fallback: those values
+> are dummy/interaction column names, not the user's original selections, and feeding them
+> back as raw regressors would either report every one as `no-column` or silently estimate
+> something that looks plausible while having dropped the factor structure. The MODERN
+> round trip — a pin created after this feature landed, which does carry `xVarsRaw` — is
+> verified byte-for-byte identical end to end. Fixing legacy pins fully would need reverse-
+> engineering original selections from expanded names, which is a different, harder problem
+> than this task's scope (giving Model the round-trip Clean already has, going forward).
+
+**Franco's correction after Tasks 1-11 shipped**, from real use: a `model.json` with N specs
+required reopening the file N times — pick one from the modal, fill the sidebar, press
+Estimate, pin manually, repeat. Since the whole point of several specs in one file is
+comparing them, and the Model Buffer Bar already has ◀ ▶ navigation for exactly this, the fix
+is: **Import estimates every spec in the file against the current dataset and pins whatever
+succeeds — no modal, no manual Estimate.** A spec that fails (missing column, wrong panel) is
+reported by name, and the rest still get pinned — same discipline `runAllSubsets` already
+established for subsets, never the silent-drop pattern CLAUDE.md documents as a shipped bug.
+
+### Why this is a bigger change than it looks
+
+`_runEstimation` (`ModelingTab.jsx:934`) is a `useCallback` that reads the ENTIRE model spec
+from React closure state — `yVar`, `xVars`, `model`, `family`, all ~60 fields — not from a
+parameter. Looping "apply spec → estimate" across N specs cannot just call `applySpec` then
+`_runEstimation` in the same synchronous block: React state updates are batched, so
+`_runEstimation`'s closure would still see the PREVIOUS spec's values, not the one just
+applied. A render-cycle queue (apply → wait a render → estimate → advance) would work but is
+fragile — `_runEstimation`'s huge dependency array means it recreates on nearly every render,
+which is a real re-entrancy hazard for a multi-step async loop.
+
+**The correct fix is to make estimation a pure function of an explicit config, not of React
+state**, and have `_runEstimation` become a thin wrapper around it. Then the bulk-import path
+builds one config PER SPEC directly (no sidebar writes, no renders, no races) and calls the
+same pure core the live Estimate button uses — behavioral parity by construction, not by two
+estimation code paths that can drift apart.
+
+### 12.1 Extract `runEstimationOnRows` — pure, behavior-preserving
+
+Create `src/components/modeling/runEstimation.js`:
+
+```js
+// ─── ECON STUDIO · components/modeling/runEstimation.js ──────────────────────
+// The pure core of model estimation, extracted out of ModelingTab's
+// _runEstimation so it can be called with an EXPLICIT config instead of
+// reading React closure state — the only way to estimate N different specs in
+// one pass without N renders in between (see Task 12 in the import/export
+// plan). ModelingTab's _runEstimation becomes a thin wrapper around this.
+//
+// cfg matches EXACTLY what _runEstimation used to build inline: every
+// dispatchEstimation(...) option, PLUS clusterVar/clusterVar2/timeVar/maxLag/
+// spatialWeights* (read by the internal collectSpec call for specExtras, even
+// though dispatchEstimation itself doesn't need them).
+//
+// extraCtx = { filename, datasetId } — replication metadata, not spec fields.
+
+import { dispatchEstimation } from "./runners/estimationDispatch.js";
+import { collectSpec } from "./modelSpec.js";
+
+export function runEstimationOnRows(dataRows, cfg, extraCtx = {}) {
+  const dispatch = dispatchEstimation(dataRows, cfg);
+
+  // Same enrichment _runEstimation always did: collectSpec is the single
+  // owner of what a spec contains, so specExtras is built through it, not by
+  // hand-listing fields here (that duplication is exactly what caused the
+  // original spec to be incomplete for several estimators — see Task 1).
+  const specExtras = {
+    ...collectSpec({
+      ...cfg,
+      selectedFeCols: cfg.feCols,
+      entityCol: cfg.panel?.entityCol ?? null,
+      timeCol: cfg.panel?.timeCol ?? null,
+    }),
+    filename: extraCtx.filename ?? null,
+  };
+  if (dispatch?.result?.spec)      Object.assign(dispatch.result.spec,      specExtras);
+  if (dispatch?.result?.fe?.spec)  Object.assign(dispatch.result.fe.spec,   specExtras);
+  if (dispatch?.result?.fd?.spec)  Object.assign(dispatch.result.fd.spec,   specExtras);
+  const _dsTag = extraCtx.datasetId ?? null;
+  if (dispatch?.result)     dispatch.result.datasetId    = _dsTag;
+  if (dispatch?.result?.fe) dispatch.result.fe.datasetId = _dsTag;
+  if (dispatch?.result?.fd) dispatch.result.fd.datasetId = _dsTag;
+  return dispatch;
+}
+```
+
+In `ModelingTab.jsx`, replace `_runEstimation`'s body (`ModelingTab.jsx:934-994`) — **everything
+between `const dispatch = dispatchEstimation(...)` and `return dispatch;`, inclusive** — with a
+single call:
+
+```js
+  const _runEstimation = useCallback((dataRows) => runEstimationOnRows(dataRows, {
+    yVar, xVars, wVars, factorVars, factorRefs, interactionTerms,
+    model, family, weightVar, seOpts, seType, panel, noIntercept,
+    zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder,
+    treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, feCols: effectiveFeCols,
+    poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol,
+    saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol,
+    csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation,
+    csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode,
+    spatialGeomCol, spatialWeightsDatasetId, resolveSpatialWeights,
+    // Not read by dispatchEstimation itself, but by runEstimationOnRows's
+    // internal collectSpec call — omitting any of these silently drops that
+    // field from every pinned model's exported spec.
+    clusterVar, clusterVar2, timeVar, maxLag,
+    spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD,
+    spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol,
+  }, { filename: cleanedData?.filename ?? null, datasetId }),
+  [model, family, yVar, xVars, wVars, zVars, postVar, treatVar, runningVar, cutoff, bwMode, bwManual, kernel, polyOrder, weightVar, seOpts, seType, clusterVar, clusterVar2, panel, noIntercept, treatedUnit, synthTreatTime, treatTimeCol, kPre, kPost, effectiveFeCols, factorVars, factorRefs, interactionTerms, poissonEntityCol, poissonOffsetCol, poissonExtraFE, cohortCol, periodCol, saUnitCol, saControlMode, saRefPeriod, csTreatCol, csEntityCol, csTimeCol, csCompGroup, csRelMin, csRelMax, csXCols, csEstMethod, csBasePeriod, csAnticipation, csInfMethod, csNBoot, csSeed, csDefaultView, spatialModel, spatialWeightsMode, spatialGeomCol, spatialWeightsDatasetId, spatialWeightsType, spatialWeightsStyle, spatialWeightsK, spatialWeightsD, spatialWeightsICol, spatialWeightsJCol, spatialWeightsWCol, timeVar, maxLag, resolveSpatialWeights, cleanedData, datasetId]);
+```
+
+**The dep array is UNCHANGED — copy it verbatim from the current file.** This is a pure
+wrap-in-place; if the deps differ from what's there today, something was mistranscribed.
+
+Add `import { runEstimationOnRows } from "./modeling/runEstimation.js";` alongside the other
+`./modeling/` imports.
+
+**Verification this step is behavior-preserving, not a rewrite:** add a harness
+`src/components/modeling/__validation__/runEstimationValidation.mjs` asserting
+`runEstimationOnRows(rows, cfg, extraCtx)` produces output byte-identical (`JSON.stringify`
+equal, modulo any function-valued fields) to calling `dispatchEstimation(rows, cfg)` directly
+and applying the SAME `specExtras`/`datasetId` enrichment inline — i.e. re-derive the OLD
+`_runEstimation` body as a literal comparison fixture in the test file itself, not by
+importing `ModelingTab.jsx` (a `.jsx` file a node harness cannot load). Cover OLS and FE
+(panel-wrapper wrapper shape: `{type, fe, fd}`) fixtures.
+
+### 12.2 `buildEstimationConfigFromSpec` — resolve an imported spec without touching React
+
+In the same `runEstimation.js` file, add:
+
+```js
+import { MODEL_SPEC_FIELDS, applySpec } from "./modelSpec.js";
+// Confirmed: ModelingTab.jsx imports buildSpatialWeights from the barrel
+// export, not SpatialEngine.js directly — match that here.
+import { buildSpatialWeights } from "../../math/index.js";
+
+// Resolves an imported/pinned spec into the exact cfg shape
+// runEstimationOnRows expects — WITHOUT writing into React state or waiting
+// for a render. Reuses applySpec for every MODEL_SPEC_FIELDS-covered field
+// (all of Task 1's validation — bad-shape guards, def-reset, factorVars
+// shape-checking — applies here for free); derives the three fields that are
+// NOT in the table (panel, seOpts, resolveSpatialWeights) the same way the
+// live sidebar does, parameterized instead of closed over state.
+//
+// ctx = { headers, datasetIds, panel, modelIds, defaultFactorVars, availableDatasets }
+export function buildEstimationConfigFromSpec(spec, ctx) {
+  const collect = {};
+  const setters = {};
+  for (const f of MODEL_SPEC_FIELDS) {
+    if (!f.setter) continue;                               // panelRef fields
+    const key = f.stateKey ?? f.key;
+    // factorVars MUST be a real Set — helpers.js's applyFactors calls
+    // .has() on it directly (verified: `factorVars.filter(v =>
+    // factorVars.has(v))` at helpers.js:64). This is the one place this
+    // collector cannot be the harness's generic makeSetters helper (which
+    // has no need to simulate that, since it only checks collectSpec/
+    // applySpec's own round-trip, not a real downstream consumer) — do not
+    // "simplify" by sharing that helper; the Set-wrapping requirement is
+    // specific to feeding a REAL estimation dispatch.
+    setters[f.setter] = key === "factorVars"
+      ? (arr) => { collect.factorVars = new Set(arr ?? []); }
+      : (v) => { collect[key] = v; };
+  }
+  const { unapplied } = applySpec(spec, setters, ctx);
+
+  const panel = ctx.panel ?? null;
+  const seOpts = {
+    seType: collect.seType, clusterVar: collect.clusterVar, clusterVar2: collect.clusterVar2,
+    timeVar: collect.timeVar ?? panel?.timeCol ?? null,
+    maxLag: collect.maxLag ? parseInt(collect.maxLag) : null,
+  };
+
+  // Mirrors ModelingTab.jsx's resolveSpatialWeights (~:669-700) exactly —
+  // copy that function's body verbatim, parameterized by `collect` (the
+  // resolved spec fields) and `availableDatasets` instead of component state.
+  // Read the real function before writing this; do not re-derive from memory.
+  function resolveSpatialWeights(dataRows) {
+    if (collect.spatialWeightsMode === "inline") {
+      if (!collect.spatialGeomCol) return { error: "Select a geometry WKT column for W." };
+      try {
+        return buildSpatialWeights(dataRows, collect.spatialGeomCol, {
+          type: collect.spatialWeightsType, style: collect.spatialWeightsStyle,
+          k: Number(collect.spatialWeightsK) || 4, d: Number(collect.spatialWeightsD) || 1000,
+        });
+      } catch (e) {
+        return { error: e.message || "Could not build spatial weights from geometry." };
+      }
+    }
+    const ds = (ctx.availableDatasets ?? []).find(d => d.id === collect.spatialWeightsDatasetId);
+    if (!ds?.rows?.length) return { error: "Select a saved spatial weights triples dataset." };
+    const iCol = collect.spatialWeightsICol || "i";
+    const jCol = collect.spatialWeightsJCol || "j";
+    const wCol = collect.spatialWeightsWCol || "w";
+    const raw = ds.rows
+      .map(r => ({ i: Number(r[iCol]), j: Number(r[jCol]), w: Number(r[wCol] ?? 1) }))
+      .filter(t => Number.isFinite(t.i) && Number.isFinite(t.j) && Number.isFinite(t.w));
+    if (!raw.length) return { error: "Weights dataset must contain numeric i, j, and w columns." };
+    const minIdx = Math.min(...raw.flatMap(t => [t.i, t.j]));
+    const maxIdx = Math.max(...raw.flatMap(t => [t.i, t.j]));
+    const shift = minIdx === 1 && maxIdx === dataRows.length ? 1 : 0;
+    const weights = raw.map(t => ({ i: t.i - shift, j: t.j - shift, w: t.w }));
+    const counts = dataRows.map((_, i) => weights.filter(t => t.i === i).length);
+    return {
+      ids: dataRows.map((_, i) => i),
+      weights,
+      summary: {
+        n: dataRows.length,
+        links: weights.length,
+        avgNeighbors: counts.reduce((s, v) => s + v, 0) / Math.max(1, dataRows.length),
+        islands: counts.filter(v => v === 0).length,
+        type: "triples",
+        style: "custom",
+      },
+    };
+  }
+
+  return {
+    cfg: {
+      ...collect,
+      // feCols' `nullable` "use the estimator's default" branch is for the
+      // live sidebar, where a user hasn't picked FE yet. Every spec THIS APP
+      // exports carries an explicit feCols list (Task 3's design note — the
+      // collect side never emits null there), so an imported file realistically
+      // always has one; [] is the sane floor if it somehow doesn't.
+      feCols: collect.selectedFeCols ?? [],
+      panel, seOpts, resolveSpatialWeights,
+    },
+    unapplied,
+  };
+}
+```
+
+The block above is now a verbatim re-read of `ModelingTab.jsx:669-712` as of this task being
+written (confirmed to include the full `summary` object the earlier draft of this plan had
+truncated), and `buildSpatialWeights` is confirmed imported from `../math/index.js` (the
+barrel), not `SpatialEngine.js` directly. If `ModelingTab.jsx` has changed since, the real
+file wins — re-read it before transcribing, don't trust this plan's copy blindly.
+
+**Harness**, appended to `runEstimationValidation.mjs`: build a spec via `collectSpec` from a
+realistic OLS state, round-trip it through `buildEstimationConfigFromSpec`, and confirm the
+resulting `cfg` estimates cleanly via `runEstimationOnRows` against a small in-memory fixture
+(mirror the OLS fixture from 12.1). Then a factor-variable fixture, asserting `cfg.factorVars
+instanceof Set` (the exact thing this section exists to get right). Then a spec naming a
+missing column, asserting `unapplied` reports it AND `cfg` still estimates on what's left
+(not asserting a specific coefficient — a real fixture with a genuinely absent column would
+now use the estimator's own listwise-deletion / factor-drop behavior, which is out of this
+task's scope to re-verify).
+
+### 12.3 `ModelIOButtons.jsx` — remove the picker, import means import-and-pin-all
+
+Modify `src/components/modeling/ModelIOButtons.jsx`:
+
+- Update the top-of-file comment: this no longer "fills the sidebar" — it estimates and pins
+  every spec in the file. Coefficients are never imported from the file itself; every pinned
+  result comes from a REAL estimation run against the current dataset. Keep that sentence — it's
+  still true and still the point.
+- Prop rename: `onApply(spec)` → `onImportAll(models)`, called with the full `res.models` array
+  from `parseModelFile` (not one picked entry).
+- Delete the `picker` state and the entire `{picker && ( … )}` modal block.
+- `onFile`'s reader callback: on a successful parse, call `onImportAll?.(res.models)` directly
+  instead of `setPicker(...)`.
+- The `specFormula` import becomes unused here — remove it (it's still used elsewhere; this is
+  a local, not a repo-wide removal).
+
+### 12.4 `ModelingTab.jsx` — the import-and-pin-all runner
+
+Extend `SPEC_CTX` (`ModelingTab.jsx:655-661`) with `availableDatasets`, since
+`buildEstimationConfigFromSpec` needs it for `resolveSpatialWeights`:
+
+```js
+  const SPEC_CTX = useMemo(() => ({
+    headers,
+    datasetIds: (availableDatasets || []).map(d => d.id),
+    panel,
+    modelIds: MODELS.map(m => m.id),
+    defaultFactorVars: headers.filter(h => !numericCols.includes(h)),
+    availableDatasets: availableDatasets ?? [],
+  }), [headers, availableDatasets, panel, numericCols]);
+```
+
+Add state near `specNotice` (`ModelingTab.jsx:~623`):
+
+```js
+  // Result of the last model.json import — { added, total, failures }, same
+  // shape as subsetRunSummary so the banner below can mirror its rendering.
+  const [importSummary, setImportSummary] = useState(null);
+```
+
+Add the runner, placed near `runAllSubsets` (it is the same pattern — loop, estimate, pin,
+collect failures — varying the SPEC instead of the subset filter):
+
+```js
+  // ── IMPORT MODELS: estimate + pin every spec in a model.json ─────────────
+  // Mirrors runAllSubsets' failure-collection discipline: never silently drop
+  // a spec that fails to estimate. Unlike runAllSubsets, the SPEC varies per
+  // iteration (not just the rows), so this cannot reuse _runEstimation
+  // directly — it builds a config PER SPEC via buildEstimationConfigFromSpec
+  // and calls the same pure core (runEstimationOnRows) _runEstimation wraps,
+  // with no sidebar writes and no renders in between (see Task 12's design
+  // note on why a render-cycle queue would have been the wrong approach).
+  const importModelsFromFile = useCallback(async (models) => {
+    if (!models?.length) return;
+    setImportSummary(null);
+    setRunning(true);
+    try {
+      const baseRows = await getFullRows();
+      const failures = [];
+      let added = 0;
+      let lastId = null;
+      for (const m of models) {
+        const { cfg, unapplied } = buildEstimationConfigFromSpec(m.spec ?? {}, SPEC_CTX);
+        const dispatch = runEstimationOnRows(baseRows, cfg,
+          { filename: cleanedData?.filename ?? null, datasetId });
+        if (dispatch?.error || !dispatch?.result) {
+          failures.push({
+            name: m.label || m.type || "imported model",
+            error: dispatch?.error ?? "Estimation failed.",
+          });
+          continue;
+        }
+        const label = m.label ? `${dispatch.result.type} · ${m.label}` : `${dispatch.result.type} · imported`;
+        const id = modelBuffer.add({ ...dispatch.result, label });
+        setBufferVersion(v => v + 1);
+        added++;
+        lastId = id;
+        // A spec whose columns partially resolved still estimated (on what
+        // was left) — report it as a soft note, not a failure, so the user
+        // knows the pinned result isn't exactly what the file specified.
+        if (unapplied.length) {
+          failures.push({
+            name: `${label} (partial)`,
+            error: unapplied.map(u => `${u.role}: ${u.reason === "no-column" ? "not in this dataset" : u.reason}`).join("; "),
+          });
+        }
+      }
+      setImportSummary({ added, total: models.length, failures });
+      if (lastId) {
+        const r = modelBuffer.get(lastId);
+        if (r) { setResult(r); setActiveBufferId(lastId); }
+      }
+    } finally {
+      setRunning(false);
+    }
+  }, [getFullRows, SPEC_CTX, cleanedData, datasetId]);
+```
+
+**On the "partial" entries in `failures`:** this reuses the SAME array as hard failures for
+simplicity of rendering, but they are not failures — the spec still estimated and got pinned.
+If this reads as confusing in the rendered banner, split it into a second list instead of
+conflating the two; use judgement, but do not silently drop the information either way.
+
+Mount `ModelIOButtons` (`ModelingTab.jsx:~3921`, from Task 5) with the new prop:
+
+```jsx
+        <ModelIOButtons
+          models={pinnedModels}
+          filenameBase={(cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100)}
+          onImportAll={importModelsFromFile}
+        />
+```
+
+Render the summary banner, mirroring `subsetRunSummary`'s exact JSX (`ModelingTab.jsx:2508-2525`)
+— same colours, same shape, placed near `ModelIOButtons`:
+
+```jsx
+        {importSummary && (
+          <div style={{
+            marginTop: "0.5rem", padding: "0.5rem 0.7rem",
+            background: C.surface,
+            border: `1px solid ${importSummary.failures.length ? C.gold + "40" : C.teal + "40"}`,
+            borderLeft: `3px solid ${importSummary.failures.length ? C.gold : C.teal}`,
+            borderRadius: 4, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, lineHeight: 1.6,
+          }}>
+            <div style={{ color: importSummary.failures.length ? C.gold : C.teal }}>
+              {importSummary.added}/{importSummary.total} models imported and pinned
+              {importSummary.failures.length ? ` · ${importSummary.failures.length} note${importSummary.failures.length !== 1 ? "s" : ""}` : ""}
+            </div>
+            {importSummary.failures.map((f, i) => (
+              <div key={i} style={{ marginTop: 4, color: C.textMuted }}>
+                <span style={{ color: C.red }}>{f.name}</span>: {f.error}
+              </div>
+            ))}
+          </div>
+        )}
+```
+
+Add the two new imports at the top of `ModelingTab.jsx`:
+
+```js
+import { runEstimationOnRows, buildEstimationConfigFromSpec } from "./modeling/runEstimation.js";
+```
+
+(`collectSpec`/`applySpec` are already imported from Task 3.)
+
+### 12.5 HintBox copy — the behaviour changed, the sentence must too
+
+Task 10 wrote: *"Export models writes the spec of every pinned model to a JSON file; Import
+models loads one back into the sidebar so you can re-estimate it on your own data — specs
+travel, coefficients do not, so press Estimate after importing."* That is no longer true —
+there is no picking, no sidebar-fill-then-press-Estimate step. Replace it with:
+
+> "Export models writes the spec of every pinned model to a JSON file. Import models
+> estimates every spec in the file against the current dataset and pins whatever succeeds —
+> specs travel, coefficients do not, so what you see pinned was computed here, not copied from
+> the file. A spec that can't run against this dataset is reported, not silently dropped."
+
+### 12.6 Update the spec doc
+
+`docs/superpowers/specs/2026-08-20-model-explore-import-export-design.md` §5's Model flow
+currently reads: *"Import ... user picks one → applySpec fills the sidebar → the user presses
+Estimate. Nothing is pinned and nothing is estimated automatically."* That sentence is now
+false. Update §5 to describe the estimate-and-pin-all flow, and change §2's decision-table row
+("What a model file carries: The recipe... importing fills the sidebar") to reflect that
+import now RUNS the recipe against the current dataset for every entry, rather than filling
+the sidebar for one.
+
+### Verification
+
+- New harness `src/components/modeling/__validation__/runEstimationValidation.mjs`: green,
+  including the byte-identical-output check (12.1) and the Set-typed-factorVars check (12.2).
+- `node src/components/modeling/__validation__/modelSpecValidation.mjs` → `391 passed, 0
+  failed` — **unchanged**. This task must not touch `modelSpec.js`'s `MODEL_SPEC_FIELDS`,
+  `collectSpec`, or `applySpec`; it only reads them.
+- `node src/services/export/__validation__/artifactIOValidation.mjs` → `97 passed, 0 failed` —
+  unchanged; `artifactIO.js` is not touched by this task.
+- `npm run build` → exit 0.
+- **NEVER use browser preview / screenshot / automation tools.** This project forbids them;
+  the owner does all browser validation himself. Node and git only.
+
+### Franco's browser checklist (addendum)
+
+- [ ] Export 2+ pinned models of different types (e.g. one FE, one OLS) to `model.json`.
+- [ ] Click Import, pick that file → no modal appears → both estimate against the current
+      dataset and land in the Model Buffer Bar, navigable with ◀ ▶.
+- [ ] The banner reports `2/2 models imported and pinned`.
+- [ ] Export a model whose spec names a column, then remove/rename that column in Clean →
+      re-import → the banner reports the estimation failure by name, and any OTHER specs in
+      the same file that don't depend on that column still get pinned.
+- [ ] Confirm the pinned models' coefficients match what a manual Estimate would produce for
+      the same spec on the same dataset (i.e. the bulk-import path and the live Estimate
+      button agree — this is the property `runEstimationOnRows` exists to guarantee).
 
 ---
 
