@@ -7,6 +7,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { HintBox } from "./components/HelpSystem.jsx";
 import { applyStep, runPipeline, runPipelineAsync } from "./pipeline/runner.js";
 import { validatePanel, buildInfo } from "./pipeline/validator.js";
+import { freezeParent } from "./pipeline/lineage.js";
 import { buildDataQualityReport, exportMarkdown } from "./core/validation/dataQuality.js";
 
 // ── Tab components ─────────────────────────────────────────────────────────
@@ -114,10 +115,31 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   // and then flip — the kind of flicker that reads as a race.
   const [context, setContext] = useState(null);
   const [contextWarnings, setContextWarnings] = useState([]);
+  // Per-dataset pipelines for every OTHER dataset, loaded from IDB by the effect
+  // below. addStep needs them to freeze a join's right operand (see lineage.js).
+  const [rightPipelines, setRightPipelines] = useState({});
   // Rebuild only when the SET of referenced datasets changes — not on every
   // step. Depending on `pipeline` itself would replay every other dataset's
   // pipeline (and re-extract whole DuckDB tables) on each edit.
   const refIdKey = useMemo(() => referencedDatasetIds(pipeline).sort().join("|"), [pipeline]);
+
+  // Every other dataset's pipeline, loaded once per project. Deliberately NOT
+  // folded into the context effect below: that one early-returns while nothing
+  // is referenced yet, which is exactly the moment the user stages their FIRST
+  // join — the frozen right snapshot would then be [], silently claiming the
+  // right dataset had no pipeline.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { loadProjectPipelines } = await import("./services/Persistence/indexedDB.js");
+        const byId = (await loadProjectPipelines(ownerPid))?.datasetPipelines ?? {};
+        if (!cancelled) setRightPipelines(byId);
+      } catch { /* no IDB record yet — freezeParent records an empty snapshot */ }
+    })();
+    return () => { cancelled = true; };
+  }, [ownerPid, allDatasets]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -382,20 +404,39 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     // Cross-dataset steps (join/append) also register a G-step in the global
     // pipeline so the exporter can build the dependency graph.
     let gStepId = null;
-    if (sessionDispatch && (s.type === "join" || s.type === "append")) {
+    if (sessionDispatch && (s.type === "join" || s.type === "append" || s.type === "lookup")) {
       gStepId = `G_${stepId}`;
+      const selfDs  = { id: pid, name: filename, filename, loadOpts: rawData?._loadOpts ?? null };
+      const rightDs = (allDatasets ?? []).find(d => d.id === s.rightId) ?? null;
+      const rightRec  = rightPipelines?.[s.rightId] ?? {};
+      const rightPipe = Array.isArray(rightRec.steps) ? rightRec.steps
+                      : Array.isArray(rightRec.pipeline) ? rightRec.pipeline
+                      : [];
       sessionDispatch({
         type: "ADD_GLOBAL_STEP",
         step: {
           id:              gStepId,
+          v:               2,
           localStepId:     stepId,
-          opType:          s.type === "join" ? `${s.how || "left"}_join` : "append",
+          opType:          s.type === "join" ? `${s.how || "left"}_join` : s.type,
           leftDatasetId:   pid,
           rightDatasetId:  s.rightId,
-          outputDatasetId: pid,         // result stays in the left dataset's pipeline
-          params:          s.type === "join"
-            ? { leftKey: s.leftKey, rightKey: s.rightKey, suffix: s.suffix }
+          // Forma 2 (default): the result augments the LEFT dataset in place.
+          outputDatasetId: s.outputDatasetId ?? pid,
+          params:          (s.type === "join" || s.type === "lookup")
+            ? { how: s.how ?? null, leftKey: s.leftKey, rightKey: s.rightKey, suffix: s.suffix }
             : {},
+          // Frozen, self-sufficient parent records — see pipeline/lineage.js.
+          // Captured BEFORE this step is appended, so the snapshot is exactly the
+          // state the join consumed.
+          left:  freezeParent(selfDs, pipeline),
+          right: rightDs
+            ? freezeParent({ id:       rightDs.id,
+                             name:     rightDs.name ?? rightDs.filename,
+                             filename: rightDs.filename ?? null,
+                             loadOpts: rightDs.rawData?._loadOpts ?? null },
+                           rightPipe)
+            : null,
         },
       });
     }
@@ -409,7 +450,12 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       params: { stepType: s.type, desc: s.desc ?? s.description ?? null, ...(gStepId ? { gStepId } : {}) },
       label:  `[${filename ?? pid}] ${s.type}${s.desc ? " — " + s.desc : ""}`,
     });
-  }, [snapshot, pid, sessionDispatch, appendLog, filename]);
+    // `pipeline`, `allDatasets`, `rightPipelines` and `rawData` are load-bearing
+    // deps: freezeParent reads them at call time. Omitting `pipeline` would
+    // freeze whatever it was on first render — an empty array — which is the
+    // stale-closure class of bug that hit estimate() for SC/EventStudy/LSDV.
+  }, [snapshot, pid, sessionDispatch, appendLog, filename,
+      pipeline, allDatasets, rightPipelines, rawData]);
 
   // Expose addStep via ref so DataStudio can dispatch patch steps from DataViewer
   useEffect(() => {
