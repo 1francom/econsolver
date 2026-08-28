@@ -529,6 +529,18 @@ function transpileStep(step, allDatasets = {}) {
         `df = df.merge(df_right, ${byExpr}, how="${pyHow}", suffixes=("", "${sfx}"))`,
       ].join("\n");
     }
+    case "lookup": {
+      const lk = step.leftKey ?? "id";
+      const rk = step.rightKey ?? lk;
+      const sfx = step.suffix ?? "_r";
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      const byExpr = lk === rk ? `on="${lk}"` : `left_on="${lk}", right_on="${rk}"`;
+      return [
+        `# Attach lookup columns from "${rightName}" (validate raises if the right key repeats)`,
+        `df_right = ${pyRightLoad(step.rightId, allDatasets)}`,
+        `df = df.merge(df_right, ${byExpr}, how="left", suffixes=("", "${sfx}"), validate="m:1")`,
+      ].join("\n");
+    }
     case "append": {
       const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
       return [

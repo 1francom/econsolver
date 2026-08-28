@@ -507,6 +507,21 @@ function transpileStep(step, allDatasets = {}) {
         `erase "__right_tmp.dta"`,
       ].filter(Boolean).join("\n");
     }
+    case "lookup": {
+      const lk  = step.leftKey  ?? "id";
+      const rk  = step.rightKey ?? lk;
+      const sfx = step.suffix   ?? "_r";
+      return [
+        `* Attach lookup columns: m:1 errors if the right key is not unique — same contract as Litux`,
+        `preserve`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
+        lk === rk ? null : `  rename ${rk} ${lk}  /* align key names */`,
+        `  save "__lookup_tmp.dta", replace`,
+        `restore`,
+        `merge m:1 ${lk} using "__lookup_tmp.dta", keep(master match) nogen suffixes("" "${sfx}")`,
+        `erase "__lookup_tmp.dta"`,
+      ].filter(Boolean).join("\n");
+    }
     case "append": {
       return [
         `* Append: stack right dataset below current`,

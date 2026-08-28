@@ -92,3 +92,32 @@ assert.throws(
 );
 
 console.log("joinCardinalityValidation: lookup OK");
+
+// -- Translators must stop faking the old first-match behaviour --------------
+// R/Python/Stata each emitted a dedup of the right side (distinct / drop_duplicates
+// / bysort keep if _n==1) to reproduce the collapsing JS join. Now that the join
+// expands, that dedup makes the SCRIPT disagree with the app.
+const { toR, toPython, toStata } = await import("../stepTranslators.js");
+
+const dsNames = { comunas: { name: "comunas", filename: "comunas.csv" } };
+const jStep = { type: "join", how: "left", rightId: "comunas", leftKey: "id", rightKey: "id", suffix: "_r" };
+const lStep = { type: "lookup", rightId: "comunas", leftKey: "id", rightKey: "id", suffix: "_r" };
+
+const rJoin = toR(jStep, "df_panel", dsNames);
+assert.doesNotMatch(rJoin, /distinct/, "R join must not dedup the right side any more");
+assert.match(rJoin, /left_join/);
+assert.match(rJoin, /suffix = c\("", "_r"\)/, "R must emit the asymmetric suffix Litux uses");
+
+const pyJoin = toPython(jStep, "df_panel", dsNames);
+assert.doesNotMatch(pyJoin, /drop_duplicates/, "Python join must not dedup the right side any more");
+
+const stJoin = toStata(jStep, "df", dsNames);
+assert.doesNotMatch(stJoin, /_n == 1/, "Stata join must not dedup the right side any more");
+assert.match(stJoin, /merge 1:m/, "Stata join must allow expansion");
+
+// lookup keeps the uniqueness contract in every language
+assert.match(toR(lStep, "df_panel", dsNames), /relationship = "many-to-one"/);
+assert.match(toPython(lStep, "df_panel", dsNames), /validate="m:1"/);
+assert.match(toStata(lStep, "df", dsNames), /merge m:1/);
+
+console.log("joinCardinalityValidation: translators OK");
