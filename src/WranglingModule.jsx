@@ -570,7 +570,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   function doSaveSubset() {
     const name = subsetName.trim() ||
       (filename ? filename.replace(/\.[^.]+$/, "") + "_subset.csv" : "subset.csv");
-    if (onSaveSubset) onSaveSubset(name, rows, headers);
+    // Freeze the parent as of NOW. The child must stay reconstructible even if
+    // this pipeline is later edited or this dataset is deleted — R value
+    // semantics: `df2 <- df1 %>% ...` copies, it does not alias.
+    const frozen = freezeParent(
+      { id: pid, name: filename, filename, loadOpts: rawData?._loadOpts ?? null },
+      pipeline
+    );
+    if (onSaveSubset) onSaveSubset(name, rows, headers, null, { parent: frozen });
     setShowSaveSubset(false);
     setSubsetName("");
   }

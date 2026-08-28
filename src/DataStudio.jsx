@@ -892,15 +892,33 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         colCount: headers.length,
         headers:  headers,
       });
-      if (recipe && parentId) {
+      // Two shapes of provenance, both producing a `derive` G-step:
+      //   options.parent — a frozen parent record (Clean's "Save as dataset"):
+      //                    the child is the parent's raw file plus the frozen
+      //                    pipeline, and nothing more.
+      //   recipe         — a single step that transforms the parent (spatial
+      //                    Aggregate-to-Grid, Explore saves, API fetchers).
+      // A caller may pass both: the recipe runs on top of the frozen snapshot.
+      const frozenParent = options?.parent ?? null;
+      if ((recipe || frozenParent) && parentId) {
         dispatch({
           type: "ADD_GLOBAL_STEP",
           step: {
-            id: `G_${Date.now()}`,
+            // Random suffix: two saves in the same millisecond collided on
+            // `G_${Date.now()}`, and REMOVE_GLOBAL_STEP filters by id — removing
+            // one would have removed both.
+            id: `G_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            v: 2,
             opType: "derive",
-            leftDatasetId: id,
-            rightDatasetId: parentId,
-            params: { recipe },
+            leftDatasetId:   id,          // the child
+            rightDatasetId:  parentId,    // the parent
+            outputDatasetId: id,
+            params: {
+              ...(recipe ? { recipe } : {}),
+              ...(options?.joins ? { joins: options.joins } : {}),
+            },
+            left:  null,                  // a derive has ONE parent — it sits in `right`
+            right: frozenParent,
           },
         });
       }
