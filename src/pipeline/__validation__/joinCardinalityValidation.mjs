@@ -70,3 +70,25 @@ assert.equal(suffixed.rows[0].nombre, "A");
 assert.equal(suffixed.rows[0].nombre_r, "X");
 
 console.log("joinCardinalityValidation: join OK");
+
+// -- lookup: attach columns from a right side that MUST be unique per key ----
+// Stata `merge m:1` / dplyr relationship = "many-to-one". This is the op people
+// actually want when pinning metadata onto a panel. It never expands, and it
+// REFUSES to run rather than silently picking one of several matches -- which is
+// exactly what the old first-match join did.
+const lookup = (rightId) => ({ type: "lookup", rightId, leftKey: "id", rightKey: "id", suffix: "_r" });
+
+const attached = applyStep(panel, ["id", "year", "robos"], lookup("comunas"), ctx);
+assert.equal(attached.rows.length, 6, "lookup never changes the left row count");
+assert.equal(attached.rows[0].nombre, "A");
+assert.equal(attached.rows.find(r => r.id === "9").nombre, null, "unmatched left row kept with null");
+assert.deepEqual(attached.headers, ["id", "year", "robos", "nombre"]);
+
+// The wrong direction must FAIL LOUDLY, not truncate the panel to one year.
+assert.throws(
+  () => applyStep(comunas, ["id", "nombre"], lookup("panel"), ctx),
+  /not unique/,
+  "lookup against a panel must throw, not collapse it"
+);
+
+console.log("joinCardinalityValidation: lookup OK");

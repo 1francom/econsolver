@@ -857,6 +857,40 @@ export function applyStep(rows, headers, s, context = {}) {
       break;
     }
 
+    case "lookup": {
+      // m:1 attach — Stata `merge m:1`, dplyr `relationship = "many-to-one"`.
+      // Output row count ALWAYS equals the left row count. If the right key is
+      // not unique the step throws instead of picking a match: silently keeping
+      // "the first row in file order" is not a defined semantic — a re-sorted
+      // source file would change the result with nothing in the UI moving.
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break;
+      const rRows = right.rows, rHeaders = right.headers;
+      const newCols = rHeaders.filter(h => h !== s.rightKey);
+      const destOf = h => (H.includes(h) ? `${h}${s.suffix || "_r"}` : h);
+
+      const byKey = new Map();
+      for (const r of rRows) {
+        const k = String(r[s.rightKey] ?? "");
+        if (byKey.has(k)) {
+          throw new Error(
+            `Lookup failed: the right key "${s.rightKey}" is not unique — value "${k}" appears more than once. ` +
+            `Use a Join (which expands to one row per match), or collapse the right dataset first with Group summarize.`
+          );
+        }
+        byKey.set(k, r);
+      }
+
+      R = rows.map(r => {
+        const match = byKey.get(String(r[s.leftKey] ?? ""));
+        const merged = { ...r };
+        newCols.forEach(h => { merged[destOf(h)] = match ? (match[h] ?? null) : null; });
+        return merged;
+      });
+      newCols.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
+      break;
+    }
+
     case "append": {
       const right = context?.datasets?.[s.rightId];
       if (!right) break;

@@ -703,7 +703,7 @@ export const STEP_REGISTRY = [
     type: "join",
     label: "Join dataset",
     category: "merge",
-    description: "Join against another loaded dataset on a key column: left, inner, right, full, semi, or anti.",
+    description: "Join against another loaded dataset on a key column: left, inner, right, full, semi, or anti. Matches dplyr — a key with several matches on the right produces several output rows.",
     schema: [
       { key: "rightId",  type: "dataset",   label: "Right dataset ID" },
       { key: "leftKey",  type: "col",    label: "Left key column" },
@@ -720,6 +720,21 @@ export const STEP_REGISTRY = [
     ],
     toLabel: s => `${s.how || "left"}_join ← ${s.rightId} on ${s.leftKey} = ${s.rightKey}`,
     defaultStep: () => ({ type: "join", rightId: "", leftKey: "", rightKey: "", how: "left", suffix: "_r" }),
+  },
+
+  {
+    type: "lookup",
+    label: "Attach lookup columns",
+    category: "merge",
+    description: "Attach columns from another dataset whose key is unique (Stata merge m:1). Never changes the row count; fails if the right key repeats.",
+    schema: [
+      { key: "rightId",  type: "dataset", label: "Right dataset ID" },
+      { key: "leftKey",  type: "col",     label: "Left key column" },
+      { key: "rightKey", type: "text",    label: "Right key column" },
+      { key: "suffix",   type: "text",    label: "Suffix for duplicate columns (default: _r)" },
+    ],
+    toLabel: s => `lookup ← ${s.rightId} on ${s.leftKey} = ${s.rightKey}`,
+    defaultStep: () => ({ type: "lookup", rightId: "", leftKey: "", rightKey: "", suffix: "_r" }),
   },
 
   {
