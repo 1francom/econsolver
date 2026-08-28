@@ -7,8 +7,11 @@ const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suff
 
 // ─── MERGE TAB ───────────────────────────────────────────────────────────────
 // JOIN and APPEND operations against other loaded datasets.
-// RHS always uses raw (pre-pipeline) data of the referenced dataset.
-function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
+// RHS uses the CLEANED (post-pipeline) data of the referenced dataset — that is
+// what runner.js joins against (WranglingModule's buildDatasetContext replays
+// each right dataset's own pipeline first). This comment used to claim "raw
+// (pre-pipeline)", which described the PREVIEW's bug rather than the behaviour.
+function MergeTab({ rows, headers, filename, allDatasets, onAdd, joinContext = null }) {
   const { C, T } = useTheme();
   // JOIN state — array of staged joins, runs in order through runner.js
   const [joins, setJoins]         = useState([emptyJoin()]);
@@ -38,7 +41,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
       const prev = chain[i];
       if (!right || !sj.rightKey || sj.how === "anti" || sj.how === "semi") { chain.push(prev.slice()); continue; }
       const next = prev.slice();
-      for (const h of right.rawData.headers) {
+      for (const h of rightOf(sj.rightId).headers) {
         if (h === sj.rightKey) continue;
         const dest = next.includes(h) ? `${h}${sj.suffix || "_r"}` : h;
         if (!next.includes(dest)) next.push(dest);
@@ -48,12 +51,25 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
     return chain; // chain[i] = headers available as left side for staged join i
   }, [joins, headers, allDatasets]);
 
-  // Context object for applyStep — keyed by dataset id, raw (pre-pipeline) rows/headers.
-  const joinContext = useMemo(() => {
+  // Context object for applyStep. Prefer the CLEANED right side supplied by
+  // WranglingModule (buildDatasetContext replays each right dataset's pipeline) —
+  // that is what the real join runs against. Falling back to raw would make the
+  // preview report matches against data the join never sees.
+  const joinCtx = useMemo(() => {
+    if (joinContext?.datasets && Object.keys(joinContext.datasets).length) return joinContext;
     const datasets = {};
     allDatasets.forEach(d => { datasets[d.id] = { rows: d.rawData.rows, headers: d.rawData.headers }; });
     return { datasets };
-  }, [allDatasets]);
+  }, [joinContext, allDatasets]);
+
+  // Resolve one right dataset, cleaned when available, raw otherwise. The
+  // context is built lazily from `referencedDatasetIds(pipeline)`, so a dataset
+  // the user has only just picked in this panel is not in it yet.
+  const rightOf = (id) => {
+    if (joinCtx.datasets[id]) return joinCtx.datasets[id];
+    const d = allDatasets.find(x => x.id === id);
+    return d ? { rows: d.rawData.rows, headers: d.rawData.headers } : { rows: [], headers: [] };
+  };
 
   // Match preview for every staged join — materializes the row chain through prior
   // joins (via applyStep) so join 2+ can report a real match % too, not just join 0.
@@ -64,7 +80,8 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
       const j = joins[i];
       const r = allDatasets.find(d => d.id === j.rightId);
       if (!r || !j.leftKey || !j.rightKey) { previews.push(null); break; }
-      const rKeys = new Set(r.rawData.rows.map(rr => String(rr[j.rightKey] ?? "")));
+      const rRows = rightOf(j.rightId).rows;
+      const rKeys = new Set(rRows.map(rr => String(rr[j.rightKey] ?? "")));
       let matched = 0, keyNulls = 0;
       curRows.forEach(row => {
         const v = row[j.leftKey];
@@ -72,8 +89,27 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
         if (rKeys.has(String(v))) matched++;
       });
       const validRows = curRows.length - keyNulls;
+      // Cardinality of the right side per key — this is what decides whether the
+      // join expands. "100% matched" says nothing about the OUTPUT row count,
+      // which is the number that surprised people: a 20-row metadata table
+      // joined onto a 200-row panel reads 100% and returns 200, not 20.
+      const rightCounts = new Map();
+      rRows.forEach(rr => {
+        const k = String(rr[j.rightKey] ?? "");
+        rightCounts.set(k, (rightCounts.get(k) ?? 0) + 1);
+      });
+      let maxPerKey = 0;
+      rightCounts.forEach(n => { if (n > maxPerKey) maxPerKey = n; });
+      const noCols = j.how === "semi" || j.how === "anti";
+      let outRows = 0;
+      curRows.forEach(row => {
+        const n = rightCounts.get(String(row[j.leftKey] ?? "")) ?? 0;
+        if (noCols) outRows += (j.how === "semi" ? (n > 0 ? 1 : 0) : (n > 0 ? 0 : 1));
+        else outRows += n > 0 ? n : ((j.how === "left" || j.how === "full") ? 1 : 0);
+      });
       previews.push({ matched, total: curRows.length, validRows, keyNulls,
-                       pct: validRows ? matched / validRows : 0 });
+                       pct: validRows ? matched / validRows : 0,
+                       maxPerKey: noCols ? 0 : maxPerKey, outRows });
       // Materialize this join's output so the NEXT staged join previews against real rows.
       if (i < joins.length - 1) {
         if (j.how === "semi" || j.how === "anti") {
@@ -83,12 +119,12 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             return j.how === "semi" ? has : !has;
           });
         } else {
-          curRows = applyStep(curRows, headerChain[i] || headers, { ...j, type: "join" }, joinContext).rows;
+          curRows = applyStep(curRows, headerChain[i] || headers, { ...j, type: "join" }, joinCtx).rows;
         }
       }
     }
     return previews;
-  }, [joins, allDatasets, rows, headerChain, headers, joinContext]);
+  }, [joins, allDatasets, rows, headerChain, headers, joinCtx]);
 
   const appendPreview = useMemo(() => {
     if (!appendDs) return null;
@@ -177,7 +213,9 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             Equivalent to dplyr's <span style={{color:C.blue}}>left_join()</span> / <span style={{color:C.blue}}>inner_join()</span>.
             Stage multiple joins below — they apply sequentially, so a later join can use
             a column added by an earlier one. Each right dataset is referenced in its
-            <em> raw</em> (pre-pipeline) state.
+            <em> cleaned</em> state — its own pipeline runs first. A key with several
+            matches on the right produces several rows, exactly as in dplyr; use
+            <em> Attach lookup columns</em> when you want one row per left row.
           </div>
 
           {/* ── Staged joins ────────────────────────────────────────────── */}
@@ -268,7 +306,16 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                         <div style={{fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
                           <span style={{color:mc}}>{mp.matched.toLocaleString()}</span>
                           {" of "}{mp.validRows.toLocaleString()} left rows matched
+                          {" · "}
+                          <span style={{color:C.textMuted}}>result: {mp.outRows.toLocaleString()} rows</span>
                         </div>
+                        {mp.maxPerKey > 1 && (
+                          <div style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily,marginTop:4}}>
+                            1:m — right key '{j.rightKey}' has up to {mp.maxPerKey} rows per key, so matched
+                            rows are duplicated (same as dplyr). Want one row per left row instead?
+                            Use <b>Attach lookup columns</b>.
+                          </div>
+                        )}
                         {mp.keyNulls > 0 && (
                           <div style={{fontSize: T.caption.fontSize,color:C.orange,fontFamily: T.code.fontFamily,marginTop:4}}>
                             ⚠ {mp.keyNulls} row{mp.keyNulls!==1?"s":""} have null in key column '{j.leftKey}'.

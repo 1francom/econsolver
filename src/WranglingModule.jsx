@@ -169,6 +169,10 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   // so passing the reference directly is safe.
   const [processed,    setProcessed]    = useState({ rows: rawData.rows, headers: rawData.headers, _duckdb: rawData._duckdb ?? null });
   const [isProcessing, setIsProcessing] = useState(false);
+  // A step may throw by design — `lookup` refuses to run when its right key is
+  // not unique. runPipeline is called inside a setTimeout, so an uncaught throw
+  // there would leave isProcessing stuck true with nothing on screen.
+  const [pipelineError, setPipelineError] = useState(null);
   const [elapsedMs,    setElapsedMs]    = useState(0);
   const timerRef = useRef(null);
 
@@ -223,7 +227,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                 extractAllRows(rawData._duckdb.tableName)
                   .catch(() => rawData.rows)
                   .then(fullRows => {
-                    if (!cancelled) done(runPipeline(fullRows, rawData.headers, pipeline, context));
+                    if (cancelled) return;
+                    try {
+                      setPipelineError(null);
+                      done(runPipeline(fullRows, rawData.headers, pipeline, context));
+                    } catch (err) {
+                      setPipelineError(err?.message ?? "Pipeline step failed.");
+                      done({ rows: fullRows, headers: rawData.headers });
+                    }
                   });
               })
           )
@@ -243,11 +254,25 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           .then(result => { if (!cancelled) done(result); })
           .catch(e => {
             console.warn("[WranglingModule] async pipeline failed, falling to sync:", e);
-            if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+            if (cancelled) return;
+            try {
+              setPipelineError(null);
+              done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+            } catch (err) {
+              setPipelineError(err?.message ?? "Pipeline step failed.");
+              done({ rows: rawData.rows, headers: rawData.headers });
+            }
           });
       } else {
         const timerId = setTimeout(() => {
-          if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+          if (cancelled) return;
+          try {
+            setPipelineError(null);
+            done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+          } catch (e) {
+            setPipelineError(e?.message ?? "Pipeline step failed.");
+            done({ rows: rawData.rows, headers: rawData.headers });
+          }
         }, 0);
         return () => { cancelled = true; clearTimeout(timerId); clearInterval(timerRef.current); };
       }
@@ -584,6 +609,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                 ⚠ {contextWarnings.join(" · ")}
               </div>
             )}
+            {/* A step that refuses to run (e.g. lookup against a non-unique key)
+                must say so. Without this the spinner would just stop and the
+                table would silently show the previous state. */}
+            {pipelineError && (
+              <div style={{ marginTop:4, fontSize: T.caption.fontSize, color:C.gold, fontFamily: T.code.fontFamily }}>
+                ⚠ {pipelineError} — showing the unprocessed data. Remove or fix that step in the pipeline sidebar.
+              </div>
+            )}
           </div>
 
           <div style={{ display:"flex", gap:6, alignItems:"center", flexShrink:0 }}>
@@ -843,6 +876,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {tab === "workbench" && (
           <WorkbenchTab rows={rows} headers={headers} info={info} panel={panel}
             filename={filename} allDatasets={allDatasets} onAdd={addStep}
+            joinContext={context}
             duckdbTableName={rawData?._duckdb?.tableName}/>
         )}
         {tab === "dictionary" && (
