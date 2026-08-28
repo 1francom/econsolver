@@ -233,7 +233,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
           loadOpts: dsRec.loadOpts ?? meta.loadOpts ?? null,
         };
       }
-      const script = generateWorkspaceScript({ language, datasets: built, globalPipeline });
+      const ws = generateWorkspaceScript({ language, datasets: built, globalPipeline });
+      const script = `${ws.perDataset}\n${ws.crossDataset}`;
       const ext  = language === "r" ? "R" : language === "stata" ? "do" : "py";
       const blob = new Blob([script], { type: "text/plain" });
       const a    = document.createElement("a");
