@@ -72,3 +72,39 @@ const gStepV1 = { id: "G_1", opType: "left_join", leftDatasetId: "d1",
 assert.equal(emitMode(gStepV1.left, []), "legacy");
 
 console.log("lineageValidation: G-step v2 contract OK");
+
+// -- topoSort ----------------------------------------------------------------
+// deps[left].add(right), then `inDegree[dep]++` counted DEPENDENTS, not in-degree.
+// The queue started with nodes nobody depends on -- i.e. the LEFT dataset -- so a
+// join's left operand was emitted before the right one it consumes.
+const { topoSort } = await import("../exporter.js");
+
+assert.deepEqual(
+  topoSort([{ id: "A" }, { id: "B" }], [{ leftDatasetId: "A", rightDatasetId: "B" }]),
+  ["B", "A"],
+  "the right operand must come first"
+);
+
+// Chain: C consumes B, B consumes A.
+assert.deepEqual(
+  topoSort([{ id: "A" }, { id: "B" }, { id: "C" }],
+           [{ leftDatasetId: "C", rightDatasetId: "B" }, { leftDatasetId: "B", rightDatasetId: "A" }]),
+  ["A", "B", "C"]
+);
+
+// A derive: the child (outputDatasetId) waits for its parent.
+assert.deepEqual(
+  topoSort([{ id: "child" }, { id: "parent" }],
+           [{ opType: "derive", outputDatasetId: "child", leftDatasetId: "child", rightDatasetId: "parent" }]),
+  ["parent", "child"]
+);
+
+// A cycle (two datasets joined into each other, which the in-place model allows)
+// must not hang or drop nodes -- every id appears exactly once.
+const cyc = topoSort([{ id: "A" }, { id: "B" }],
+                     [{ leftDatasetId: "A", rightDatasetId: "B" },
+                      { leftDatasetId: "B", rightDatasetId: "A" }]);
+assert.equal(cyc.length, 2);
+assert.deepEqual([...cyc].sort(), ["A", "B"]);
+
+console.log("lineageValidation: topoSort OK");

@@ -198,47 +198,41 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
  * @param {object[]} globalPipeline - G-steps with leftDatasetId / rightDatasetId
  * @returns {string[]} ordered dataset IDs
  */
-function topoSort(datasets, globalPipeline) {
+export function topoSort(datasets, globalPipeline) {
   const ids = datasets.map(d => d.id);
+  const idSet = new Set(ids);
 
-  // Build adjacency: rightId must be processed before leftId
-  const deps = {}; // id → Set of ids it depends on
+  // deps[id] = the ids `id` must wait for. The CONSUMER is the G-step's output
+  // dataset (which for an in-place join is the left operand).
+  const deps = {};
   for (const id of ids) deps[id] = new Set();
-
   for (const g of globalPipeline) {
-    if (g.rightDatasetId && deps[g.leftDatasetId]) {
-      deps[g.leftDatasetId].add(g.rightDatasetId);
+    const consumer = g.outputDatasetId ?? g.leftDatasetId;
+    if (!deps[consumer]) continue;
+    for (const src of [g.leftDatasetId, g.rightDatasetId]) {
+      if (src && src !== consumer && idSet.has(src)) deps[consumer].add(src);
     }
   }
 
-  // Kahn's algorithm
-  const inDegree = {};
-  for (const id of ids) inDegree[id] = 0;
-  for (const id of ids) {
-    for (const dep of deps[id]) {
-      if (inDegree[dep] !== undefined) inDegree[dep]++;
-    }
-  }
-
-  const queue  = ids.filter(id => inDegree[id] === 0);
+  // Kahn: repeatedly take every node whose dependencies are already emitted.
+  // The previous version counted DEPENDENTS rather than in-degree, so the queue
+  // started with the nodes nobody depends on — i.e. the consumer — and a join's
+  // left operand was emitted before the right one it consumes.
+  const remaining = new Set(ids);
   const result = [];
-
-  while (queue.length) {
-    const curr = queue.shift();
-    result.push(curr);
+  let progress = true;
+  while (remaining.size && progress) {
+    progress = false;
     for (const id of ids) {
-      if (deps[id].has(curr)) {
-        deps[id].delete(curr);
-        if (deps[id].size === 0) queue.push(id);
-      }
+      if (!remaining.has(id)) continue;
+      let ready = true;
+      for (const d of deps[id]) if (remaining.has(d)) { ready = false; break; }
+      if (ready) { result.push(id); remaining.delete(id); progress = true; }
     }
   }
-
-  // Append any ids not reached (cycles → append as-is)
-  for (const id of ids) {
-    if (!result.includes(id)) result.push(id);
-  }
-
+  // Cycles are possible under the in-place model (two datasets joined into each
+  // other) — append what is left, in insertion order, rather than dropping it.
+  for (const id of ids) if (remaining.has(id)) result.push(id);
   return result;
 }
 
