@@ -25,25 +25,31 @@ import { generateWorkspaceScript } from "../../pipeline/exporter.js";
 
 
 // ─── CASCADE HELPERS ──────────────────────────────────────────────────────────
-// MODEL: in-place (Gap C decision 2026-06-10). A join/append augments the LEFT
-// dataset in place — outputDatasetId === leftDatasetId — it never creates a
-// derived dataset node. So cascades never remove a dataset (doing so would delete
-// a SOURCE dataset). They only remove cross-dataset interactions (G-steps).
+// MODEL (revised 2026-08-28, G-step v2): a G-step carries FROZEN parent records
+// — filename, loadOpts and the parent's pipeline as of that moment (see
+// pipeline/lineage.js). A child is therefore reconstructible from its own G-step
+// alone, with no live parent.
+//
+// So deleting a dataset must NOT remove G-steps that PRODUCE another dataset
+// (outputDatasetId !== the deleted id) — those are the only record of how their
+// children were built. Only interactions whose OUTPUT was the deleted dataset
+// become meaningless, and they go with it.
 //
 // Deleting a single G-step removes just that interaction (datasetIds always []).
 function computeGStepCascade(rootStep, _allSteps) {
-  return { gStepIds: [rootStep.id], datasetIds: [] };
+  return { gStepIds: [rootStep.id], datasetIds: [], keptCount: 0 };
 }
 
-// Deleting a source dataset invalidates every interaction that references it (as
-// left or right operand) — those joins can no longer run. No derived datasets
-// exist to remove (in-place), so datasetIds is empty; the dataset itself is
-// tracked separately as the deleted item.
 function computeDatasetCascade(dsId, allSteps) {
-  const gStepIds = allSteps
-    .filter(s => s.leftDatasetId === dsId || s.rightDatasetId === dsId)
-    .map(s => s.id);
-  return { gStepIds, datasetIds: [] };
+  const producedHere = s => (s.outputDatasetId ?? s.leftDatasetId) === dsId;
+  const gStepIds = allSteps.filter(producedHere).map(s => s.id);
+  // Interactions that merely REFERENCE the deleted dataset as a source are kept:
+  // their frozen record still carries filename + loadOpts + pipeline, so the
+  // child's replication script survives its parent.
+  const keptCount = allSteps.filter(
+    s => !producedHere(s) && (s.leftDatasetId === dsId || s.rightDatasetId === dsId)
+  ).length;
+  return { gStepIds, datasetIds: [], keptCount };
 }
 
 // ─── CASCADE CONFIRM DIALOG ───────────────────────────────────────────────────
@@ -90,6 +96,15 @@ function CascadeConfirm({ cascade, datasets, globalPipeline, label, onSaveSnapsh
           {affectedDsNames.map(n => (
             <div key={n} style={{ fontSize: T.caption.fontSize, color: C.red, paddingLeft: 4 }}>— {n}</div>
           ))}
+        </div>
+      )}
+
+      {cascade.keptCount > 0 && (
+        <div style={{ marginBottom: 8, fontSize: T.caption.fontSize, color: C.teal }}>
+          {cascade.keptCount} interaction{cascade.keptCount > 1 ? "s" : ""} reference
+          {cascade.keptCount > 1 ? "" : "s"} this dataset as a source and {cascade.keptCount > 1 ? "are" : "is"} KEPT —
+          each carries its own frozen recipe (file, load options and pipeline as of then),
+          so the datasets built from it still replicate.
         </div>
       )}
 
