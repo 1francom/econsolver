@@ -928,9 +928,12 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Group summarize: aggregate (mean, sum, count, min, max) by group — collapses rows",
             "Pivot longer / wider: reshape between wide and long",
             "Balance panel: fill in the missing entity-time cells",
-            "Join another dataset: left, inner, right, full, semi or anti",
+            "Join another dataset: left, inner, right, full, semi or anti — matching dplyr, so a key with several matches on the right produces several rows. The preview tells you the resulting row count before you commit",
+            "Attach lookup columns: the m:1 alternative (Stata's merge m:1). Never changes the row count, and refuses to run if the right key repeats — use it to pin metadata onto a panel",
+            "A join can write its result to a new dataset instead of changing the current one; the parent's pipeline is left untouched",
             "Append (stack rows), bind columns, union, intersect, setdiff",
             "Join steps remember the real filenames, so the exported script reads the right files",
+            "The right dataset is referenced in its cleaned state — its own pipeline runs first",
           ]},
           { heading: "Panel Structure", items: [
             "Declare the entity column (i) and the time column (t)",
