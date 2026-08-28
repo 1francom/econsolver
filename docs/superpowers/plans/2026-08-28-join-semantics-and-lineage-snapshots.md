@@ -1578,6 +1578,28 @@ git add src/pipeline/exporter.js src/pipeline/__validation__/lineageValidation.m
 
 ## Task 13: Three-case emission in `generateWorkspaceScript`
 
+> **AMENDMENT (found executing Task 7, 2026-08-28) — the `!s.gStepId` filter must be self-healing.**
+> `undo`/`redo` restore only `pipeline`, not `globalPipeline` (`WranglingModule.jsx:539`). Undoing a
+> join deletion therefore restores a local step whose `gStepId` names a G-step that no longer exists.
+> The per-dataset loop skips local steps with a `gStepId` (they are meant to be emitted from the
+> global section), so that join would be emitted **nowhere** — silently absent from the script.
+> Coupling undo to `globalPipeline` is fragile plumbing; instead the exporter must emit from the
+> G-step **when one exists**, and otherwise fall back to emitting the local step inline. That kills
+> the whole class — undo, pipeline import, and any future path that drops a G-step. Concretely, the
+> per-dataset filter becomes:
+>
+> ```js
+> const gIds = new Set(globalPipeline.map(g => g.id));
+> // A local cross-dataset step is emitted from the global section ONLY if its
+> // G-step is still there. An orphaned gStepId (undo restored the step but not
+> // the G-step) falls back to emitting the step inline — never nowhere.
+> const local = (ds.pipeline ?? []).filter(s => !s.gStepId || !gIds.has(s.gStepId));
+> ```
+>
+> Task 13's test must pin it: a pipeline containing a join step whose `gStepId` is absent from
+> `globalPipeline` must still produce a join in the script.
+
+
 **Files:**
 - Modify: `src/pipeline/exporter.js:256-460`
 - Test: `src/pipeline/__validation__/lineageValidation.mjs` (append)

@@ -470,53 +470,71 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     });
   }, [snapshot]);
 
+  // A cross-dataset step owns a G-step in the global pipeline. Removing the
+  // local step without removing its G-step leaves the exporter emitting a join
+  // the app no longer performs — a script that silently disagrees with the app.
+  const dropGStepFor = useCallback(step => {
+    if (step?.gStepId && sessionDispatch) {
+      sessionDispatch({ type: "REMOVE_GLOBAL_STEP", id: step.gStepId });
+    }
+  }, [sessionDispatch]);
+
   const rmStep = useCallback(i => {
     // Deleting the last step needs no warning — nothing downstream.
     if (i >= pipeline.length - 1) {
+      dropGStepFor(pipeline[i]);
       setPipeline(p => { snapshot(p); return p.filter((_, j) => j !== i); });
       return;
     }
     // Mid-pipeline delete — warn the user about downstream steps.
     setPendingDelete({ index: i, downstreamCount: pipeline.length - 1 - i });
-  }, [snapshot, pipeline.length]);
+  }, [snapshot, pipeline, dropGStepFor]);
 
   // "Delete this step only" — leaves downstream steps (they may silently degrade).
   // "cascade" — removes this step and everything after it (clean slate from that point).
   const confirmDeleteStep = useCallback(mode => {
     if (!pendingDelete) return;
     const i = pendingDelete.index;
+    // Cascade removes this step AND everything after it, so every G-step owned
+    // by that tail goes too — not just the one at index i.
+    (mode === "cascade" ? pipeline.slice(i) : [pipeline[i]]).forEach(dropGStepFor);
     setPipeline(p => {
       snapshot(p);
       return mode === "cascade" ? p.slice(0, i) : p.filter((_, j) => j !== i);
     });
     setPendingDelete(null);
-  }, [pendingDelete, snapshot]);
+  }, [pendingDelete, snapshot, pipeline, dropGStepFor]);
 
   const cancelDelete = useCallback(() => setPendingDelete(null), []);
 
   const rmLastStep = useCallback(() => {
+    dropGStepFor(pipeline[pipeline.length - 1]);
     setPipeline(p => {
       snapshot(p);
       return p.slice(0, -1);
     });
-  }, [snapshot]);
+  }, [snapshot, pipeline, dropGStepFor]);
 
   const clear = useCallback(() => {
+    pipeline.forEach(dropGStepFor);
     setPipeline(p => {
       if (p.length === 0) return p;
       snapshot(p);
       return [];
     });
     setBranchPointIndex(null);
-  }, [snapshot]);
+  }, [snapshot, pipeline, dropGStepFor]);
 
   // One-click pipeline replication — atomically replaces the entire pipeline
   // with steps from an imported pipeline.json. Undoable via the History panel.
+  // The outgoing steps' G-steps go with them: an import wholesale replaces the
+  // pipeline, so any join it drops must drop its interaction too.
   const replacePipeline = useCallback(next => {
     if (!Array.isArray(next)) return;
+    pipeline.forEach(dropGStepFor);
     setPipeline(p => { snapshot(p); return next; });
     setBranchPointIndex(null);
-  }, [snapshot]);
+  }, [snapshot, pipeline, dropGStepFor]);
 
   const undo = useCallback(() => {
     if (!undoStack.current.length) return;
