@@ -11,10 +11,13 @@ const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suff
 // what runner.js joins against (WranglingModule's buildDatasetContext replays
 // each right dataset's own pipeline first). This comment used to claim "raw
 // (pre-pipeline)", which described the PREVIEW's bug rather than the behaviour.
-function MergeTab({ rows, headers, filename, allDatasets, onAdd, joinContext = null }) {
+function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joinContext = null }) {
   const { C, T } = useTheme();
   // JOIN state — array of staged joins, runs in order through runner.js
   const [joins, setJoins]         = useState([emptyJoin()]);
+  // "" = augment THIS dataset (forma 2, the default). Otherwise the name of the
+  // NEW dataset the join writes to (forma 1).
+  const [joinDest, setJoinDest]   = useState("");
   // APPEND state
   const [appendId, setAppendId]   = useState("");
   const [combineId, setCombineId] = useState("");
@@ -154,6 +157,16 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, joinContext = n
 
   function doJoinAll() {
     if (!completeJoins.length) return;
+    if (joinDest !== "") {
+      // Forma 1 — write to a NEW dataset. The steps are deliberately NOT added
+      // to this dataset's pipeline: the parent's history stays clean, and the
+      // provenance lives in the child's frozen record and in INTERACTIONS.
+      // Equivalent to `joined <- left_join(this, right)` rather than
+      // `this <- this %>% left_join(right)`.
+      onForkJoin?.(joinDest.trim() || "joined_data", completeJoins);
+      setJoins([emptyJoin()]);
+      return;
+    }
     for (const j of completeJoins) {
       const rDs = allDatasets.find(d => d.id === j.rightId);
       onAdd({ type:"join", rightId:j.rightId, leftKey:j.leftKey, rightKey:j.rightKey,
@@ -374,6 +387,39 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, joinContext = n
             );
           })}
 
+          {/* Result destination — forma 2 (in place) vs forma 1 (new dataset) */}
+          <div style={{marginBottom:"1rem"}}>
+            <Lbl color={C.gold}>Result</Lbl>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+              {[["", `this dataset (${filename ?? "current"})`], ["new", "new dataset"]].map(([k,l])=>{
+                const on = k === "" ? joinDest === "" : joinDest !== "";
+                return (
+                  <button key={k}
+                    onClick={()=>setJoinDest(k === "" ? "" : (joinDest || "joined_data"))}
+                    style={{padding:"0.3rem 0.7rem",border:`1px solid ${on?C.gold:C.border2}`,
+                      background:on?`${C.gold}18`:"transparent",color:on?C.gold:C.textDim,
+                      borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,
+                      fontFamily: T.code.fontFamily}}>
+                    {on?"✓ ":""}{l}
+                  </button>
+                );
+              })}
+              {joinDest !== "" && (
+                <input value={joinDest} onChange={e=>setJoinDest(e.target.value)} placeholder="joined_data"
+                  style={{flex:1,minWidth:140,boxSizing:"border-box",padding:"0.35rem 0.55rem",
+                    background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,
+                    color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"}}/>
+              )}
+            </div>
+            {joinDest !== "" && (
+              <div style={{marginTop:6,fontSize: T.caption.fontSize,color:C.textMuted,
+                fontFamily: T.code.fontFamily,lineHeight:1.6}}>
+                Creates <span style={{color:C.gold}}>{joinDest.trim() || "joined_data"}</span> and leaves{" "}
+                {filename ?? "this dataset"} untouched — its pipeline is not modified.
+              </div>
+            )}
+          </div>
+
           {/* Add-another + submit */}
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1rem"}}>
             <button onClick={addJoin}
@@ -385,9 +431,11 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, joinContext = n
             <span style={{flex:1}}/>
             <Btn onClick={doJoinAll} color={C.teal} v="solid"
               dis={completeJoins.length===0}
-              ch={completeJoins.length<=1
-                ? `Add JOIN to pipeline →`
-                : `Add ${completeJoins.length} joins to pipeline →`}/>
+              ch={joinDest !== ""
+                ? `Create ${joinDest.trim() || "joined_data"} →`
+                : completeJoins.length<=1
+                  ? `Add JOIN to pipeline →`
+                  : `Add ${completeJoins.length} joins to pipeline →`}/>
           </div>
         </div>
       )}

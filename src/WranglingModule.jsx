@@ -457,6 +457,44 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   }, [snapshot, pid, sessionDispatch, appendLog, filename,
       pipeline, allDatasets, rightPipelines, rawData]);
 
+  // Forma 1: run the staged joins against the CURRENT rows and save the result
+  // as a NEW dataset, leaving this pipeline untouched. Provenance lives in the
+  // child's frozen record (see pipeline/lineage.js), so editing or deleting this
+  // dataset later cannot break the child's replication script.
+  const forkJoin = useCallback((name, staged) => {
+    if (!onSaveSubset || !Array.isArray(staged) || !staged.length) return;
+    let cur = { rows, headers };
+    try {
+      for (const j of staged) {
+        cur = applyStep(cur.rows, cur.headers, { ...j, type: "join" }, context ?? { datasets: {} });
+      }
+    } catch (e) {
+      setPipelineError(e?.message ?? "Join failed.");
+      return;
+    }
+    const parentFrozen = freezeParent(
+      { id: pid, name: filename, filename, loadOpts: rawData?._loadOpts ?? null },
+      pipeline
+    );
+    const joinRecords = staged.map(j => {
+      const rd = (allDatasets ?? []).find(d => d.id === j.rightId) ?? { id: j.rightId };
+      const rec = rightPipelines?.[j.rightId] ?? {};
+      const rp  = Array.isArray(rec.steps) ? rec.steps
+                : Array.isArray(rec.pipeline) ? rec.pipeline
+                : [];
+      return {
+        how: j.how ?? "left", leftKey: j.leftKey, rightKey: j.rightKey, suffix: j.suffix ?? "_r",
+        right: freezeParent({ id:       rd.id,
+                              name:     rd.name ?? rd.filename,
+                              filename: rd.filename ?? null,
+                              loadOpts: rd.rawData?._loadOpts ?? null }, rp),
+      };
+    });
+    setPipelineError(null);
+    onSaveSubset(name, cur.rows, cur.headers, null, { parent: parentFrozen, joins: joinRecords });
+  }, [rows, headers, context, pid, filename, rawData, pipeline,
+      onSaveSubset, allDatasets, rightPipelines]);
+
   // Expose addStep via ref so DataStudio can dispatch patch steps from DataViewer
   useEffect(() => {
     if (addStepRef) addStepRef.current = addStep;
@@ -947,7 +985,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {tab === "workbench" && (
           <WorkbenchTab rows={rows} headers={headers} info={info} panel={panel}
             filename={filename} allDatasets={allDatasets} onAdd={addStep}
-            joinContext={context}
+            joinContext={context} onForkJoin={forkJoin}
             duckdbTableName={rawData?._duckdb?.tableName}/>
         )}
         {tab === "dictionary" && (
