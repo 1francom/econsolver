@@ -120,4 +120,23 @@ assert.match(toR(lStep, "df_panel", dsNames), /relationship = "many-to-one"/);
 assert.match(toPython(lStep, "df_panel", dsNames), /validate="m:1"/);
 assert.match(toStata(lStep, "df", dsNames), /merge m:1/);
 
+// -- the shared module and the three LOCAL transpileStep copies must agree ---
+// rScript.js / pythonScript.js / stataScript.js each carry their own join case.
+// They had silently diverged: the local R/Python ones already emitted a real
+// dplyr/pandas join (so THAT export path always disagreed with the collapsing JS
+// runner), while stataScript used `merge 1:1`, which errors outright on a 1:m
+// join. Nothing compared them, so nothing caught it.
+const { generateStataScript } = await import("../../services/export/stataScript.js");
+const stataLocal = generateStataScript({
+  filename: "d.csv", model: {},
+  allDatasets: { comunas: { name: "comunas", filename: "comunas.csv" } },
+  pipeline: [jStep],
+});
+assert.match(stataLocal, /merge 1:m/, "stataScript.js's local join must match the shared module's cardinality");
+assert.doesNotMatch(stataLocal, /merge 1:1/, "merge 1:1 errors on any repeated key");
+// Stata cannot express a true many-to-many merge; both emitters must SAY so
+// rather than emit code that silently means something else.
+assert.match(stataLocal, /joinby/, "the m:m limitation must be stated in the script, not hidden");
+assert.match(toStata(jStep, "df", dsNames), /joinby/, "same note in the shared module");
+
 console.log("joinCardinalityValidation: translators OK");
