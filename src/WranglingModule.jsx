@@ -475,13 +475,58 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         return;
       }
     }
+    // A forma-1 join never enters this dataset's pipeline, so its right operands
+    // are NOT in `context` — that is built from referencedDatasetIds(pipeline).
+    // Passing it anyway left runner.js's `if (!right) break;` to no-op the join
+    // silently, and the fork saved a plain copy of the parent. Build the context
+    // these staged joins actually need.
+    let forkCtx;
+    try {
+      const { buildDatasetContext } = await import("./pipeline/datasetContext.js");
+      const { extractAllRows } = await import("./services/data/duckdb.js");
+      const rightIds = [...new Set(staged.map(j => j.rightId).filter(Boolean))];
+      const built = await buildDatasetContext(
+        allDatasets ?? [],
+        (id) => {
+          const rec = rightPipelines?.[id] ?? {};
+          return Array.isArray(rec.steps) ? rec.steps
+               : Array.isArray(rec.pipeline) ? rec.pipeline
+               : [];
+        },
+        async (d) => {
+          const tbl = d.rawData?._duckdb?.tableName;
+          return tbl
+            ? { rows: await extractAllRows(tbl), headers: d.rawData.headers }
+            : { rows: d.rawData.rows, headers: d.rawData.headers };
+        },
+        { only: rightIds },
+      );
+      const missing = rightIds.filter(id => !built.datasets[id]);
+      if (missing.length) {
+        setPipelineError(`Could not load the dataset${missing.length > 1 ? "s" : ""} to join against — the new dataset was NOT created, rather than created without the join.`);
+        return;
+      }
+      forkCtx = { datasets: built.datasets };
+    } catch (e) {
+      setPipelineError(`Could not prepare the join (${e?.message ?? e}) — the new dataset was NOT created.`);
+      return;
+    }
+
     let cur = { rows: baseRows, headers };
     try {
       for (const j of staged) {
-        cur = applyStep(cur.rows, cur.headers, { ...j, type: "join" }, context ?? { datasets: {} });
+        const before = cur.headers.length;
+        cur = applyStep(cur.rows, cur.headers, { ...j, type: "join" }, forkCtx);
+        // runner.js no-ops a join whose right operand is missing rather than
+        // failing. A column-adding join that added nothing means it did not run;
+        // saving that would hand the user a silent copy of the parent.
+        const adds = j.how !== "semi" && j.how !== "anti";
+        if (adds && cur.headers.length === before) {
+          throw new Error(`The join against "${(allDatasets ?? []).find(d => d.id === j.rightId)?.filename ?? j.rightId}" added no columns — it did not run.`);
+        }
       }
     } catch (e) {
-      setPipelineError(e?.message ?? "Join failed.");
+      setPipelineError(`${e?.message ?? "Join failed."} The new dataset was NOT created.`);
       return;
     }
     const parentFrozen = freezeParent(
@@ -504,7 +549,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     });
     setPipelineError(null);
     onSaveSubset(name, cur.rows, cur.headers, null, { parent: parentFrozen, joins: joinRecords });
-  }, [rows, headers, context, pid, filename, rawData, pipeline, processed,
+  }, [rows, headers, pid, filename, rawData, pipeline, processed,
       onSaveSubset, allDatasets, rightPipelines]);
 
   // Expose addStep via ref so DataStudio can dispatch patch steps from DataViewer

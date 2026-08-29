@@ -93,6 +93,19 @@ assert.throws(
 
 console.log("joinCardinalityValidation: lookup OK");
 
+// -- a join whose right operand is missing NO-OPS, it does not fail ----------
+// runner.js does `if (!right) break;`, so applyStep returns the input unchanged.
+// That is how a forma-1 fork saved a plain copy of the parent: the staged join's
+// right dataset was not in the context (a forma-1 join never enters the pipeline,
+// so referencedDatasetIds never sees it), the join silently did nothing, and the
+// result was saved as "joined_data". Pinned here so any caller knows it must
+// check the output rather than trust the call.
+const noop = applyStep(comunas, ["id", "nombre"], join("left", "NOT_LOADED"), ctx);
+assert.equal(noop.rows.length, comunas.length, "a join with no right operand returns the input");
+assert.deepEqual(noop.headers, ["id", "nombre"], "and adds no columns — the detectable signal");
+
+console.log("joinCardinalityValidation: missing-operand no-op pinned");
+
 // -- Translators must stop faking the old first-match behaviour --------------
 // R/Python/Stata each emitted a dedup of the right side (distinct / drop_duplicates
 // / bysort keep if _n==1) to reproduce the collapsing JS join. Now that the join
