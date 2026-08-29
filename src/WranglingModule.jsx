@@ -461,9 +461,21 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   // as a NEW dataset, leaving this pipeline untouched. Provenance lives in the
   // child's frozen record (see pipeline/lineage.js), so editing or deleting this
   // dataset later cannot break the child's replication script.
-  const forkJoin = useCallback((name, staged) => {
+  const forkJoin = useCallback(async (name, staged) => {
     if (!onSaveSubset || !Array.isArray(staged) || !staged.length) return;
-    let cur = { rows, headers };
+    // `rows` is the 500-row PREVIEW for a DuckDB-backed dataset. Forking off it
+    // would create a new dataset holding 500 of 550,000 rows, with nothing said.
+    let baseRows = rows;
+    if (processed?._duckdb?.tableName) {
+      try {
+        const { extractAllRows } = await import("./services/data/duckdb.js");
+        baseRows = await extractAllRows(processed._duckdb.tableName);
+      } catch (e) {
+        setPipelineError(`Could not read the full table (${e?.message ?? e}) — the new dataset was NOT created, rather than created with only the ${rows.length} preview rows.`);
+        return;
+      }
+    }
+    let cur = { rows: baseRows, headers };
     try {
       for (const j of staged) {
         cur = applyStep(cur.rows, cur.headers, { ...j, type: "join" }, context ?? { datasets: {} });
@@ -492,7 +504,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     });
     setPipelineError(null);
     onSaveSubset(name, cur.rows, cur.headers, null, { parent: parentFrozen, joins: joinRecords });
-  }, [rows, headers, context, pid, filename, rawData, pipeline,
+  }, [rows, headers, context, pid, filename, rawData, pipeline, processed,
       onSaveSubset, allDatasets, rightPipelines]);
 
   // Expose addStep via ref so DataStudio can dispatch patch steps from DataViewer
@@ -605,7 +617,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   const [showSaveSubset, setShowSaveSubset] = useState(false);
   const [subsetName,     setSubsetName]     = useState("");
 
-  function doSaveSubset() {
+  async function doSaveSubset() {
     const name = subsetName.trim() ||
       (filename ? filename.replace(/\.[^.]+$/, "") + "_subset.csv" : "subset.csv");
     // Freeze the parent as of NOW. The child must stay reconstructible even if
@@ -615,7 +627,21 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       { id: pid, name: filename, filename, loadOpts: rawData?._loadOpts ?? null },
       pipeline
     );
-    if (onSaveSubset) onSaveSubset(name, rows, headers, null, { parent: frozen });
+    // `rows` is the 500-row PREVIEW for a DuckDB-backed dataset — saving it
+    // would materialise 500 of 550,000 rows under a name that claims to be the
+    // whole thing. Refuse rather than save a truncated dataset.
+    let outRows = rows;
+    if (processed?._duckdb?.tableName) {
+      try {
+        const { extractAllRows } = await import("./services/data/duckdb.js");
+        outRows = await extractAllRows(processed._duckdb.tableName);
+      } catch (e) {
+        setPipelineError(`Could not read the full table (${e?.message ?? e}) — the dataset was NOT saved, rather than saved with only the ${rows.length} preview rows.`);
+        setShowSaveSubset(false);
+        return;
+      }
+    }
+    if (onSaveSubset) onSaveSubset(name, outRows, headers, null, { parent: frozen });
     setShowSaveSubset(false);
     setSubsetName("");
   }
@@ -699,7 +725,10 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
               <span style={{ color:C.gold }}>
                 {rawData._duckdb ? rawData._duckdb.rowCount.toLocaleString() : rawData.rows.length}
               </span> raw ·{" "}
-              <span>{rows.length}</span> current ·{" "}
+              {/* For a DuckDB-backed dataset `rows` is the 500-row preview, so
+                  showing rows.length made a 550,000-row table read "500 current"
+                  — as if the pipeline had dropped 549,500 rows. */}
+              <span>{(processed?._duckdb?.rowCount ?? rows.length).toLocaleString()}</span> current ·{" "}
               <span style={{ color: headers.length > rawData.headers.length ? C.green : C.textMuted }}>
                 {headers.length}
               </span> cols
@@ -808,7 +837,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}
               datasetName={filename ? filename.replace(/\.[^.]+$/, "") : "dataset"}
               allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}
-              datasetId={pid}/>
+              datasetId={pid}
+              duckdbTableName={processed?._duckdb?.tableName ?? null}
+              totalRows={processed?._duckdb?.rowCount ?? rows.length}/>
             <ImportPipelineButton currentLength={pipeline.length} onImport={replacePipeline}
               currentDatasetId={pid}
               datasetIds={(allDatasets || []).map(d => d.id)} />
