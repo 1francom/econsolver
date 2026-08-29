@@ -1,5 +1,5 @@
 // ─── ECON STUDIO · components/wrangling/MergeTab.jsx ───────────────────────
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTheme, Lbl, Collapsible, Btn } from "./shared.jsx";
 import { applyStep } from "../../pipeline/runner.js";
 
@@ -11,7 +11,7 @@ const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suff
 // what runner.js joins against (WranglingModule's buildDatasetContext replays
 // each right dataset's own pipeline first). This comment used to claim "raw
 // (pre-pipeline)", which described the PREVIEW's bug rather than the behaviour.
-function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joinContext = null, leftTotal = null }) {
+function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joinContext = null, leftTotal = null, duckdbTableName = null }) {
   const { C, T } = useTheme();
   // JOIN state — array of staged joins, runs in order through runner.js
   const [joins, setJoins]         = useState([emptyJoin()]);
@@ -143,6 +143,40 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
     }
     return previews;
   }, [joins, allDatasets, rows, headerChain, headers, joinCtx, rightOf, leftTotal]);
+
+  // ── SQL match preview ──────────────────────────────────────────────────────
+  // When the JS preview would be computed on truncated data, compute the real
+  // numbers in DuckDB over the full tables instead. Only for the FIRST staged
+  // join: later ones consume a materialised intermediate that has no table, so
+  // those keep the honest "unavailable" notice.
+  const [sqlStats, setSqlStats] = useState(null);   // { key, stats } | { key, error }
+  const j0    = joins[0];
+  const r0    = allDatasets.find(d => d.id === j0?.rightId);
+  const r0Tbl = r0?.rawData?._duckdb?.tableName ?? null;
+  const sqlKey = (duckdbTableName && r0Tbl && j0?.leftKey && j0?.rightKey)
+    ? [duckdbTableName, r0Tbl, j0.leftKey, j0.rightKey, j0.how].join("|")
+    : null;
+
+  useEffect(() => {
+    if (!sqlKey) { setSqlStats(null); return; }
+    let cancelled = false;
+    setSqlStats({ key: sqlKey, pending: true });
+    (async () => {
+      try {
+        const { joinPreviewStats } = await import("../../pipeline/duckdbRunner.js");
+        const stats = await joinPreviewStats({
+          leftTable: duckdbTableName, rightTable: r0Tbl,
+          leftKey: j0.leftKey, rightKey: j0.rightKey, how: j0.how || "left",
+        });
+        if (!cancelled) setSqlStats({ key: sqlKey, stats });
+      } catch (e) {
+        // Never fall through to the JS numbers here — they are the wrong answer,
+        // not a degraded one. Say the preview could not be computed.
+        if (!cancelled) setSqlStats({ key: sqlKey, error: e?.message ?? String(e) });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sqlKey, duckdbTableName, r0Tbl, j0?.leftKey, j0?.rightKey, j0?.how]);
 
   const appendPreview = useMemo(() => {
     if (!appendDs) return null;
@@ -317,12 +351,37 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
 
                   {/* Match preview — materialized through the chain for every staged join */}
                   {matchPreviews[idx] && (() => {
-                    const mp = matchPreviews[idx];
+                    let mp = matchPreviews[idx];
                     // Either side cut to its 500-row preview? Then the match
                     // stats are meaningless — matching one file's first 500 keys
                     // against another's is not a sample, and with different key
                     // orders it reads 0% for a join that matches every row. Say
                     // so instead of showing a number that would stop the user.
+                    // Real numbers from DuckDB, when available for this join.
+                    const sql = (idx === 0 && sqlStats?.key === sqlKey) ? sqlStats : null;
+                    if (sql?.stats) {
+                      mp = { ...mp, ...sql.stats, truncated: false, fromSQL: true,
+                             pct: sql.stats.validRows ? sql.stats.matched / sql.stats.validRows : 0 };
+                    } else if (mp.truncated && sql?.pending) return (
+                      <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
+                        border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,
+                        borderRadius:4,marginBottom:"1rem",
+                        fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
+                        Counting matches over the full tables…
+                      </div>
+                    );
+                    else if (mp.truncated && sql?.error) return (
+                      <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
+                        border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,
+                        borderRadius:4,marginBottom:"1rem",
+                        fontSize: T.code.fontSize,color:C.gold,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
+                        ⚠ Could not count matches over the full tables ({sql.error}).
+                        <div style={{marginTop:4,color:C.textMuted}}>
+                          Not falling back to the {mp.sampleL.toLocaleString()}-row preview — on tables this
+                          size that is the wrong answer, not a rough one.
+                        </div>
+                      </div>
+                    );
                     if (mp.truncated) return (
                       <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
                         border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,

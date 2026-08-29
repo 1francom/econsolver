@@ -1016,11 +1016,15 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {tab === "structure" && (
           <PanelTab rows={rows} headers={headers} info={info} panel={panel} setPanel={setPanel} onAdd={addStep}/>
         )}
+        {/* joinLeftTable is the CURRENT pipeline output's table — the join
+            preview counts against that. `duckdbTableName` is the RAW table and
+            feeds FeatureTab, which wants exactly that; they are not the same. */}
         {tab === "workbench" && (
           <WorkbenchTab rows={rows} headers={headers} info={info} panel={panel}
             filename={filename} allDatasets={allDatasets} onAdd={addStep}
             joinContext={context} onForkJoin={forkJoin}
             leftTotal={processed?._duckdb?.rowCount ?? rows.length}
+            joinLeftTable={processed?._duckdb?.tableName ?? null}
             duckdbTableName={rawData?._duckdb?.tableName}/>
         )}
         {tab === "dictionary" && (
