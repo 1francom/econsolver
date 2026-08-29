@@ -67,9 +67,23 @@ export async function buildDatasetContext(datasets, pipelineFor, loadRows, opts 
     if (cache.has(id)) return cache.get(id);
 
     const steps = pipelineFor(id) ?? [];
-    // No steps: raw IS processed. Forward rawData untouched so a DuckDB-backed
-    // dataset keeps its table pointer and the SQL join stays on the fast path.
+    // No steps: raw IS processed. Keep the `_duckdb` pointer so the SQL join
+    // stays on the fast path — but a DuckDB-backed dataset's `rawData.rows` is
+    // only the 500-row PREVIEW, so forwarding it untouched silently joined
+    // against 500 rows on any JS path (a non-DuckDB left dataset, or a SQL step
+    // that fell back). Load the real rows for exactly the datasets a join
+    // actually references; the cost is only paid when it is needed.
     if (!steps.length) {
+      if (ds.rawData?._duckdb?.tableName) {
+        try {
+          const { rows } = await loadRows(ds);
+          const full = { ...ds.rawData, rows };
+          cache.set(id, full);
+          return full;
+        } catch (e) {
+          warnings.push(`Could not load the full table for "${ds.filename ?? id}" (${e?.message ?? e}) — joined against its ${ds.rawData.rows?.length ?? 0}-row preview.`);
+        }
+      }
       cache.set(id, ds.rawData);
       return ds.rawData;
     }

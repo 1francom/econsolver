@@ -989,6 +989,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           <WorkbenchTab rows={rows} headers={headers} info={info} panel={panel}
             filename={filename} allDatasets={allDatasets} onAdd={addStep}
             joinContext={context} onForkJoin={forkJoin}
+            leftTotal={processed?._duckdb?.rowCount ?? rows.length}
             duckdbTableName={rawData?._duckdb?.tableName}/>
         )}
         {tab === "dictionary" && (

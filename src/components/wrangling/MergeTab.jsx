@@ -11,7 +11,7 @@ const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suff
 // what runner.js joins against (WranglingModule's buildDatasetContext replays
 // each right dataset's own pipeline first). This comment used to claim "raw
 // (pre-pipeline)", which described the PREVIEW's bug rather than the behaviour.
-function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joinContext = null }) {
+function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joinContext = null, leftTotal = null }) {
   const { C, T } = useTheme();
   // JOIN state — array of staged joins, runs in order through runner.js
   const [joins, setJoins]         = useState([emptyJoin()]);
@@ -96,6 +96,15 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
         if (rKeys.has(String(v))) matched++;
       });
       const validRows = curRows.length - keyNulls;
+      // TRUNCATION. `rows` and a DuckDB-backed right dataset's rawData.rows are
+      // both the 500-row PREVIEW. Matching preview against preview is not a
+      // sample of the real answer — with the two files in different key orders
+      // the intersection is empty, so a join that matches 550,000 rows reports
+      // 0%. Never present these numbers as the truth when either side is cut.
+      const rTotal   = r.rawData?._duckdb?.rowCount ?? rRows.length;
+      const rCut     = rTotal > rRows.length;
+      const lCut     = (leftTotal ?? rows.length) > rows.length;
+      const truncated = rCut || lCut;
       // Cardinality of the right side per key — this is what decides whether the
       // join expands. "100% matched" says nothing about the OUTPUT row count,
       // which is the number that surprised people: a 20-row metadata table
@@ -116,7 +125,9 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
       });
       previews.push({ matched, total: curRows.length, validRows, keyNulls,
                        pct: validRows ? matched / validRows : 0,
-                       maxPerKey: noCols ? 0 : maxPerKey, outRows });
+                       maxPerKey: noCols ? 0 : maxPerKey, outRows,
+                       truncated, lCut, rCut, leftTotal: leftTotal ?? rows.length, rTotal,
+                       sampleL: rows.length, sampleR: rRows.length });
       // Materialize this join's output so the NEXT staged join previews against real rows.
       if (i < joins.length - 1) {
         if (j.how === "semi" || j.how === "anti") {
@@ -131,7 +142,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
       }
     }
     return previews;
-  }, [joins, allDatasets, rows, headerChain, headers, joinCtx, rightOf]);
+  }, [joins, allDatasets, rows, headerChain, headers, joinCtx, rightOf, leftTotal]);
 
   const appendPreview = useMemo(() => {
     if (!appendDs) return null;
@@ -271,7 +282,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
                         fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}>
                       {j.rightId===d.id?"✓ ":""}{d.filename}
                       <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:6}}>
-                        {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                        {(d.rawData._duckdb?.rowCount ?? d.rawData.rows.length).toLocaleString()}×{d.rawData.headers.length}
                       </span>
                     </button>
                   ))}
@@ -307,6 +318,27 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
                   {/* Match preview — materialized through the chain for every staged join */}
                   {matchPreviews[idx] && (() => {
                     const mp = matchPreviews[idx];
+                    // Either side cut to its 500-row preview? Then the match
+                    // stats are meaningless — matching one file's first 500 keys
+                    // against another's is not a sample, and with different key
+                    // orders it reads 0% for a join that matches every row. Say
+                    // so instead of showing a number that would stop the user.
+                    if (mp.truncated) return (
+                      <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
+                        border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,
+                        borderRadius:4,marginBottom:"1rem",
+                        fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
+                        <span style={{color:C.gold}}>Match preview unavailable</span> — this join runs on the
+                        full tables ({mp.leftTotal.toLocaleString()} × {mp.rTotal.toLocaleString()} rows), but only{" "}
+                        {mp.lCut ? `${mp.sampleL.toLocaleString()} left` : ""}{mp.lCut && mp.rCut ? " and " : ""}
+                        {mp.rCut ? `${mp.sampleR.toLocaleString()} right` : ""} rows are loaded in the browser.
+                        <div style={{marginTop:4,color:C.textMuted}}>
+                          Counting matches on those samples would compare one file's first rows against the
+                          other's — with different key orders that reads 0% for a join that matches everything.
+                          Add the join to see the real result.
+                        </div>
+                      </div>
+                    );
                     const mc = mp.pct > 0.8 ? C.green : mp.pct > 0.4 ? C.yellow : C.red;
                     return (
                       <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
@@ -467,7 +499,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
                   fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}>
                 {appendId===d.id?"✓ ":""}{d.filename}
                 <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:6}}>
-                  {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                  {(d.rawData._duckdb?.rowCount ?? d.rawData.rows.length).toLocaleString()}×{d.rawData.headers.length}
                 </span>
               </button>
             ))}
@@ -551,7 +583,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
                   borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily}}>
                 {combineId===d.id?"✓ ":""}{d.filename}
                 <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:6}}>
-                  {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                  {(d.rawData._duckdb?.rowCount ?? d.rawData.rows.length).toLocaleString()}×{d.rawData.headers.length}
                 </span>
               </button>
             ))}
