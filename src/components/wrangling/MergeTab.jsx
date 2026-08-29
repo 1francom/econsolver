@@ -1,5 +1,5 @@
 // ─── ECON STUDIO · components/wrangling/MergeTab.jsx ───────────────────────
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useTheme, Lbl, Collapsible, Btn } from "./shared.jsx";
 import { applyStep } from "../../pipeline/runner.js";
 
@@ -34,6 +34,30 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
   const addJoin = () =>
     setJoins(js => [...js, emptyJoin()]);
 
+  // Context object for applyStep. Prefer the CLEANED right side supplied by
+  // WranglingModule (buildDatasetContext replays each right dataset's pipeline) —
+  // that is what the real join runs against. Falling back to raw would make the
+  // preview report matches against data the join never sees.
+  //
+  // Declared BEFORE headerChain and matchPreviews: both call rightOf() inside a
+  // useMemo body, which runs during render, so declaring it after them put it in
+  // the temporal dead zone and threw on the first render that resolved a key.
+  const joinCtx = useMemo(() => {
+    if (joinContext?.datasets && Object.keys(joinContext.datasets).length) return joinContext;
+    const datasets = {};
+    allDatasets.forEach(d => { datasets[d.id] = { rows: d.rawData.rows, headers: d.rawData.headers }; });
+    return { datasets };
+  }, [joinContext, allDatasets]);
+
+  // Resolve one right dataset, cleaned when available, raw otherwise. The
+  // context is built lazily from `referencedDatasetIds(pipeline)`, so a dataset
+  // the user has only just picked in this panel is not in it yet.
+  const rightOf = useCallback((id) => {
+    if (joinCtx.datasets[id]) return joinCtx.datasets[id];
+    const d = allDatasets.find(x => x.id === id);
+    return d ? { rows: d.rawData.rows, headers: d.rawData.headers } : { rows: [], headers: [] };
+  }, [joinCtx, allDatasets]);
+
   // Simulate header chain through staged joins so each row's left-key picker
   // can reference columns added by earlier joins.
   const headerChain = useMemo(() => {
@@ -52,27 +76,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
       chain.push(next);
     }
     return chain; // chain[i] = headers available as left side for staged join i
-  }, [joins, headers, allDatasets]);
-
-  // Context object for applyStep. Prefer the CLEANED right side supplied by
-  // WranglingModule (buildDatasetContext replays each right dataset's pipeline) —
-  // that is what the real join runs against. Falling back to raw would make the
-  // preview report matches against data the join never sees.
-  const joinCtx = useMemo(() => {
-    if (joinContext?.datasets && Object.keys(joinContext.datasets).length) return joinContext;
-    const datasets = {};
-    allDatasets.forEach(d => { datasets[d.id] = { rows: d.rawData.rows, headers: d.rawData.headers }; });
-    return { datasets };
-  }, [joinContext, allDatasets]);
-
-  // Resolve one right dataset, cleaned when available, raw otherwise. The
-  // context is built lazily from `referencedDatasetIds(pipeline)`, so a dataset
-  // the user has only just picked in this panel is not in it yet.
-  const rightOf = (id) => {
-    if (joinCtx.datasets[id]) return joinCtx.datasets[id];
-    const d = allDatasets.find(x => x.id === id);
-    return d ? { rows: d.rawData.rows, headers: d.rawData.headers } : { rows: [], headers: [] };
-  };
+  }, [joins, headers, allDatasets, rightOf]);
 
   // Match preview for every staged join — materializes the row chain through prior
   // joins (via applyStep) so join 2+ can report a real match % too, not just join 0.
@@ -127,7 +131,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joi
       }
     }
     return previews;
-  }, [joins, allDatasets, rows, headerChain, headers, joinCtx]);
+  }, [joins, allDatasets, rows, headerChain, headers, joinCtx, rightOf]);
 
   const appendPreview = useMemo(() => {
     if (!appendDs) return null;
