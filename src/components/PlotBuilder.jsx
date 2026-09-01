@@ -29,14 +29,21 @@ import { buildPlotsFile, parsePlotsFile, downloadJSON } from "../services/export
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
 const arrMax = (a, fb = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : fb;
 
+// NOTE: intentionally a local copy of the light/dark entries in
+// components/tabs/spatial/shared/leaflet.js — keep the two in sync.
+const ESRI_ATTR = "Tiles &copy; <a href='https://www.esri.com'>Esri</a> &mdash; Esri, DeLorme, NAVTEQ";
 const MAP_BASEMAPS = {
   light: {
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> &copy; <a href='https://carto.com/attributions'>CARTO</a>",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    labelsUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+    attribution: ESRI_ATTR,
+    maxZoom: 16,
   },
   dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> &copy; <a href='https://carto.com/attributions'>CARTO</a>",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    labelsUrl: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+    attribution: ESRI_ATTR,
+    maxZoom: 16,
   },
 };
 
@@ -967,12 +974,14 @@ function MapCanvas({ layer, rows }) {
     leafMapRef.current = map;
 
     const basemap = MAP_BASEMAPS[theme === "light" ? "light" : "dark"];
-    L.tileLayer(basemap.url, {
+    const tileOpts = {
       attribution: basemap.attribution,
-      maxZoom: 19,
-      detectRetina: true,
+      maxZoom: basemap.maxZoom ?? 19,
+      detectRetina: false,
       crossOrigin: true,
-    }).addTo(map);
+    };
+    L.tileLayer(basemap.url, tileOpts).addTo(map);
+    if (basemap.labelsUrl) L.tileLayer(basemap.labelsUrl, { ...tileOpts, attribution: "" }).addTo(map);
 
     // Color scale
     const colorCol = aes.color;

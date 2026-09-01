@@ -1,16 +1,38 @@
 import { toDfVar } from "../../pipeline/exporter.js";
 import { buildPyLoadLine, buildRLoadLine } from "./loadLine.js";
 
-const R_BASEMAPS = {
-  light: "addProviderTiles(providers$CartoDB.Positron)",
-  dark: "addProviderTiles(providers$CartoDB.DarkMatter)",
-  osm: "addTiles()",
+// Esri canvas basemaps: keyless, and the app draws the place-label reference
+// layer on top of the base, so the exported scripts must do the same.
+const ESRI_ATTR = "Tiles &copy; Esri — Esri, DeLorme, NAVTEQ";
+const ESRI = {
+  light: {
+    base: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    labels: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+  },
+  dark: {
+    base: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    labels: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+  },
 };
 
+const R_BASEMAPS = {
+  light: [
+    `addTiles(urlTemplate = "${ESRI.light.base}", attribution = "${ESRI_ATTR}", options = tileOptions(maxZoom = 16))`,
+    `addTiles(urlTemplate = "${ESRI.light.labels}", options = tileOptions(maxZoom = 16))`,
+  ],
+  dark: [
+    `addTiles(urlTemplate = "${ESRI.dark.base}", attribution = "${ESRI_ATTR}", options = tileOptions(maxZoom = 16))`,
+    `addTiles(urlTemplate = "${ESRI.dark.labels}", options = tileOptions(maxZoom = 16))`,
+  ],
+  osm: ["addTiles()"],
+};
+
+// folium: a custom tile URL needs an explicit attr; the label overlay is a
+// second TileLayer with overlay=True so it paints above the base.
 const PY_BASEMAPS = {
-  light: "CartoDB positron",
-  dark: "CartoDB dark_matter",
-  osm: "OpenStreetMap",
+  light: { tiles: ESRI.light.base, attr: ESRI_ATTR, labels: ESRI.light.labels, maxZoom: 16 },
+  dark:  { tiles: ESRI.dark.base,  attr: ESRI_ATTR, labels: ESRI.dark.labels,  maxZoom: 16 },
+  osm:   { tiles: "OpenStreetMap", attr: null,      labels: null,              maxZoom: 19 },
 };
 
 function visibleLayers(mapEntry) {
@@ -116,7 +138,7 @@ export function buildLeafletR(mapEntry, { datasets = [] } = {}) {
   const layers = visibleLayers(entry);
   const prep = [];
   const comments = [];
-  const components = [R_BASEMAPS[entry.basemap] ?? R_BASEMAPS.light];
+  const components = [...(R_BASEMAPS[entry.basemap] ?? R_BASEMAPS.light)];
   const needsSf = layers.some(hasWkt);
 
   layers.forEach((layer, index) => {
@@ -290,7 +312,13 @@ export function buildFoliumPy(mapEntry, { datasets = [] } = {}) {
   if (needsPalette) lines.push("", ...pyColorHelper());
   if (comments.length) lines.push("", ...comments);
   if (prep.length) lines.push("", ...prep);
-  lines.push("", `m = folium.Map(location=${center}, tiles=${pyString(PY_BASEMAPS[entry.basemap] ?? PY_BASEMAPS.light)})`);
+  const pyBase = PY_BASEMAPS[entry.basemap] ?? PY_BASEMAPS.light;
+  const mapArgs = [`location=${center}`, `tiles=${pyString(pyBase.tiles)}`];
+  if (pyBase.attr) mapArgs.push(`attr=${pyString(pyBase.attr)}`, `max_zoom=${pyBase.maxZoom}`);
+  lines.push("", `m = folium.Map(${mapArgs.join(", ")})`);
+  if (pyBase.labels) {
+    lines.push(`folium.TileLayer(tiles=${pyString(pyBase.labels)}, attr=" ", overlay=True, control=False, max_zoom=${pyBase.maxZoom}).add_to(m)`);
+  }
   if (body.length) lines.push("", ...body);
   lines.push("", "m");
   return lines.join("\n");

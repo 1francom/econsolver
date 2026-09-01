@@ -120,7 +120,7 @@ function paintMapLegend(ctx, legend, W, H, C, T) {
   ctx.restore();
 }
 
-function paintMapAttribution(ctx, W, H, T, text = "© OpenStreetMap © CARTO") {
+function paintMapAttribution(ctx, W, H, T, text = "© Esri") {
   ctx.save();
   ctx.font = `9px ${T?.code?.fontFamily || MONO_STACK}`;
   ctx.fillStyle = "rgba(90,90,90,0.85)";
@@ -267,7 +267,9 @@ const BASEMAP=${scriptJson(BASEMAPS[basemap] ?? BASEMAPS.light)};
 const VIEW=${scriptJson(mapView)};
 const LEGEND=${scriptJson(activeLegend)};
 const map=L.map("map");
-L.tileLayer(BASEMAP.url,{attribution:BASEMAP.attribution,maxZoom:19,detectRetina:true,crossOrigin:true}).addTo(map);
+const TOPTS={attribution:BASEMAP.attribution,maxZoom:BASEMAP.maxZoom||19,detectRetina:BASEMAP.retina!==false,crossOrigin:true};
+L.tileLayer(BASEMAP.url,TOPTS).addTo(map);
+if(BASEMAP.labelsUrl)L.tileLayer(BASEMAP.labelsUrl,Object.assign({},TOPTS,{attribution:""})).addTo(map);
 const group=L.featureGroup().addTo(map);
 for(const feature of FEATURES){
   let layer=null;
@@ -418,7 +420,7 @@ if(LEGEND){
       } catch { /* skip an invalid overlay */ }
     }
 
-    const attrText = basemap === "osm" ? "© OpenStreetMap" : "© OpenStreetMap © CARTO";
+    const attrText = basemap === "osm" ? "© OpenStreetMap" : "Tiles © Esri — Esri, DeLorme, NAVTEQ";
     paintMapLegend(ctx, activeLegend, W, H, C, T);
     paintMapAttribution(ctx, W, H, T, attrText);
     return canvas;
