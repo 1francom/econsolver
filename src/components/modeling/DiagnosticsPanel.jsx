@@ -328,7 +328,7 @@ export default function DiagnosticsPanel({
               <SectionHdr>Normality of Residuals</SectionHdr>
               <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "0.5rem 0.5rem" }}>
                 {jb && (
-                  <TestCard name="Jarque-Bera" stat={jb.JB} statLabel="JB"
+                  <TestCard name="Jarque-Bera" stat={fmt4(jb.JB)} statLabel="JB"
                     df={2} pVal={jb.pVal} reject={jb.reject}
                     note={`Skewness = ${fmt4(jb.skewness)} · Excess kurtosis = ${fmt4(jb.kurtosis)}`}
                   />

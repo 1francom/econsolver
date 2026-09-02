@@ -6,18 +6,16 @@
 //   jarqueBera(resid)    → JBResult | null
 //   shapiroWilk(resid)   → SWResult | null   (n ≤ 5000)
 
-// ── Chi-squared p-value (Wilson-Hilferty) ─────────────────────────────────────
+import { pchisqUpper } from "../../math/calcEngine.js";
+
+// Exact upper-tail chi-square probability. This used to be a Wilson-Hilferty
+// normal approximation copied into this file; it is now the same regularized
+// incomplete gamma every other test in the app uses, so the Jarque-Bera p-value
+// reported for OLS residuals in Model and for a raw column in Explore/Simulate
+// is one number computed one way.
 function chi2pVal(stat, df) {
   if (stat <= 0 || df <= 0) return 1;
-  const h = 2 / (9 * df);
-  const z = (Math.pow(stat / df, 1 / 3) - (1 - h)) / Math.sqrt(h);
-  const absZ = Math.abs(z);
-  const t    = 1 / (1 + 0.2316419 * absZ);
-  const poly = t * (0.319381530 + t * (-0.356563782
-             + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-  const tail = Math.exp(-0.5 * absZ * absZ) / Math.sqrt(2 * Math.PI) * poly;
-  const cdf  = z >= 0 ? 1 - tail : tail;
-  return Math.max(0, Math.min(1, 1 - cdf));
+  return Math.max(0, Math.min(1, pchisqUpper(stat, df)));
 }
 
 // ── Normal CDF (Abramowitz & Stegun 26.2.17) ──────────────────────────────────
@@ -54,10 +52,10 @@ export function jarqueBera(resid) {
 
   return {
     test:     "Jarque-Bera",
-    JB:       +JB.toFixed(4),
-    skewness: +S.toFixed(4),
-    kurtosis: +K.toFixed(4),   // excess kurtosis (normal = 0)
-    pVal:     +pVal.toFixed(4),
+    JB,
+    skewness: S,
+    kurtosis: K,               // excess kurtosis (normal = 0)
+    pVal,
     reject:   pVal < 0.05,
     n,
     note:     "H₀: residuals are normally distributed. JB ~ χ²(2).",

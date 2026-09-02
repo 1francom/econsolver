@@ -1,8 +1,9 @@
 // ─── ECON STUDIO · src/components/tabs/statsim/SampleTestPanel.jsx ────────────
 // Collapsible pre-model hypothesis-test panel. Lets the user test the mean or
-// variance of a numeric column, or test an arbitrary parameter from a point
-// estimate + SE. Shared by the Stat (loaded data) and Simulate (simulated data)
-// tabs. Math lives in src/math/SampleTests.js — this file is UI only.
+// variance of a numeric column, the serial dependence or normality of a series,
+// or an arbitrary parameter from a point estimate + SE. Shared by the Explore,
+// Stat (loaded data) and Simulate (simulated data) tabs. Math lives in
+// src/math/SampleTests.js — this file is UI only.
 //
 // Props:
 //   columns    [{ name, values:number[] }]  — numeric columns available to test
@@ -21,7 +22,9 @@ import {
   oneSampleMeanTest, varianceTest, parameterTest,
   twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest, varianceRatioTest,
   splitByGroup, groupLevels, countsByGroup,
+  ljungBoxTest, normalityTest,
 } from "../../../math/SampleTests.js";
+import { SERIES_TRANSFORMS } from "../../../math/timeSeries.js";
 import { sortFactorLevels } from "../../modeling/helpers.js";
 import { generateStatInferenceScript } from "../../../services/export/statInferenceScript.js";
 
@@ -29,6 +32,16 @@ const LANGS = [["r", "R"], ["python", "Python"], ["stata", "Stata"]];
 
 function fmt(n, d = 6) {
   return (typeof n === "number" && isFinite(n)) ? n.toFixed(d) : "—";
+}
+
+// A tiny p-value is a finding, not a footnote. R prints "p-value < 2.2e-16";
+// this used to print "<0.0001" for everything below 1e-4, which erases the
+// difference between p = 9e-5 and the p = 2e-46 a portmanteau test on returns
+// routinely produces.
+function fmtP(p) {
+  if (typeof p !== "number" || !isFinite(p)) return "—";
+  if (p === 0) return "< 1e-300";
+  return p < 1e-4 ? p.toExponential(2) : p.toFixed(4);
 }
 
 const STAT_GLYPH = { t: "t", z: "z", chi2: "χ²", F: "F" };
@@ -63,11 +76,21 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
   const [s1, setS1] = useState(""); const [n1, setN1] = useState("");
   const [s2, setS2] = useState(""); const [n2, setN2] = useState("");
   const [copied, setCopied] = useState("");
+  // Series tests (Ljung-Box / Jarque-Bera): lag depth, portmanteau variant,
+  // ARMA parameters already fitted, and the x / |x| / x² transform that turns
+  // one test into the three-panel stylised-facts check.
+  const [lags, setLags]       = useState("10");
+  const [lbType, setLbType]   = useState("Ljung");
+  const [fitdf, setFitdf]     = useState("0");
+  const [transform, setTransform] = useState("raw");
 
   const field = { background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 3, color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "0.28rem 0.55rem", outline: "none" };
 
   const effectiveCol = columns.some(c => c.name === colName) ? colName : (columns[0]?.name ?? "");
   const selCol = columns.find(c => c.name === effectiveCol) ?? null;
+  // One numeric column, no null value, no alternative: these are right-tailed
+  // by construction — a large statistic IS the evidence against H₀.
+  const SERIES = mode === "ljung-box" || mode === "normality";
   const TWO_COL = mode === "two-mean" || mode === "paired" || mode === "correlation" || mode === "var-ratio";
   const effectiveColB = columns.some(c => c.name === colNameB) ? colNameB : (columns[1]?.name ?? columns[0]?.name ?? "");
   const selColB = columns.find(c => c.name === effectiveColB) ?? null;
@@ -131,9 +154,11 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
       if (mode === "var-ratio")   return varianceRatioTest(selCol.values, selColB.values, { alternative: alt });
     }
     if (!selCol) return null;
+    if (mode === "ljung-box") return ljungBoxTest(selCol.values, { lags, type: lbType, fitdf, transform });
+    if (mode === "normality") return normalityTest(selCol.values, { transform });
     if (mode === "mean") return oneSampleMeanTest(selCol.values, h0, alt);
     return varianceTest(selCol.values, h0, alt);
-  }, [mode, selCol, selColB, h0, alt, estimate, se, df, pooled, corrMethod, succ, nObs, s1, n1, s2, n2, TWO_COL, byGroup, rows, groupCol, levelA, levelB]);
+  }, [mode, selCol, selColB, h0, alt, estimate, se, df, pooled, corrMethod, succ, nObs, s1, n1, s2, n2, TWO_COL, byGroup, rows, groupCol, levelA, levelB, lags, lbType, fitdf, transform]);
 
   function copyScript(lang) {
     if (!result || result.error || mode === "parameter") return;
@@ -141,6 +166,7 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
       mean: "oneSampleMeanTest", variance: "varianceTest", "two-mean": "twoSampleMeanTest",
       paired: "pairedMeanTest", "one-prop": "onePropTest", "two-prop": "twoPropTest",
       correlation: "correlationTest", "var-ratio": "varianceRatioTest",
+      "ljung-box": "ljungBoxTest", normality: "normalityTest",
     }[mode];
     const params = {
       values: selCol?.values, a: selCol?.values, b: selColB?.values,
@@ -156,6 +182,7 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
       mu0: Number(h0), nullValue: Number(h0), alternative: alt, pooled, method: corrMethod,
       successes: Number(succ), n: Number(nObs), p0: Number(h0),
       s1: Number(s1), n1: Number(n1), s2: Number(s2), n2: Number(n2),
+      lags: Number(lags), type: lbType, fitdf: Number(fitdf), transform,
     };
     const snippet = generateStatInferenceScript(lang, op, params, result);
     navigator.clipboard?.writeText(snippet.trimStart()).then(() => {
@@ -198,6 +225,8 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
             {modeBtn("var-ratio", "Variance ratio (F)")}
             {modeBtn("one-prop", "One proportion (z)")}
             {modeBtn("two-prop", "Two proportions (z)")}
+            {modeBtn("ljung-box", "Autocorrelation (Ljung-Box)")}
+            {modeBtn("normality", "Normality (Jarque-Bera)")}
           </div>
 
           {/* Input shape, for the independent-sample tests only. Long format is
@@ -252,6 +281,39 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
                 {!columns.length && <option value="">— no numeric column —</option>}
                 {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
+            </div>
+          )}
+
+          {/* Series tests: the transform is part of the specification. Running the
+              same test on x, |x| and x² is the stylised-facts check itself —
+              returns are near-uncorrelated while their magnitudes are not. */}
+          {SERIES && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>series</span>
+              {SERIES_TRANSFORMS.map(t => (
+                <button key={t.id} onClick={() => setTransform(t.id)}
+                  style={{
+                    background: transform === t.id ? `${C.teal}18` : "transparent",
+                    border: `1px solid ${transform === t.id ? C.teal : C.border2}`,
+                    color: transform === t.id ? C.teal : C.textDim,
+                    fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                    padding: "0.22rem 0.6rem", borderRadius: 2, cursor: "pointer",
+                  }}>{t.label}</button>
+              ))}
+              {mode === "ljung-box" && (
+                <>
+                  <label style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>
+                    lags <input type="number" step="1" min="1" value={lags} onChange={e => setLags(e.target.value)} style={{ ...field, width: 70 }} />
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>
+                    fitdf <input type="number" step="1" min="0" value={fitdf} onChange={e => setFitdf(e.target.value)} style={{ ...field, width: 60 }} />
+                  </label>
+                  <select value={lbType} onChange={e => setLbType(e.target.value)} style={field}>
+                    <option value="Ljung">Ljung-Box</option>
+                    <option value="Box-Pierce">Box-Pierce</option>
+                  </select>
+                </>
+              )}
             </div>
           )}
 
@@ -326,6 +388,11 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
           )}
 
           {/* Null value + alternative — H₀ value is fixed (0 or 1) for correlation/two-prop/var-ratio */}
+          {/* Ljung-Box and Jarque-Bera fix both: H₀ is "no dependence" / "normal",
+              and the test is right-tailed by construction. Offering a null value
+              or a sidedness selector here would be offering settings that do
+              nothing. */}
+          {!SERIES && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {mode !== "correlation" && mode !== "two-prop" && mode !== "var-ratio" && (
               <label style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>
@@ -339,6 +406,7 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
               <option value="less">less</option>
             </select>
           </div>
+          )}
 
           {result?.error && (
             <div style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.red }}>{result.error}</div>
@@ -389,6 +457,24 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
                   <span style={{ color: C.textMuted }}>  ·  n = </span>{result.n}
                   <span style={{ color: C.textMuted }}>  ·  {result.method}</span></div>
               )}
+              {result.test === "ljung-box" && (
+                <div><span style={{ color: C.textMuted }}>ρ̂₁ = </span><span style={{ color: C.teal }}>{fmt(result.estimate, 4)}</span>
+                  <span style={{ color: C.textMuted }}>  ·  lags = </span>{result.lags}
+                  {result.fitdf > 0 && <><span style={{ color: C.textMuted }}>  ·  fitdf = </span>{result.fitdf}</>}
+                  <span style={{ color: C.textMuted }}>  ·  n = </span>{result.n}
+                  <span style={{ color: C.textMuted }}>  ·  </span>{result.method}
+                  {result.transform !== "raw" && <span style={{ color: C.gold }}>  ·  on {SERIES_TRANSFORMS.find(t => t.id === result.transform)?.label}</span>}
+                  {result.nDropped > 0 && <span style={{ color: C.textMuted }}>  ·  {result.nDropped} missing dropped (lags close over the gap)</span>}
+                </div>
+              )}
+              {result.test === "normality" && (
+                <div><span style={{ color: C.textMuted }}>skewness = </span><span style={{ color: C.teal }}>{fmt(result.skewness, 4)}</span>
+                  <span style={{ color: C.textMuted }}>  ·  excess kurtosis = </span><span style={{ color: C.teal }}>{fmt(result.kurtosis, 4)}</span>
+                  <span style={{ color: C.textMuted }}>  ·  n = </span>{result.n}
+                  {result.transform !== "raw" && <span style={{ color: C.gold }}>  ·  on {SERIES_TRANSFORMS.find(t => t.id === result.transform)?.label}</span>}
+                  {result.nDropped > 0 && <span style={{ color: C.textMuted }}>  ·  {result.nDropped} missing dropped</span>}
+                </div>
+              )}
               {result.test === "var-ratio" && (
                 <div><span style={{ color: C.textMuted }}>s²ₐ/s²_b = </span><span style={{ color: C.teal }}>{fmt(result.estimate, 4)}</span>
                   <span style={{ color: C.textMuted }}>  ·  nₐ = </span>{result.nA}
@@ -399,7 +485,7 @@ export default function SampleTestPanel({ columns = [], rows = null, headers = [
                 <span style={{ color: C.gold, fontSize: T.body.fontSize }}>{fmt(result.stat, 4)}</span>
                 {result.df != null && <><span style={{ color: C.textMuted }}>  ·  df = </span>{result.df}</>}
                 <span style={{ color: C.textMuted }}>  ·  p = </span>
-                <span style={{ color: result.pValue < 0.05 ? C.teal : C.text }}>{result.pValue < 1e-4 ? "<0.0001" : fmt(result.pValue, 4)}</span>
+                <span style={{ color: result.pValue < 0.05 ? C.teal : C.text }}>{fmtP(result.pValue)}</span>
               </div>
             </div>
           )}

@@ -18,7 +18,11 @@ import { generateCleanScript, toDfVar } from "./pipeline/exporter.js";
 import { callClaude } from "./services/AI/AIService.js";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { getExplorePins, saveExplorePins } from "./services/Persistence/plotHistory.js";
+import { aggregateTimeSeries, fetchAggregateTimeSeriesSQL } from "./services/data/timeSeriesAggregate.js";
 import ExplorePinBar from "./components/explore/ExplorePinBar.jsx";
+import ScatterMatrix from "./components/explore/ScatterMatrix.jsx";
+import MultiSeriesChart from "./components/explore/MultiSeriesChart.jsx";
+import { niceTicks } from "./components/explore/axisTicks.js";
 import SampleTestPanel from "./components/tabs/statsim/SampleTestPanel.jsx";
 import { menuLabel, normalizeOp, evalPredicate } from "./pipeline/predicate.js";
 
@@ -116,60 +120,6 @@ function pearson(xs,ys){
   let sxy=0,sx=0,sy=0;
   for(let i=0;i<n;i++){sxy+=(xs[i]-mx)*(ys[i]-my);sx+=(xs[i]-mx)**2;sy+=(ys[i]-my)**2;}
   return(sx&&sy)?sxy/Math.sqrt(sx*sy):0;
-}
-
-// Aggregate rows into time-series points — SHARED by TimeSeriesTab and the pin
-// Compare so both render identical data. Returns [{ grp, pts:[{t,y}] }].
-function aggregateTimeSeries(rows, tCol, yCol, grpCol, agg) {
-  if (!tCol || !yCol || !rows?.length) return [];
-  const valid = rows.filter(r =>
-    typeof r[tCol] === "number" && isFinite(r[tCol]) &&
-    (agg === "count" || (typeof r[yCol] === "number" && isFinite(r[yCol])))
-  );
-  if (!valid.length) return [];
-  const groups = grpCol ? [...new Set(valid.map(r => String(r[grpCol] ?? "")))] : ["_all_"];
-  return groups.map(grp => {
-    const subset = grpCol ? valid.filter(r => String(r[grpCol] ?? "") === grp) : valid;
-    const byT = {};
-    subset.forEach(r => { const t = r[tCol]; (byT[t] = byT[t] || []).push(agg !== "count" ? r[yCol] : 1); });
-    const pts = Object.entries(byT).map(([t, vals]) => {
-      const tv = parseFloat(t);
-      let y;
-      if (agg === "mean")   y = vals.reduce((s, v) => s + v, 0) / vals.length;
-      if (agg === "sum")    y = vals.reduce((s, v) => s + v, 0);
-      if (agg === "count")  y = vals.length;
-      if (agg === "median") { const s = [...vals].sort((a, b) => a - b); y = s[Math.floor(s.length / 2)]; }
-      return { t: tv, y };
-    }).sort((a, b) => a.t - b.t);
-    return { grp, pts };
-  }).filter(s => s.pts.length > 0);
-}
-
-// SQL equivalent of aggregateTimeSeries() — GROUP BY (grpCol, tCol) inside DuckDB, so
-// only the resulting (group × period) points cross into JS, correct and fast at any
-// row count. Falls back to the JS version above for small/non-DuckDB datasets and
-// filtered views. Reused for flatY too (grpCol="", agg="mean" — always the mean of
-// yCol per period, independent of the chart's own agg selector).
-async function fetchAggregateTimeSeriesSQL(duckTable, tCol, yCol, grpCol, agg) {
-  const esc = s => `"${String(s).replace(/"/g, '""')}"`;
-  const AGG_SQL = {
-    mean:   c => `avg(${c})`,
-    sum:    c => `sum(${c})`,
-    count:  () => `count(*)`,
-    median: c => `percentile_cont(0.5) WITHIN GROUP (ORDER BY ${c})`,
-  };
-  const grpSel = grpCol ? `${esc(grpCol)} AS grp, ` : "";
-  const groupBy = grpCol ? `${esc(grpCol)}, ${esc(tCol)}` : esc(tCol);
-  const where = [`${esc(tCol)} IS NOT NULL`, ...(agg !== "count" ? [`${esc(yCol)} IS NOT NULL`] : [])].join(" AND ");
-  const sql = `SELECT ${grpSel}${esc(tCol)} AS t, ${AGG_SQL[agg](esc(yCol))} AS y FROM "${duckTable}" WHERE ${where} GROUP BY ${groupBy} ORDER BY ${groupBy}`;
-  const { rows } = await queryDuckDB(sql);
-  const byGrp = new Map();
-  rows.forEach(r => {
-    const grp = grpCol ? String(r.grp ?? "") : "_all_";
-    if (!byGrp.has(grp)) byGrp.set(grp, []);
-    byGrp.get(grp).push({ t: Number(r.t), y: r.y == null ? null : Number(r.y) });
-  });
-  return Array.from(byGrp.entries()).map(([grp, pts]) => ({ grp, pts: pts.filter(p => p.y != null) })).filter(s => s.pts.length > 0);
 }
 
 // ─── SVG CHARTS ───────────────────────────────────────────────────────────────
@@ -1305,7 +1255,15 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable }) {
   const [yCol,   setYCol]   = useState(numH.find(h => h !== tCol) ?? "");
   const [grpCol, setGrpCol] = useState(""); // "" = no grouping
   const [agg,    setAgg]    = useState("mean"); // mean | sum | count | median
-  const [tsView, setTsView] = useState("line"); // "line" | "acf" | "adf"
+  const [tsView, setTsView] = useState("line"); // "line" | "multi" | "acf" | "adf"
+  // plot.zoo: one panel per variable. Kept separate from yCol because the ACF and
+  // ADF views test ONE series — a multi-selection there would have to silently
+  // pick one of them.
+  const [multiCols, setMultiCols] = useState([]);
+  const multiCandidates = numH.filter(h => h !== tCol);
+  // Empty selection means "not chosen yet", not "nothing": show the first few so
+  // the view has something on screen the moment it is opened.
+  const multiEffective = (multiCols.length ? multiCols.filter(c => multiCandidates.includes(c)) : multiCandidates.slice(0, 3)).slice(0, 8);
   const [seriesColors, setSeriesColors] = useState({}); // grp -> user-picked color override
 
   // ── Flat sorted series for ACF/ADF (no grouping, mean agg) — JS fallback ────
@@ -1385,16 +1343,8 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable }) {
     const sx = t => PAD.l + ((t - tMin) / (tMax - tMin || 1)) * iW;
     const sy = v => PAD.t + iH - ((v - yLo) / (yHi - yLo)) * iH;
 
-    // ticks
-    function niceTicks(lo, hi, n = 5) {
-      const range = hi - lo; if (!range) return [lo];
-      const step = Math.pow(10, Math.floor(Math.log10(range / n)));
-      const nice = [1,2,2.5,5,10].find(s => range/(s*step) <= n) * step;
-      const start = Math.ceil(lo / nice) * nice;
-      const out = [];
-      for (let v = start; v <= hi + nice*0.01; v += nice) out.push(parseFloat(v.toFixed(10)));
-      return out.length >= 2 ? out : [lo, hi];
-    }
+    // Ticks come from the shared helper so the single-series and multi-series
+    // views cannot end up with different axis conventions.
     const xTicks = niceTicks(tMin, tMax, 6);
     const yTicks = niceTicks(yLo, yHi, 5);
 
@@ -1420,12 +1370,13 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable }) {
     <div>
       {/* Sub-tab toggle */}
       <div style={{ display: "flex", gap: 1, background: C.border, borderRadius: 3, overflow: "hidden", marginBottom: "1rem", width: "fit-content", alignItems: "center" }}>
-        {[["line","⬡ Line chart"],["acf","⬡ ACF / PACF"],["adf","⬡ ADF test"]].map(([k, l]) => (
+        {[["line","⬡ Line chart"],["multi","⬡ Multi-series"],["acf","⬡ ACF / PACF"],["adf","⬡ ADF test"]].map(([k, l]) => (
           <button key={k} onClick={() => setTsView(k)} style={{ padding: "0.3rem 0.9rem", background: tsView === k ? C.surface3 : C.surface, border: "none", borderBottom: tsView === k ? `2px solid ${C.teal}` : "2px solid transparent", color: tsView === k ? C.teal : C.textMuted, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s" }}>{l}</button>
         ))}
         {onPin&&<div style={{padding:"0 6px",background:C.surface}}>
           <PinBtn onClick={()=>{
             if(tsView==="line") onPin({kind:"timeseries",yCol,timeCol:tCol,groupCol:grpCol||null,agg},`Time series: ${agg}(${yCol}) over ${tCol}${grpCol?` by ${grpCol}`:""}`);
+            else if(tsView==="multi") onPin({kind:"timeseries",yCol:(multiEffective[0]??yCol),timeCol:tCol,groupCol:null,agg},`Multi-series: ${multiEffective.join(", ")} over ${tCol}`);
             else if(tsView==="acf") onPin({kind:"acf_pacf",yCol,timeCol:tCol,maxLag},`ACF/PACF: ${yCol} (lags 1–${maxLag})`);
             else onPin({kind:"adf",yCol,timeCol:tCol,lagOrder:2},`ADF test: ${yCol}`);
           }}/>
@@ -1472,6 +1423,50 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable }) {
           </select>
         </div>
       </div>
+
+      {/* Multi-series (plot.zoo) */}
+      {tsView === "multi" && (
+        <div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginBottom: "0.8rem" }}>
+            <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textMuted }}>panels</span>
+            {multiCandidates.map(h => {
+              const on = multiEffective.includes(h);
+              return (
+                <button key={h} onClick={() => {
+                  const base = multiCols.length ? multiCols : multiEffective;
+                  setMultiCols(on ? base.filter(c => c !== h) : [...base, h].slice(0, 8));
+                }} style={{
+                  padding: "0.18rem 0.5rem",
+                  background: on ? `${C.teal}18` : "transparent",
+                  border: `1px solid ${on ? C.teal : C.border2}`,
+                  borderRadius: 2, color: on ? C.teal : C.textDim,
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, cursor: "pointer",
+                }}>{h}</button>
+              );
+            })}
+          </div>
+          {/* Group-by belongs to the single-series chart. Saying so beats
+              quietly ignoring the selector still sitting above this view. */}
+          {grpCol && (
+            <div style={{ marginBottom: 8, fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.body.fontFamily }}>
+              Group-by ({grpCol}) is not used here — a multi-series view draws one line per variable, like R's plot.zoo. Use the Line chart view to compare groups.
+            </div>
+          )}
+          {agg === "count" && (
+            <div style={{ marginBottom: 8, fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.body.fontFamily }}>
+              Count per period is the same number for every variable, so every panel would be identical — showing the mean instead.
+            </div>
+          )}
+          <MultiSeriesChart
+            rows={rows}
+            tCol={tCol}
+            yCols={multiEffective}
+            agg={agg === "count" ? "mean" : agg}
+            duckTable={duckTable}
+            colors={COLORS}
+          />
+        </div>
+      )}
 
       {/* ACF / PACF panel */}
       {tsView === "acf" && (
@@ -2607,11 +2602,13 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             "Use it to eyeball a subgroup without committing to a cleaning step",
             "Stats, plots and correlations all recompute against the filtered rows instantly",
           ]},
-          { heading: "Compare groups", items: [
+          { heading: "Hypothesis tests", items: [
             "Below Group Summarize: pick an outcome, a group column and two of its levels",
             "A difference in means IS the ATE — reported with its standard error, t and p, not just the two averages",
             "Also does proportions (binary outcome) and a variance ratio; it respects the ⊘ filter, so a subgroup contrast matches the plots beside it",
-            "Copies as t.test(y ~ treat, data = df) — the script references your data instead of pasting it in",
+            "Ljung-Box (or Box-Pierce) tests a column for serial correlation; Jarque-Bera tests it for normality — no model needed first",
+            "Both run on x, |x| or x²: near-zero autocorrelation in x with strong autocorrelation in |x| and x² is volatility clustering",
+            "Copies as t.test(y ~ treat, data = df) or Box.test(x, lag = 10, type = \"Ljung-Box\") — the script references your data instead of pasting it in",
           ]},
           { heading: "Summary", items: [
             "5-number summary (mean, SD, median, min, max) for all numeric variables",
@@ -2625,18 +2622,26 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           ]},
           { heading: "Time Series", items: [
             "Line chart: aggregate Y over time, optionally split by group",
-            "ACF / PACF correlograms for autocorrelation diagnosis",
+            "Multi-series: R's plot.zoo — one stacked panel per variable, sharing the time axis and each keeping its own y scale",
+            "That per-panel scale is the point: a rate and an index level share a date axis and nothing else, and one shared y axis flattens the smaller of the two",
+            "ACF / PACF correlograms for autocorrelation diagnosis, and an ADF unit-root test",
+            "Multi-series copies as plot.zoo() / df.plot(subplots=True) / tsline + graph combine — with the aggregation the chart applied, not without it",
           ]},
           { heading: "Correlation", items: [
             "Pearson correlation heatmap across all numeric variables",
             "Red = negative · Teal = positive",
+            "Below it, R's pairs(): a scatterplot matrix over the variables you pick, correlations and significance above the diagonal",
+            "Two variables can share a correlation of 0.0 and look nothing alike — the matrix shows the shape the single number hides",
+            "Copies as pairs() / pd.plotting.scatter_matrix / graph matrix",
           ]},
           { heading: "Plot Builder", items: [
             "Layer-based chart editor — stack as many layers as you need on one canvas",
-            "Geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, h-line, v-line",
+            "Geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, ACF, h-line, v-line",
             "Aesthetic mappings (x, y, colour), stacking and jitter, palette presets, axis and label controls",
             "facet_wrap: split into one panel per level of a column, with a column-count control",
             "Histogram and density take either a bin count or a bin width — bin width uses ggplot's centred edges",
+            "ACF draws R's correlogram: pick the series column, choose ACF or PACF, a max lag and the ±z/√n band; it reads row order, so sort by time first",
+            "The ACF geom also runs on |x| and x² — the correlogram of squared returns is the volatility-clustering picture",
             "Saved plots store the recipe, not a picture — they redraw against the current data, and that is why they can be exported as a runnable script",
             "Save overwrites the plot you loaded from the history; Save as new forks it into its own entry, so you can keep an original and a variant side by side",
             "Export as SVG or PNG, or copy the equivalent R / Python / Stata plot script",
@@ -2677,7 +2682,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
                 columns={numericCols.map(h => ({ name: h, values: filteredRows.map(r => r[h]) }))}
                 rows={filteredRows}
                 headers={headers}
-                title="Compare groups — hypothesis test"
+                title="Hypothesis tests — groups & series"
               />
             </div>
           </>
@@ -2697,6 +2702,13 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
                 <CorrHeatmap headers={headers} rows={filteredRows} info={info} duckTable={filterConds.length ? null : duckTable}/>
               </div>
               <PlotExportBar getEl={() => corrRef.current} filename="correlation_heatmap" />
+            </div>
+            {/* The matrix answers the same question at a different resolution:
+                a correlation of 0.0 on a perfect U and one on a shapeless cloud
+                are the same heatmap cell and obviously different panels. */}
+            <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Scatterplot matrix · pairs()</div>
+              <ScatterMatrix headers={headers} rows={filteredRows} info={info} usingPreview={usingPreview}/>
             </div>
           </div>
         )}

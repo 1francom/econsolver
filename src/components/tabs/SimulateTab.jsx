@@ -921,7 +921,8 @@ export default function SimulateTab({ onAddDataset, rows = [], headers = [], onA
         ]},
         { heading: "Stats workspace", items: [
           "Below the builder: variables, computed columns, resampling, probability and distribution tools",
-          "Sample tests: one-sample mean t-test, variance χ² test, and generic parameter t/z tests",
+          "Sample tests: one- and two-sample mean t-tests, variance χ² and variance-ratio F, proportions, correlation, and a generic parameter t/z test",
+          "Series tests: Ljung-Box / Box-Pierce for serial correlation and Jarque-Bera for normality, each runnable on x, |x| or x²",
           "These run on any numeric column — simulated or real — before you commit to a model",
         ]},
       ]} />

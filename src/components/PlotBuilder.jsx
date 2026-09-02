@@ -23,6 +23,7 @@ import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
 import { buildGgplot, buildMatplotlibPlot, buildStataPlot, resolvePlotPreamble } from "../services/export/plotScript.js";
 import { toDfVar } from "../pipeline/exporter.js";
+import { correlogramSeries, SERIES_TRANSFORMS } from "../math/timeSeries.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
 import { buildPlotsFile, parsePlotsFile, downloadJSON } from "../services/export/artifactIO.js";
 
@@ -98,6 +99,7 @@ export const GEOMS = [
   { id: "errorbar",  label: "Errorbar"  },
   { id: "ribbon",    label: "Ribbon"    },
   { id: "tile",      label: "Tile"      },
+  { id: "acf",       label: "ACF"       },
   { id: "hline",     label: "H-Line"    },
   { id: "vline",     label: "V-Line"    },
 ];
@@ -194,6 +196,7 @@ const GEOM_OPTS_DEFAULTS = {
   hline:     { strokeWidth: 1.5, dash: "dashed" },
   vline:     { strokeWidth: 1.5, dash: "dashed" },
   tile:      { scheme: "viridis", showValues: false, decimals: 2 },
+  acf:       { maxLag: 20, kind: "acf", transform: "raw", ci: 0.95, showCI: true },
 };
 
 function mkLayer(geom, idx) {
@@ -509,6 +512,30 @@ function buildMarksForLayer(Plt, ly, rows, showSE = true, facetConst = null) {
     // indices, years, bins). That matches the heatmap use case; for scattered
     // continuous coordinates ggplot's geom_tile would center a tile on each
     // point instead, which `cell` does not reproduce.
+    case "acf": {
+      if (aes.x) {
+        const series = correlogramSeries(rows, aes.x, ly.opts);
+        if (series) {
+          const { showCI = true } = ly.opts || {};
+          // Bars from the zero baseline, R's type = "h".
+          marks.push(Plt.ruleX(series.data, {
+            x: "lag", y1: 0, y2: "value",
+            stroke: colorVal, strokeWidth: 2, strokeOpacity: op, ...fc,
+          }));
+          // The zero line is part of the chart here, not the plot-level rule:
+          // an ACF layer contributes no y values, so the shared ruleY never fires.
+          marks.push(Plt.ruleY([0], { stroke: "#888", strokeWidth: 1, strokeOpacity: 0.6, ...fc }));
+          if (showCI) {
+            marks.push(Plt.ruleY([series.band, -series.band], {
+              stroke: colorVal, strokeWidth: 1.2, strokeOpacity: 0.75 * op,
+              strokeDasharray: "4,4", ...fc,
+            }));
+          }
+        }
+      }
+      break;
+    }
+
     case "tile": {
       if (aes.x && aes.y) {
         const { showValues = false, decimals = 2 } = ly.opts || {};
@@ -696,6 +723,7 @@ export function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height,
         // Geoms that pre-compute a statistic in JS need one pass per panel (see
         // buildMarksForLayer's note); everything else facets by data identity.
         const derived = ly.geom === "boxplot"
+          || ly.geom === "acf"
           || (ly.geom === "smooth" && (ly.opts?.method ?? "lm") !== "lm");
         if (facetActive && derived) {
           for (const lv of facetLevels) {
@@ -750,6 +778,12 @@ export function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height,
       //     difference up to full panel height. ggplot's geom_col always keeps 0
       //     in the scale, so mirror that instead of dropping the domain.
       const hasBar = layers.some(ly => ly.visible && ly.geom === "bar");
+      // An ACF layer's x is the LAG, not the column named in aes.x — that column
+      // holds the series itself and never reaches an axis. xVals below is built
+      // from it all the same, so the shared ruleX([0]) would be placed from the
+      // wrong numbers: on returns centred near zero it lands on lag 0 and reads
+      // as part of the correlogram. The layer draws its own baseline instead.
+      const hasACF = layers.some(ly => ly.visible && ly.geom === "acf");
       // Bar value labels are drawn ~8px above the bar top in a 10px font. With a
       // domain of exactly [0, max] the tallest bar reaches the panel edge, so the
       // label lands on the frame. ggplot never shows this because its default 5%
@@ -763,7 +797,7 @@ export function PlotCanvas({ layers, rows, xLabel, yLabel, title, width, height,
       // Only pad the end the labels actually sit at: negative bars label downward.
       const autoYMin = hasBar ? Math.min(0, yMin) - (yMin < 0 ? labelPad : 0) : yMin;
       const autoYMax = hasBar ? Math.max(0, yMax) + (yMax > 0 ? labelPad : 0) : yMax;
-      const showRuleX = !xIsDate && !hasBoxplot && !hasTile && !hasBar && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
+      const showRuleX = !xIsDate && !hasBoxplot && !hasTile && !hasBar && !hasACF && xVals.length > 0 && 0 >= xMin - xRange * 0.2 && 0 <= xMax + xRange * 0.2;
       const showRuleY = !hasTile && yVals.length > 0 && 0 >= yMin - yRange * 0.2 && 0 <= yMax + yRange * 0.2;
 
       const zeroStyle = { stroke: "#888", strokeWidth: 1.4, strokeOpacity: 0.55 };
@@ -1253,6 +1287,36 @@ function GeomOptsRow({ layer, onChange, headers = [] }) {
     </>}
   </>;
 
+  if (geom === "acf") return <>
+    <div style={{ display: "flex", gap: 2 }}
+      title="ACF plots lag 0 (always 1, as R does); PACF starts at lag 1.">
+      {[["acf", "ACF"], ["pacf", "PACF"]].map(([k, l]) => (
+        <button key={k} onClick={() => set("kind", k)} style={chip((opts.kind ?? "acf") === k)}>{l}</button>
+      ))}
+    </div>
+    {lbl("max lag")}
+    <input type="number" min={1} max={200} value={opts.maxLag ?? 20}
+      onChange={e => set("maxLag", e.target.value === "" ? "" : +e.target.value)}
+      onBlur={e => { if (!(+e.target.value >= 1)) set("maxLag", 20); }}
+      style={{ width: 52, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 4px", color: C.text, outline: "none" }} />
+    <div style={{ display: "flex", gap: 2 }}
+      title="Run the same correlogram on the series, its absolute values and its squares. Near-zero autocorrelation in x with strong autocorrelation in |x| and x² is volatility clustering.">
+      {SERIES_TRANSFORMS.map(t => (
+        <button key={t.id} onClick={() => set("transform", t.id)} style={chip((opts.transform ?? "raw") === t.id)}>{t.label}</button>
+      ))}
+    </div>
+    <button onClick={() => set("showCI", !(opts.showCI ?? true))} style={chip(opts.showCI ?? true)}>
+      band {(opts.showCI ?? true) ? "on" : "off"}
+    </button>
+    {(opts.showCI ?? true) && <div style={{ display: "flex", gap: 2 }}>
+      {[[0.90, "90%"], [0.95, "95%"], [0.99, "99%"]].map(([v, l]) => (
+        <button key={v} onClick={() => set("ci", v)} style={chipGold((opts.ci ?? 0.95) === v)}>{l}</button>
+      ))}
+    </div>}
+    <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}
+      title="An autocorrelation is only meaningful on a series already sorted by time — sort in Clean first, exactly as R's acf() trusts the order of the vector it is given.">reads row order</span>
+  </>;
+
   if (geom === "bar") return <>
     {lbl("stroke")}
     {slider("strokeWidth", 0, 2, 0.25, 0)}
@@ -1313,7 +1377,9 @@ function LayerEditorInline({ layer, onChange, headers }) {
   const isTile       = layer.geom === "tile";
   const isRefLine    = ["hline", "vline"].includes(layer.geom);
   const needsYMinMax = ["errorbar", "ribbon"].includes(layer.geom);
-  const noY          = ["histogram", "density", "hline", "vline"].includes(layer.geom);
+  // An ACF layer takes one column — the series — and derives both axes from it.
+  const isACF        = layer.geom === "acf";
+  const noY          = ["histogram", "density", "hline", "vline", "acf"].includes(layer.geom);
   const noX          = ["hline", "vline"].includes(layer.geom);
 
   const selStyle = active => ({
@@ -1337,7 +1403,7 @@ function LayerEditorInline({ layer, onChange, headers }) {
           style={{ ...selStyle(!!layer.value), width: 60 }} />
       </>}
       {!noX && <>
-        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{isMap ? "lon" : "x"}</span>
+        <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{isMap ? "lon" : isACF ? "series" : "x"}</span>
         <select value={layer.aes.x} onChange={e => onChange({ ...layer, aes: { ...layer.aes, x: e.target.value } })} style={selStyle(!!layer.aes.x)}>
           <option value="">— col —</option>
           {headers.map(h => <option key={h} value={h}>{h}</option>)}
@@ -1362,7 +1428,7 @@ function LayerEditorInline({ layer, onChange, headers }) {
           {headers.map(h => <option key={h} value={h}>{h}</option>)}
         </select>
       </>}
-      {!isRefLine && <>
+      {!isRefLine && !isACF && <>
         {/* For tile this channel IS the fill value (ggplot aes(fill = …)), not a
             grouping colour — label it so, and mark it required rather than optional. */}
         <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>{isTile ? "fill" : "color"}</span>

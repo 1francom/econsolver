@@ -1,6 +1,14 @@
 // Standalone R / Python / Stata snippets for data-level Stat & Simulation tests.
 
 import { groupInferenceSnippet, columnRefSnippet } from "./statInferenceGroupScript.js";
+import { SERIES_TRANSFORMS } from "../../math/timeSeries.js";
+
+const tExpr = (id, lang, x) => {
+  const t = SERIES_TRANSFORMS.find(e => e.id === id) ?? SERIES_TRANSFORMS[0];
+  return t[lang](x);
+};
+const seriesLines = (transform, lang, v) =>
+  (transform && transform !== "raw") ? [`${v} = ${tExpr(transform, lang, v)}`] : [];
 
 function finiteNumber(v) {
   return typeof v === "number" && isFinite(v);
@@ -55,6 +63,8 @@ function normalizeOp(op, result) {
     "var-ratio": "varianceRatioTest",
     bootstrap: "bootstrapStatistic",
     permutation: "permutationTest",
+    "ljung-box": "ljungBoxTest",
+    normality: "normalityTest",
   };
   return aliases[op] ?? aliases[result?.test] ?? op;
 }
@@ -356,6 +366,18 @@ function generateR(op, params, result) {
   if (op === "pairedMeanTest") return [`# Standalone paired mean test`, `a <- ${rVec(a)}`, `b <- ${rVec(b)}`, `print(t.test(a, b, paired = TRUE, mu = ${mu0}, alternative = ${JSON.stringify(alt)}))`].join("\n");
   if (op === "correlationTest") return [`# Standalone correlation test`, `a <- ${rVec(a)}`, `b <- ${rVec(b)}`, `print(cor.test(a, b, method = ${JSON.stringify(params.method ?? result?.method ?? "pearson")}, alternative = ${JSON.stringify(alt)}))`].join("\n");
   if (op === "varianceRatioTest") return [`# Standalone variance-ratio test`, `a <- ${rVec(a)}`, `b <- ${rVec(b)}`, `print(var.test(a, b, alternative = ${JSON.stringify(alt)}))`].join("\n");
+  if (op === "ljungBoxTest") return [
+    `# Standalone ${params.type === "Box-Pierce" ? "Box-Pierce" : "Ljung-Box"} test`,
+    `x <- ${rVec(a)}`,
+    ...(params.transform && params.transform !== "raw" ? [`x <- ${tExpr(params.transform, "rExpr", "x")}`] : []),
+    `print(Box.test(x, lag = ${numberLiteral(params.lags, "10")}, type = ${JSON.stringify(params.type === "Box-Pierce" ? "Box-Pierce" : "Ljung-Box")}, fitdf = ${numberLiteral(params.fitdf, "0")}))`,
+  ].join("\n");
+  if (op === "normalityTest") return [
+    "# Standalone Jarque-Bera test (requires: install.packages(\"tseries\"))",
+    `x <- ${rVec(a)}`,
+    ...(params.transform && params.transform !== "raw" ? [`x <- ${tExpr(params.transform, "rExpr", "x")}`] : []),
+    "print(tseries::jarque.bera.test(x))",
+  ].join("\n");
   if (op === "varianceTest") return [
     "# Standalone one-sample variance test",
     `x <- ${rVec(a)}`,
@@ -403,6 +425,19 @@ function generatePython(op, params, result) {
     `p_value = ${alt === "less" ? "cdf" : alt === "greater" ? "1 - cdf" : "2 * min(cdf, 1 - cdf)"}`,
     `print({"F": f_stat, "df1": len(a) - 1, "df2": len(b) - 1, "p_value": p_value})`,
   ].join("\n");
+  if (op === "ljungBoxTest") return [
+    `# Standalone ${params.type === "Box-Pierce" ? "Box-Pierce" : "Ljung-Box"} test`,
+    ...head,
+    "from statsmodels.stats.diagnostic import acorr_ljungbox",
+    ...seriesLines(params.transform, "pyExpr", "a"),
+    `print(acorr_ljungbox(a, lags=[${numberLiteral(params.lags, "10")}], model_df=${numberLiteral(params.fitdf, "0")}, boxpierce=${params.type === "Box-Pierce" ? "True" : "False"}, return_df=True))`,
+  ].join("\n");
+  if (op === "normalityTest") return [
+    "# Standalone Jarque-Bera test",
+    ...head,
+    ...seriesLines(params.transform, "pyExpr", "a"),
+    "print(stats.jarque_bera(a))",
+  ].join("\n");
   if (op === "varianceTest") return [
     "# Standalone one-sample variance test", ...head, `sigma2_0 = ${mu0}`,
     `statistic = (len(a) - 1) * np.var(a, ddof=1) / sigma2_0`, `cdf = stats.chi2.cdf(statistic, len(a) - 1)`,
@@ -430,6 +465,27 @@ function generateStata(op, params, result) {
     return [`* Standalone correlation test`, ...stataData({ a, b }), command, `* Requested alternative: ${alt}; these commands report the standard two-sided significance.`].join("\n");
   }
   if (op === "varianceRatioTest") return [`* Standalone variance-ratio test`, ...stataData({ a, b }), `sdtest a == b`, `* Requested alternative: ${alt}; Stata displays one- and two-sided p-values.`].join("\n");
+  if (op === "ljungBoxTest") return [
+    "* Standalone Ljung-Box test",
+    ...stataData({ x: a }),
+    `generate double _lbx = ${tExpr(params.transform ?? "raw", "stataExpr", "x")}`,
+    "generate long _lbt = _n",
+    "tsset _lbt",
+    `wntestq _lbx, lags(${numberLiteral(params.lags, "10")})`,
+    ...(params.type === "Box-Pierce" ? ["* NOTE: wntestq is the Ljung-Box Q. Base Stata has no Box-Pierce variant, so this is NOT the statistic the app displayed."] : []),
+    ...(Number(params.fitdf) > 0 ? [`* NOTE: wntestq has no fitdf option; the app used df = lags - ${numberLiteral(params.fitdf, "0")}.`] : []),
+  ].join("\n");
+  if (op === "normalityTest") return [
+    "* Standalone Jarque-Bera test",
+    "* Base Stata has no Jarque-Bera command (sktest is a different test), so JB",
+    "* is computed from the sample moments directly.",
+    ...stataData({ x: a }),
+    `generate double _jbx = ${tExpr(params.transform ?? "raw", "stataExpr", "x")}`,
+    "quietly summarize _jbx, detail",
+    "scalar JB = r(N)/6 * (r(skewness)^2 + (r(kurtosis) - 3)^2/4)",
+    "scalar JB_p = chi2tail(2, JB)",
+    'display "JB = " JB "  df = 2  p = " JB_p',
+  ].join("\n");
   if (op === "varianceTest") return [
     "* Standalone one-sample variance test", ...stataData({ x: a }), `scalar sigma2_0 = ${mu0}`, `quietly summarize x`,
     `scalar chi2_stat = (r(N) - 1) * r(Var) / sigma2_0`, `scalar cdf = chi2(r(N) - 1, chi2_stat)`,

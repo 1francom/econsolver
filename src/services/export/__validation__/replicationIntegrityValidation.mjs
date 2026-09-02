@@ -93,6 +93,7 @@ const CFG = {
   pivot_wider:   { idCols: ["id"], namesFrom: "t", valuesFrom: ["wage"], valuesFill: 0, namesPrefix: "w" },
   factor_interactions: { contCol: "wage", dummyCols: ["d1", "d2"], prefix: "wxd_" },
   inject_column: { colName: "pred", values: [1, 2, 3, 4] },
+  connected_components: { colA: "id", colB: "region", nn: "component", keepLargest: "all" },
   balance_panel: { entityCol: "id", timeCol: "t", outcomeCols: ["wage"], staticCols: ["region"], fillValue: 0 },
 };
 
@@ -259,6 +260,44 @@ section("T6 · factor reference category export");
   const noRefCfg = { ...refCfg, model: { ...refCfg.model, factorRefs: {} } };
   const rNoRef = generateRScript(noRefCfg);
   check("no factorRefs entry → plain factor(), no relevel()", /factor\(region\)/.test(rNoRef) && !/relevel/.test(rNoRef));
+}
+
+// ─── T7 — A TRANSLATED STEP'S LIBRARIES REACH THE SCRIPT HEADER ──────────────
+// connected_components had three working translators and no way to reach them
+// (T1 catches that). It ALSO called igraph:: and networkx without either
+// appearing in the install hint or the imports — so once the step was reachable,
+// the script still died on that line. A translation is not done until the
+// packages it calls are declared.
+section("T7 · emitted code's libraries are declared in the header");
+{
+  for (const type of STEP_TYPES) {
+    if (KNOWN_GAPS.has(type)) continue;
+    const step = buildStep(type);
+
+    // R: every pkg::fn() in the body must appear in the install.packages() line.
+    let rScript;
+    try { rScript = GEN.R(step); } catch { rScript = null; }
+    if (rScript) {
+      const installLine = rScript.split("\n").find(l => l.includes("install.packages")) ?? "";
+      const called = new Set([...rScript.matchAll(/\b([A-Za-z][A-Za-z0-9.]*)::/g)].map(m => m[1]));
+      for (const pkg of called) {
+        check(`R:${type} declares ${pkg}`, installLine.includes(`"${pkg}"`) || rScript.includes(`install.packages("${pkg}")`), installLine);
+      }
+    }
+
+    // Python: a module the body names must be imported. Scanned by name rather
+    // than by parsing, so the list is explicit — extend it when a translator
+    // starts calling something new.
+    let pyScript;
+    try { pyScript = GEN.Py(step); } catch { pyScript = null; }
+    if (pyScript) {
+      for (const mod of ["networkx", "geopy", "scipy", "sklearn", "geopandas", "shapely", "tobler"]) {
+        if (!new RegExp(`\\b${mod}\\.`).test(pyScript)) continue;
+        const imported = new RegExp(`^\\s*(import ${mod}\\b|from ${mod}[ .])`, "m").test(pyScript);
+        check(`Py:${type} imports ${mod}`, imported, `uses ${mod} without importing it`);
+      }
+    }
+  }
 }
 
 // ─── GAP SUMMARY ──────────────────────────────────────────────────────────────
