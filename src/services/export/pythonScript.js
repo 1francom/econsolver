@@ -65,6 +65,7 @@ export function generatePythonScript(config = {}) {
   if (pkgs.has("statsmodels"))  installPkgs.push("statsmodels");
   if (pkgs.has("linearmodels")) installPkgs.push("linearmodels");
   if (pkgs.has("scipy"))        installPkgs.push("scipy");
+  if (pkgs.has("networkx"))     installPkgs.push("networkx");
   if (installPkgs.length) {
     lines.push(`# Install required packages if needed:`);
     lines.push(`#   pip install ${installPkgs.join(" ")}`);
@@ -89,6 +90,10 @@ export function generatePythonScript(config = {}) {
   }
   if (pkgs.has("scipy")) {
     lines.push("from scipy import stats");
+  }
+  // The translator writes networkx.Graph() with the full module name.
+  if (pkgs.has("networkx")) {
+    lines.push("import networkx");
   }
   lines.push("");
 
@@ -129,6 +134,9 @@ function buildPackageList(modelType, pipeline = []) {
   const pkgs = new Set(["statsmodels"]);
   if (["FE","FD","2SLS","TWFE","GMM","LIML"].includes(modelType)) pkgs.add("linearmodels");
   if (modelType === "RDD" || modelType === "SpatialRDD") pkgs.add("scipy");
+  // Pipeline-driven: the connected_components translator calls networkx, and
+  // without the import the script dies on that line with a NameError.
+  if (pipeline.some(s => s?.type === "connected_components")) pkgs.add("networkx");
   return pkgs;
 }
 
@@ -629,8 +637,14 @@ function transpileStep(step, allDatasets = {}) {
       ].join("\n");
     }
 
-    default:
+    // See the identically-motivated note in rScript.js: two transpilers cover
+    // the same step types and only sp_* was routed between them, so a step
+    // translated in stepTranslators.js and not here silently became a comment.
+    default: {
+      const central = toPython(step, "df", allDatasets);
+      if (central && !/^#\s*\[unknown step/.test(central)) return central;
       return `# [${type}] — not yet transpiled`;
+    }
   }
 }
 
@@ -1352,7 +1366,8 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
 
   const needsLinear = configs.some(c => ["FE","FD","2SLS","TWFE"].includes(c.model?.type));
   const needs2SLS   = configs.some(c => c.model?.type === "2SLS");
-  const installPkgs = ["statsmodels", ...(needsLinear ? ["linearmodels"] : [])];
+  const needsNetworkx = pipeline.some(s => s?.type === "connected_components");
+  const installPkgs = ["statsmodels", ...(needsLinear ? ["linearmodels"] : []), ...(needsNetworkx ? ["networkx"] : [])];
   lines.push(`# Install required packages if needed:`);
   lines.push(`#   pip install ${installPkgs.join(" ")}`);
   lines.push("");
@@ -1364,6 +1379,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
   lines.push("from patsy.contrasts import Treatment");
   if (needsLinear) lines.push("from linearmodels.panel import PanelOLS, FirstDifferenceOLS");
   if (needs2SLS)   lines.push("from linearmodels.iv import IV2SLS");
+  if (needsNetworkx) lines.push("import networkx");
   lines.push("");
 
   lines.push(`# ── Load data ─────────────────────────────────────────────────────────────`);

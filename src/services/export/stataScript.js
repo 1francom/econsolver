@@ -644,8 +644,14 @@ function transpileStep(step, allDatasets = {}) {
       ].join("\n");
     }
 
-    default:
+    // See the identically-motivated note in rScript.js: two transpilers cover
+    // the same step types and only sp_* was routed between them, so a step
+    // translated in stepTranslators.js and not here silently became a comment.
+    default: {
+      const central = toStata(step, "df", allDatasets);
+      if (central && !/^\*\s*\[unknown step/.test(central)) return central;
       return `* [${type}] — not yet transpiled`;
+    }
   }
 }
 

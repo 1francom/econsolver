@@ -671,8 +671,19 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       ].join("\n");
     }
 
-    default:
+    // This file carries its own transpiler, and stepTranslators.js carries a
+    // second one for the same step types. Only the sp_* prefix was ever routed
+    // across, so a step translated THERE and not here fell straight through to
+    // the fallback marker below — which is exactly what happened to
+    // connected_components: three working translators nobody could reach.
+    // Delegating the default keeps the local table authoritative where it has
+    // an entry, and picks up the central one where it does not. A type neither
+    // knows still lands on a fallback marker, since toR's own default emits one.
+    default: {
+      const central = toR(step, dfVar, allDatasets);
+      if (central && !/^#\s*\[unknown step/.test(central)) return central;
       return `# [unknown step: ${step.type}] ${stepLabel(step)}`;
+    }
   }
 }
 
@@ -1547,13 +1558,15 @@ export function generateRScript(config) {
   );
 
   // ── Package installation guard ───────────────────────────────────────────────
+  const nsPkgs = namespacedPackages(pipeline, "df", allDatasets).filter(p => !pkgs.includes(p));
   lines.push(
     `# ── 0. Packages ──────────────────────────────────────────────────────────`,
     `# Install if missing:`,
-    `# install.packages(c(${pkgs.map(rStr).join(", ")}))`,
+    `# install.packages(c(${[...pkgs, ...nsPkgs].map(rStr).join(", ")}))`,
     ``
   );
   pkgs.forEach(p => lines.push(`library(${p})`));
+  // Called as pkg::fn() below — installed, deliberately not attached.
   lines.push(``);
 
   // ── Data loading ─────────────────────────────────────────────────────────────
@@ -1705,8 +1718,9 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
     ``
   );
 
+  const nsPkgs = namespacedPackages(pipeline, "df", allDatasets).filter(p => !pkgs.has(p));
   lines.push(`# ── 0. Packages ──────────────────────────────────────────────────────────`);
-  lines.push(`# install.packages(c(${[...pkgs].map(rStr).join(", ")}))`);
+  lines.push(`# install.packages(c(${[...pkgs, ...nsPkgs].map(rStr).join(", ")}))`);
   [...pkgs].sort().forEach(p => lines.push(`library(${p})`));
   lines.push(``);
 
@@ -1920,6 +1934,34 @@ export function generateSubsetRScript({ filename = "dataset.csv", pipeline = [],
 }
 
 // ─── PACKAGE LIST ─────────────────────────────────────────────────────────────
+// Packages a step calls through `pkg::fn()` rather than after a library() call.
+// They belong in the install hint — the script fails without them — but NOT in
+// the library() block: igraph exports union/groups/intersection, which mask
+// dplyr's after a `library(igraph)` placed below `library(dplyr)`, and every
+// pipeline step above it is dplyr. That masking is why the translator writes
+// `igraph::components()` in the first place.
+//
+// Read off the EMITTED CODE rather than a table of step type → package. A hand
+// kept table is how sf ended up missing from every spatial step's install hint
+// and lubridate from date_parse's: the translator was updated, the table was
+// not, and nothing failed until the user ran the script. Transpiling twice is
+// cheap and pure; drifting is not.
+export function namespacedPackages(pipeline = [], dfVar = "df", allDatasets = {}) {
+  const out = new Set();
+  for (const step of pipeline) {
+    let code;
+    try { code = transpileStep(step, dfVar, allDatasets); }
+    catch { continue; }
+    if (typeof code !== "string") continue;
+    for (const line of code.split("\n")) {
+      // Comments name packages they do not call ("see igraph::components").
+      if (line.trim().startsWith("#")) continue;
+      for (const m of line.matchAll(/\b([A-Za-z][A-Za-z0-9.]*)::/g)) out.add(m[1]);
+    }
+  }
+  return [...out].sort();
+}
+
 function buildPackageList(modelType, pipeline, seType = "classical") {
   const pkgs = new Set(["dplyr", "tidyr", "readr", "fixest", "modelsummary"]);
 
