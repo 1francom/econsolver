@@ -42,6 +42,7 @@ export const APP_CAPABILITY_MAP = {
   Explore:   { purpose: "Descriptive stats, plots & pre-model hypothesis tests", subtabs: {
                  "Explorer": "summary stats, distributions, group contrasts, Ljung-Box / Box-Pierce serial-correlation and Jarque-Bera normality tests on any column",
                  "Correlation": "correlation heatmap plus a pairs() scatterplot matrix with correlations above the diagonal",
+                 "Time series": "line chart, multi-series plot.zoo panels (one per variable), ACF/PACF correlograms, ADF unit-root test",
                  "Plot Builder": "layered charts (point/line/bar/histogram/density/smooth/boxplot/errorbar/ribbon/tile/ACF correlogram/h-line/v-line), facet_wrap by any column" } },
   Model:     { purpose: "Estimate econometric models", subtabs: {
                  "Estimator": "pick a model — Linear (OLS), Panel (FE/FD/LSDV), DiD (2×2 DiD, TWFE DiD, CS DiD, Sun-Abraham), Event Study (Classical TWFE, CS DiD, Sun-Abraham), IV/2SLS, RDD, GMM, Synthetic Control",
