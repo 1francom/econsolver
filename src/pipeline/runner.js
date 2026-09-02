@@ -778,32 +778,45 @@ export function applyStep(rows, headers, s, context = {}) {
       const newCols = rHeaders.filter(h => h !== s.rightKey);
       const destOf = h => (H.includes(h) ? `${h}${s.suffix || "_r"}` : h);
 
-      // Build right lookup (first match wins, matching prior behavior).
-      const rightMap = new Map();
-      rRows.forEach(r => { const k = String(r[s.rightKey] ?? ""); if (!rightMap.has(k)) rightMap.set(k, r); });
+      // Group the right side by key. A MULTIMAP, not a first-match Map: dplyr's
+      // joins expand, and the DuckDB path (duckdbRunner.js "join") already emits
+      // a real SQL JOIN. Collapsing here made the same step return a different
+      // row count depending only on whether the dataset was DuckDB-backed.
+      const rightGroups = new Map();
+      rRows.forEach(r => {
+        const k = String(r[s.rightKey] ?? "");
+        const arr = rightGroups.get(k);
+        if (arr) arr.push(r); else rightGroups.set(k, [r]);
+      });
 
       // Filtering joins: add NO columns, just keep/drop left rows.
       if (how === "semi" || how === "anti") {
         R = rows.filter(r => {
-          const k = String(r[s.leftKey] ?? "");
-          const has = rightMap.has(k);
+          const has = rightGroups.has(String(r[s.leftKey] ?? ""));
           return how === "semi" ? has : !has;
         });
         break;
       }
 
-      // Right join: iterate right rows, attach matching left.
+      // Right join: iterate right rows, attach EVERY matching left row.
       if (how === "right") {
-        const leftMap = new Map();
-        rows.forEach(r => { const k = String(r[s.leftKey] ?? ""); if (!leftMap.has(k)) leftMap.set(k, r); });
-        R = rRows.map(rr => {
-          const k = String(rr[s.rightKey] ?? "");
-          const lm = leftMap.get(k);
-          const merged = {};
-          H.forEach(h => { merged[h] = lm ? (lm[h] ?? null) : null; });
-          newCols.forEach(h => { merged[destOf(h)] = rr[h] ?? null; });
-          return merged;
+        const leftGroups = new Map();
+        rows.forEach(r => {
+          const k = String(r[s.leftKey] ?? "");
+          const arr = leftGroups.get(k);
+          if (arr) arr.push(r); else leftGroups.set(k, [r]);
         });
+        const out = [];
+        rRows.forEach(rr => {
+          const lms = leftGroups.get(String(rr[s.rightKey] ?? "")) ?? [null];
+          lms.forEach(lm => {
+            const merged = {};
+            H.forEach(h => { merged[h] = lm ? (lm[h] ?? null) : null; });
+            newCols.forEach(h => { merged[destOf(h)] = rr[h] ?? null; });
+            out.push(merged);
+          });
+        });
+        R = out;
         newCols.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
         break;
       }
@@ -813,12 +826,14 @@ export function applyStep(rows, headers, s, context = {}) {
       const outRows = [];
       rows.forEach(r => {
         const k = String(r[s.leftKey] ?? "");
-        const match = rightMap.get(k);
-        if (match) {
+        const matches = rightGroups.get(k);
+        if (matches) {
           matchedRightKeys.add(k);
-          const merged = { ...r };
-          newCols.forEach(h => { merged[destOf(h)] = match[h] ?? null; });
-          outRows.push(merged);
+          matches.forEach(match => {
+            const merged = { ...r };
+            newCols.forEach(h => { merged[destOf(h)] = match[h] ?? null; });
+            outRows.push(merged);
+          });
         } else if (how === "left" || how === "full") {
           const merged = { ...r };
           newCols.forEach(h => { merged[destOf(h)] = null; });
@@ -827,6 +842,7 @@ export function applyStep(rows, headers, s, context = {}) {
         // inner: drop unmatched left rows
       });
       if (how === "full") {
+        // Every unmatched right ROW, not one per unmatched key.
         rRows.forEach(rr => {
           const k = String(rr[s.rightKey] ?? "");
           if (matchedRightKeys.has(k)) return;
@@ -837,6 +853,40 @@ export function applyStep(rows, headers, s, context = {}) {
         });
       }
       R = outRows;
+      newCols.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
+      break;
+    }
+
+    case "lookup": {
+      // m:1 attach — Stata `merge m:1`, dplyr `relationship = "many-to-one"`.
+      // Output row count ALWAYS equals the left row count. If the right key is
+      // not unique the step throws instead of picking a match: silently keeping
+      // "the first row in file order" is not a defined semantic — a re-sorted
+      // source file would change the result with nothing in the UI moving.
+      const right = context?.datasets?.[s.rightId];
+      if (!right) break;
+      const rRows = right.rows, rHeaders = right.headers;
+      const newCols = rHeaders.filter(h => h !== s.rightKey);
+      const destOf = h => (H.includes(h) ? `${h}${s.suffix || "_r"}` : h);
+
+      const byKey = new Map();
+      for (const r of rRows) {
+        const k = String(r[s.rightKey] ?? "");
+        if (byKey.has(k)) {
+          throw new Error(
+            `Lookup failed: the right key "${s.rightKey}" is not unique — value "${k}" appears more than once. ` +
+            `Use a Join (which expands to one row per match), or collapse the right dataset first with Group summarize.`
+          );
+        }
+        byKey.set(k, r);
+      }
+
+      R = rows.map(r => {
+        const match = byKey.get(String(r[s.leftKey] ?? ""));
+        const merged = { ...r };
+        newCols.forEach(h => { merged[destOf(h)] = match ? (match[h] ?? null) : null; });
+        return merged;
+      });
       newCols.forEach(h => { const d = destOf(h); if (!H.includes(d)) H = [...H, d]; });
       break;
     }

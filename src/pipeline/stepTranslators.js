@@ -702,10 +702,16 @@ export function toR(step, df = "df", allDatasets = {}) {
       return [
         `# Load right dataset: "${rightName}"`,
         `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
-        // Litux's join is a first-match LOOKUP — dedup right by key so dplyr
-        // reproduces the same row count (no many-to-many expansion).
-        `right_df <- dplyr::distinct(right_df, ${rStr(step.rightKey)}, .keep_all = TRUE)  # Litux keeps the first match per key`,
-        `${df} <- ${how}(${df}, right_df, by = c(${rStr(step.leftKey)} = ${rStr(step.rightKey)}), suffix = c("", ${rStr(step.suffix ?? "_r")}))`,
+        `${df} <- dplyr::${how}(${df}, right_df, by = c(${rStr(step.leftKey)} = ${rStr(step.rightKey)}), suffix = c("", ${rStr(step.suffix ?? "_r")}))`,
+      ].join("\n");
+    }
+
+    case "lookup": {
+      const rightName = safeDatasetName(step.rightId, allDatasets);
+      return [
+        `# Attach lookup columns from: "${rightName}" (right key must be unique)`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
+        `${df} <- dplyr::left_join(${df}, right_df, by = c(${rStr(step.leftKey)} = ${rStr(step.rightKey)}), suffix = c("", ${rStr(step.suffix ?? "_r")}), relationship = "many-to-one")`,
       ].join("\n");
     }
 
@@ -1256,18 +1262,36 @@ export function toStata(step, df = "df", allDatasets = {}) {
 
     case "join": {
       const rightName = safeDatasetName(step.rightId, allDatasets);
-      const how = step.how === "inner" ? "keepusing(_merge)" : "";
       return [
         `* Join dataset: "${rightName}"`,
         `* Save current data first`,
         `preserve`,
         `${stataRightLoad(step.rightId, allDatasets)}`,
         `rename ${stVar(step.rightKey)} ${stVar(step.leftKey)}`,
-        `* Litux's join is a first-match LOOKUP — keep one row per key so m:1 merge matches`,
-        `bysort ${stVar(step.leftKey)}: keep if _n == 1`,
         `save _right_tmp.dta, replace`,
         `restore`,
-        `merge m:1 ${stVar(step.leftKey)} using _right_tmp.dta, ${how}`,
+        `* 1:m — a key with several matches on the right produces several rows.`,
+        `* NOTE: this assumes the key is unique in the master. If BOTH sides repeat`,
+        `* it, Stata's merge cannot express the join — use joinby instead:`,
+        `*   joinby ${stVar(step.leftKey)} using _right_tmp.dta, unmatched(master)`,
+        `* UNVERIFIED against a real Stata run.`,
+        `merge 1:m ${stVar(step.leftKey)} using _right_tmp.dta`,
+        step.how === "inner" ? `keep if _merge == 3` : `drop if _merge == 2`,
+        `drop _merge`,
+      ].join("\n");
+    }
+
+    case "lookup": {
+      const rightName = safeDatasetName(step.rightId, allDatasets);
+      return [
+        `* Attach lookup columns from: "${rightName}"`,
+        `preserve`,
+        `${stataRightLoad(step.rightId, allDatasets)}`,
+        `rename ${stVar(step.rightKey)} ${stVar(step.leftKey)}`,
+        `save _right_tmp.dta, replace`,
+        `restore`,
+        `* m:1 errors out if the right key is not unique — same contract as Litux`,
+        `merge m:1 ${stVar(step.leftKey)} using _right_tmp.dta`,
         `drop if _merge == 2`,
         `drop _merge`,
       ].join("\n");
@@ -1840,10 +1864,16 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return [
         `# Join dataset: "${rightName}"`,
         `right_df = ${pyRightLoad(step.rightId, allDatasets)}`,
-        // Litux's join is a first-match LOOKUP — dedup right by key so pandas
-        // reproduces the same row count (no many-to-many expansion).
-        `right_df = right_df.drop_duplicates(subset=[${pyCol(step.rightKey)}], keep="first")  # Litux keeps the first match per key`,
         `${df} = pd.merge(${df}, right_df, left_on=${pyCol(step.leftKey)}, right_on=${pyCol(step.rightKey)}, how=${pyStr(how)}, suffixes=("", ${pyStr(step.suffix ?? "_r")}))`,
+      ].join("\n");
+    }
+
+    case "lookup": {
+      const rightName = safeDatasetName(step.rightId, allDatasets);
+      return [
+        `# Attach lookup columns from: "${rightName}" (validate raises if the right key repeats)`,
+        `right_df = ${pyRightLoad(step.rightId, allDatasets)}`,
+        `${df} = pd.merge(${df}, right_df, left_on=${pyCol(step.leftKey)}, right_on=${pyCol(step.rightKey)}, how="left", suffixes=("", ${pyStr(step.suffix ?? "_r")}), validate="m:1")`,
       ].join("\n");
     }
 

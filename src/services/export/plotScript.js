@@ -458,9 +458,13 @@ export function buildGgplot(plotEntry, { dfVar = "df" } = {}) {
   ].filter(line => line != null).join("\n");
 }
 
+// ggspatial gets its providers from rosm, whose "cartolight"/"cartodark" now
+// return CARTO's watermarked API-key tiles, and which has no Esri canvas
+// provider at all. Fall back to plain OSM and say so, rather than emitting a
+// provider that renders a watermark across the figure.
 const BASEMAP_TYPES = {
-  light: "cartolight",
-  dark: "cartodark",
+  light: "osm",
+  dark: "osm",
   osm: "osm",
 };
 
@@ -638,6 +642,10 @@ export function buildGeoGgplot(geoEntry, { datasets = [], basemap = "none" } = {
 
   if (basemap !== "none") {
     comments.push("# basemap tiles require internet; ggspatial fetches them at render time");
+    if (basemap === "light" || basemap === "dark") {
+      comments.push(`# NOTE: the app draws the Esri ${basemap === "dark" ? "Dark" : "Light"} Gray Canvas basemap, which rosm/ggspatial`);
+      comments.push("#       does not provide. This plot uses OSM tiles instead, so the basemap will look different.");
+    }
     components.push(`ggspatial::annotation_map_tile(type = ${rString(BASEMAP_TYPES[basemap] ?? basemap)}, zoomin = 0)`);
   }
 

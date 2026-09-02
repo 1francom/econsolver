@@ -353,7 +353,7 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
       el.appendChild(errDiv);
     }
 
-    // ── Draw CARTO tiles on the tile canvas ──────────────────────────────────
+    // ── Draw basemap tiles on the tile canvas ──────────────────────────────────
     if (showTiles && tileCanRef.current) {
       const tc = tileCanRef.current;
       tc.width  = plotW;
@@ -375,17 +375,25 @@ export const GeoPlotCanvas = forwardRef(function GeoPlotCanvas(
           const px0 = lonToPx(lon0), px1 = lonToPx(lon1);
           const py0 = latToPy(lat1), py1 = latToPy(lat0);
           const tcfg = BASEMAPS[basemap] ?? BASEMAPS.light;
-          const url = tcfg.url
+          const tileUrl = tpl => tpl
             .replace("{s}", "a")
             .replace("{z}", String(z))
             .replace("{x}", String(tx))
             .replace("{y}", String(ty))
             .replace("{r}", "");
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.onload = () => { try { ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0); } catch (err) { void err; } };
-          img.onerror = () => undefined;
-          img.src = url;
+          const paint = (url, after) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = () => {
+              try { ctx.drawImage(img, px0, py0, px1 - px0, py1 - py0); } catch (err) { void err; }
+              if (after) after();
+            };
+            img.onerror = () => undefined;
+            img.src = url;
+          };
+          // Esri canvas basemaps keep place labels in a separate reference layer;
+          // chain it off the base tile's load so it never paints underneath.
+          paint(tileUrl(tcfg.url), tcfg.labelsUrl ? () => paint(tileUrl(tcfg.labelsUrl)) : null);
         }
       }
     }

@@ -744,3 +744,52 @@ export async function runPipelineDuck(rawTableName, rawHeaders, steps, conn, con
     _duckdb: { tableName, rowCount },
   };
 }
+
+// ─── JOIN PREVIEW STATS (SQL) ────────────────────────────────────────────────
+/**
+ * Real match/cardinality stats for a staged join, computed in DuckDB over the
+ * FULL tables.
+ *
+ * The JS preview can only see each side's 500-row preview, and matching one
+ * file's first 500 keys against another's is not a sample of the answer — with
+ * the two files in different key orders the intersection is empty, so a join
+ * that matches every one of 550,000 rows reports 0%. This computes the truth.
+ *
+ * @param {object}  o
+ * @param {string}  o.leftTable   - DuckDB table name for the left (current) data
+ * @param {string}  o.rightTable  - DuckDB table name for the right dataset
+ * @param {string}  o.leftKey
+ * @param {string}  o.rightKey
+ * @param {"left"|"inner"|"right"|"full"|"semi"|"anti"} o.how
+ * @returns {Promise<{matched:number, validRows:number, keyNulls:number, maxPerKey:number, outRows:number}>}
+ */
+export async function joinPreviewStats({ leftTable, rightTable, leftKey, rightKey, how = "left" }) {
+  const { conn } = await getDuckDB();
+  const L = `"${String(leftTable).replace(/"/g, '""')}"`;
+  const R = `"${String(rightTable).replace(/"/g, '""')}"`;
+  const lk = esc(leftKey), rk = esc(rightKey);
+
+  // Output row count: run the real join and count it. DuckDB does this in one
+  // pass — cheap next to being wrong.
+  const JOIN_SQL = {
+    left:  `SELECT COUNT(*) AS n FROM ${L} l LEFT JOIN ${R} r ON l.${lk} = r.${rk}`,
+    inner: `SELECT COUNT(*) AS n FROM ${L} l JOIN ${R} r ON l.${lk} = r.${rk}`,
+    right: `SELECT COUNT(*) AS n FROM ${L} l RIGHT JOIN ${R} r ON l.${lk} = r.${rk}`,
+    full:  `SELECT COUNT(*) AS n FROM ${L} l FULL OUTER JOIN ${R} r ON l.${lk} = r.${rk}`,
+    semi:  `SELECT COUNT(*) AS n FROM ${L} l WHERE EXISTS (SELECT 1 FROM ${R} r WHERE r.${rk} = l.${lk})`,
+    anti:  `SELECT COUNT(*) AS n FROM ${L} l WHERE NOT EXISTS (SELECT 1 FROM ${R} r WHERE r.${rk} = l.${lk})`,
+  };
+
+  const num = v => (typeof v === "bigint" ? Number(v) : Number(v ?? 0));
+  const one = async (sql) => num((await conn.query(sql)).toArray()[0]?.n);
+
+  const [validRows, keyNulls, matched, maxPerKey, outRows] = await Promise.all([
+    one(`SELECT COUNT(*) AS n FROM ${L} WHERE ${lk} IS NOT NULL`),
+    one(`SELECT COUNT(*) AS n FROM ${L} WHERE ${lk} IS NULL`),
+    one(`SELECT COUNT(*) AS n FROM ${L} l WHERE l.${lk} IS NOT NULL AND EXISTS (SELECT 1 FROM ${R} r WHERE r.${rk} = l.${lk})`),
+    one(`SELECT COALESCE(MAX(c), 0) AS n FROM (SELECT COUNT(*) AS c FROM ${R} WHERE ${rk} IS NOT NULL GROUP BY ${rk})`),
+    one(JOIN_SQL[how] ?? JOIN_SQL.left),
+  ]);
+
+  return { matched, validRows, keyNulls, maxPerKey, outRows };
+}

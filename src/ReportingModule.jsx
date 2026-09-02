@@ -1101,7 +1101,17 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         modelSc = ""; // models are emitted inline, in execution order
       } else if (multiDataset) {
         // Workspace skeleton: ALL session datasets in topological order.
-        cleanSc = generateWorkspaceScript({ language: lang, datasets: built, globalPipeline });
+        const ws = generateWorkspaceScript({ language: lang, datasets: built, globalPipeline });
+        cleanSc = ws.perDataset;
+        // Cross-dataset joins are deterministic replication code and are appended
+        // AFTER the AI returns, exactly like the visual/spatial sections below.
+        // Sent THROUGH the model they get dropped — that is how a session with
+        // three joins exported a script with none, then estimated on a dataset
+        // the script never built.
+        if (ws.crossDataset.trim()) {
+          visualSections = `\n\n${comment} ── Cross-dataset interactions ───────────────────────\n${ws.crossDataset}`
+                         + visualSections;
+        }
         modelSc = modelsToReplicate().map(renderModel).filter(Boolean).join("\n\n");
       } else {
         const dsName = cleanedData?.filename?.replace(/\.[^.]+$/, "") ?? "dataset";
