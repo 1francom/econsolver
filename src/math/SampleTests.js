@@ -4,7 +4,9 @@
 // users can test means/variances of loaded or simulated data before modeling.
 // No React, no UI imports — math only.
 
-import { pt, pnorm, pchisq, pf } from "./calcEngine.js";
+import { pt, pnorm, pchisq, pchisqUpper, pf } from "./calcEngine.js";
+import { computeACF } from "./timeSeries.js";
+import { jarqueBera } from "../core/diagnostics/normality.js";
 
 function finite(v) {
   return typeof v === "number" && isFinite(v);
@@ -315,4 +317,127 @@ export function varianceRatioTest(a, b, { alternative = "two-sided" } = {}) {
   const stat = A.variance / B.variance;
   const pValue = clamp01(pFromCdf(pf(stat, df1, df2), alternative));
   return { test: "var-ratio", nA: A.n, nB: B.n, estimate: stat, df1, df2, nullValue: 1, statLabel: "F", stat, alternative, pValue };
+}
+
+// ─── SERIES TRANSFORMS ────────────────────────────────────────────────────────
+// The QRM stylised-facts workflow runs the same test three times: on the series,
+// on its absolute values, and on its squares. Raw returns are close to serially
+// uncorrelated while |r| and r² are strongly autocorrelated — that contrast IS
+// the volatility-clustering finding, so the transform is part of the test's
+// specification, not a separate cleaning step the user has to build a column for.
+// The Python spellings go through numpy rather than pandas methods on purpose:
+// `x.abs()` works on a Series but not on the np.asarray the literal-vector
+// emitters build, and np.abs works on both.
+export const SERIES_TRANSFORMS = [
+  { id: "raw",    label: "x",   rExpr: x => x,           pyExpr: x => x,            stataExpr: x => x },
+  { id: "abs",    label: "|x|", rExpr: x => `abs(${x})`, pyExpr: x => `np.abs(${x})`, stataExpr: x => `abs(${x})` },
+  { id: "square", label: "x²",  rExpr: x => `(${x})^2`,  pyExpr: x => `${x}**2`,      stataExpr: x => `(${x})^2` },
+];
+
+export function applySeriesTransform(values, transform = "raw") {
+  if (transform === "abs")    return values.map(Math.abs);
+  if (transform === "square") return values.map(v => v * v);
+  return values;
+}
+
+// ─── LJUNG-BOX / BOX-PIERCE PORTMANTEAU TEST ──────────────────────────────────
+// H0: the series is serially uncorrelated up to lag h (R's Box.test).
+//   Ljung-Box:  Q = n(n+2) Σ_{k=1..h} ρ̂²_k / (n−k)
+//   Box-Pierce: Q = n Σ_{k=1..h} ρ̂²_k
+// Under H0, Q ~ χ²(h − fitdf); fitdf is the number of ARMA parameters already
+// fitted (R's `fitdf`), 0 for a raw series. The test is one-sided by
+// construction — a large Q means dependence — so it takes no `alternative`.
+//
+// ρ̂_k comes from computeACF, the same estimator the Explore ACF plot draws, so
+// the picture and the p-value can never disagree about the autocorrelations.
+export function ljungBoxTest(values, { lags = 10, type = "Ljung", fitdf = 0, transform = "raw" } = {}) {
+  const raw = cleanNumeric(values);
+  const nDropped = (values?.length ?? 0) - raw.length;
+  const x = applySeriesTransform(raw, transform);
+  const n = x.length;
+  const h = Math.trunc(Number(lags));
+  const fit = Math.max(0, Math.trunc(Number(fitdf) || 0));
+
+  if (n < 5) return { error: "Need at least 5 numeric observations." };
+  if (!(h >= 1)) return { error: "Number of lags must be at least 1." };
+  if (h >= n) return { error: `Lags (${h}) must be below the number of observations (${n}).` };
+  const df = h - fit;
+  if (df < 1) return { error: `df = lags − fitdf must be at least 1 (got ${h} − ${fit}).` };
+
+  // computeACF answers a zero-variance series with all-zero autocorrelations,
+  // which would come back here as Q = 0, p = 1 — "no serial dependence" stated
+  // confidently about a series that has no correlations to speak of at all.
+  // Mirror its own threshold and refuse instead. It is an absolute cutoff on
+  // Σ(x−x̄)², so a genuinely micro-scaled series is refused rather than
+  // silently answered from zeros.
+  const mean = x.reduce((s, v) => s + v, 0) / n;
+  const c0 = x.reduce((s, v) => s + (v - mean) ** 2, 0);
+  if (!(c0 > 1e-15)) return { error: "Series has (near-)zero variance — autocorrelations undefined." };
+
+  const acf = computeACF(x, h);
+  if (acf.length <= h) return { error: "Too few observations for the requested lags." };
+
+  const boxPierce = String(type).toLowerCase().startsWith("box");
+  let stat = 0;
+  for (let k = 1; k <= h; k++) {
+    const r2 = acf[k] * acf[k];
+    stat += boxPierce ? r2 : r2 / (n - k);
+  }
+  stat *= boxPierce ? n : n * (n + 2);
+
+  return {
+    test: "ljung-box",
+    method: boxPierce ? "Box-Pierce" : "Ljung-Box",
+    n,
+    nDropped,
+    lags: h,
+    fitdf: fit,
+    transform,
+    acf: acf.slice(1),
+    estimate: acf[1],          // ρ̂₁ — the headline autocorrelation
+    df,
+    nullValue: 0,
+    statLabel: "chi2",
+    stat,
+    // Right-tailed by construction, so this is NOT routed through pFromCdf.
+    alternative: "greater",
+    // Right tail directly: on financial returns Q lands where 1 - pchisq()
+    // has already rounded to exactly 0, and "p = 0" is not the finding.
+    pValue: clamp01(pchisqUpper(stat, df)),
+  };
+}
+
+// ─── JARQUE-BERA NORMALITY TEST ON A SAMPLE ───────────────────────────────────
+// Same statistic the Model tab's diagnostics report for OLS residuals, applied
+// to any numeric column — which is what a QRM workflow needs, since the returns
+// are tested for normality long before any regression exists.
+//
+// The statistic comes from core/diagnostics/normality.js so there is exactly one
+// implementation of it in the app; only the p-value is recomputed here, with the
+// exact χ² CDF instead of the display-rounded value that function returns.
+export function normalityTest(values, { transform = "raw" } = {}) {
+  const raw = cleanNumeric(values);
+  const nDropped = (values?.length ?? 0) - raw.length;
+  const x = applySeriesTransform(raw, transform);
+  if (x.length < 8) return { error: "Need at least 8 numeric observations for Jarque-Bera." };
+
+  const jb = jarqueBera(x);
+  if (!jb) return { error: "Sample has zero variance — Jarque-Bera undefined." };
+
+  return {
+    test: "normality",
+    method: "Jarque-Bera",
+    n: jb.n,
+    nDropped,
+    transform,
+    skewness: jb.skewness,
+    kurtosis: jb.kurtosis,     // EXCESS kurtosis: normal = 0
+    estimate: jb.skewness,
+    df: 2,
+    nullValue: 0,
+    statLabel: "chi2",
+    stat: jb.JB,
+    alternative: "greater",
+    pValue: clamp01(pchisqUpper(jb.JB, 2)),
+  };
 }

@@ -39,8 +39,8 @@ export const APP_CAPABILITY_MAP = {
                  "Panel Structure": "declare entity/time panel structure; panel operators lag/lead/diff",
                  "Dictionary": "AI-infer or edit variable descriptions",
                  "AI command": "describe a change in plain language; preview & apply pipeline steps" } },
-  Explore:   { purpose: "Descriptive stats & plots", subtabs: {
-                 "Explorer": "summary stats, distributions",
+  Explore:   { purpose: "Descriptive stats, plots & pre-model hypothesis tests", subtabs: {
+                 "Explorer": "summary stats, distributions, group contrasts, Ljung-Box / Box-Pierce serial-correlation and Jarque-Bera normality tests on any column",
                  "Plot Builder": "layered charts (point/line/bar/histogram/density/smooth/boxplot/errorbar/ribbon/tile/h-line/v-line), facet_wrap by any column" } },
   Model:     { purpose: "Estimate econometric models", subtabs: {
                  "Estimator": "pick a model — Linear (OLS), Panel (FE/FD/LSDV), DiD (2×2 DiD, TWFE DiD, CS DiD, Sun-Abraham), Event Study (Classical TWFE, CS DiD, Sun-Abraham), IV/2SLS, RDD, GMM, Synthetic Control",
@@ -49,7 +49,7 @@ export const APP_CAPABILITY_MAP = {
                  "Diagnostics": "heteroskedasticity, autocorrelation, normality tests",
                  "Compare": "pin models side by side; run across subsets",
                  "Code": "view/edit R / Python / Stata replication code" } },
-  Simulate:  { purpose: "DGP builder, Monte Carlo, pre-model sample tests", subtabs: {} },
+  Simulate:  { purpose: "DGP builder, Monte Carlo, pre-model sample and series tests (mean, variance, proportion, correlation, Ljung-Box, Jarque-Bera)", subtabs: {} },
   Calculate: { purpose: "Calculator workspace", subtabs: {} },
   Report:    { purpose: "Publication output — LaTeX tables, forest plots, AI narrative & unified script", subtabs: {} },
   // Not a tab: a floating panel reachable from every tab. Keyed here anyway

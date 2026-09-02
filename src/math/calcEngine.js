@@ -413,15 +413,63 @@ function _lnGamma(z) {
 }
 
 // Regularized lower incomplete gamma P(a,x) — series expansion
-function _regGammaP(a, x) {
-  if (x <= 0) return 0;
+// Regularized lower incomplete gamma P(a,x), Numerical Recipes §6.2.
+//
+// The series below converges only while x < a+1. It used to be the whole
+// implementation, and past that point it does not merely lose accuracy — the
+// terms grow before they decay, so the partial sums overflow: pchisq(1000, 2)
+// returned 0.51 instead of 1 (a hugely significant chi-square test read as
+// insignificant) and pchisq(5000, 2) returned NaN outright. That is the same
+// bug class as the Riemann-sum tCDF/fCDF fixed in LinearEngine.js on
+// 2026-07-28 and the missing complement branch in _betaCF above — a third
+// copy of it. Large chi-square statistics are the normal case for portmanteau
+// and LM tests on financial series, not an edge case.
+//
+// Above the switch point the upper tail Q(a,x) is evaluated by its continued
+// fraction instead, which is where the accuracy lives up there anyway.
+function _gammaSeries(a, x) {
   let term = 1 / a, sum = term;
-  for (let n = 1; n < 500; n++) {
+  for (let n = 1; n < 1000; n++) {
     term *= x / (a + n);
     sum += term;
-    if (Math.abs(term) < 1e-14 * sum) break;
+    if (Math.abs(term) < Math.abs(sum) * 1e-16) break;
   }
-  return Math.exp(-x + a * Math.log(x) - _lnGamma(a)) * sum;
+  return sum * Math.exp(-x + a * Math.log(x) - _lnGamma(a));
+}
+
+// Upper tail Q(a,x) = 1 - P(a,x) via the modified Lentz continued fraction.
+function _gammaCF(a, x) {
+  const TINY = 1e-300;
+  let b = x + 1 - a;
+  let c = 1 / TINY;
+  let d = 1 / (Math.abs(b) < TINY ? TINY : b);
+  let h = d;
+  for (let i = 1; i < 1000; i++) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b; if (Math.abs(d) < TINY) d = TINY;
+    c = b + an / c; if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-16) break;
+  }
+  return Math.exp(-x + a * Math.log(x) - _lnGamma(a)) * h;
+}
+
+function _regGammaP(a, x) {
+  if (!(x > 0) || !(a > 0)) return 0;
+  return x < a + 1 ? _gammaSeries(a, x) : 1 - _gammaCF(a, x);
+}
+
+// Upper tail directly, WITHOUT going through 1 - P. A right-tailed test on a
+// large statistic (Ljung-Box on returns, an LM test on a big sample) has a
+// p-value far below double precision's reach from 1: computing it as
+// 1 - pchisq() rounds every such p-value to exactly 0, which then prints as
+// "p = 0" rather than the 2e-16 or 8.8e-46 that is the actual finding.
+function _regGammaQ(a, x) {
+  if (!(x > 0) || !(a > 0)) return 1;
+  return x < a + 1 ? 1 - _gammaSeries(a, x) : _gammaCF(a, x);
 }
 
 // Regularized incomplete beta I_x(a,b) via continued fraction (Lentz).
@@ -555,6 +603,14 @@ export function pchisq(x, df) {
   if (x <= 0) return 0;
   if (df <= 0) return NaN;
   return _regGammaP(df / 2, x / 2);
+}
+// P(X > x) for X ~ chi-square(df) — the right-tail p-value of an LM, Wald,
+// portmanteau or LR test, accurate all the way into the 1e-300 range where
+// 1 - pchisq(x, df) has already collapsed to 0.
+export function pchisqUpper(x, df) {
+  if (!(df > 0)) return NaN;
+  if (!(x > 0)) return 1;
+  return _regGammaQ(df / 2, x / 2);
 }
 // F-distribution CDF via the regularized incomplete beta:
 //   F(x; d1, d2) = I_{ (d1·x)/(d1·x + d2) }( d1/2, d2/2 )

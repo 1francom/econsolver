@@ -2607,11 +2607,13 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             "Use it to eyeball a subgroup without committing to a cleaning step",
             "Stats, plots and correlations all recompute against the filtered rows instantly",
           ]},
-          { heading: "Compare groups", items: [
+          { heading: "Hypothesis tests", items: [
             "Below Group Summarize: pick an outcome, a group column and two of its levels",
             "A difference in means IS the ATE — reported with its standard error, t and p, not just the two averages",
             "Also does proportions (binary outcome) and a variance ratio; it respects the ⊘ filter, so a subgroup contrast matches the plots beside it",
-            "Copies as t.test(y ~ treat, data = df) — the script references your data instead of pasting it in",
+            "Ljung-Box (or Box-Pierce) tests a column for serial correlation; Jarque-Bera tests it for normality — no model needed first",
+            "Both run on x, |x| or x²: near-zero autocorrelation in x with strong autocorrelation in |x| and x² is volatility clustering",
+            "Copies as t.test(y ~ treat, data = df) or Box.test(x, lag = 10, type = \"Ljung-Box\") — the script references your data instead of pasting it in",
           ]},
           { heading: "Summary", items: [
             "5-number summary (mean, SD, median, min, max) for all numeric variables",
@@ -2677,7 +2679,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
                 columns={numericCols.map(h => ({ name: h, values: filteredRows.map(r => r[h]) }))}
                 rows={filteredRows}
                 headers={headers}
-                title="Compare groups — hypothesis test"
+                title="Hypothesis tests — groups & series"
               />
             </div>
           </>

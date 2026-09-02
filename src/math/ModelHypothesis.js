@@ -1,4 +1,4 @@
-import { pnorm, pt, pchisq, pf } from "./calcEngine.js";
+import { pnorm, pt, pchisqUpper, pf } from "./calcEngine.js";
 import { matInv } from "./LinearEngine.js";
 
 function finiteNumber(v) {
@@ -210,12 +210,15 @@ export function waldTest(beta, vcov, indices, h0s = null, opts = {}) {
   const chiSq = tmp.reduce((s, v, i) => s + v * Rb[i], 0);
   if (!isFinite(chiSq) || chiSq < 0) return { error: "Wald statistic is non-finite — check coefficient selection." };
 
-  const rawPval = 1 - pchisq(chiSq, q);
-  // pchisq can return NaN when chiSq is extreme (gamma function overflow);
-  // for chiSq > 0 this means p ≈ 0 (test is overwhelmingly significant).
-  const chiSqPval = (isFinite(rawPval) && rawPval >= 0)
-    ? Math.max(0, Math.min(1, rawPval))
-    : 0;
+  // Right tail directly. This used to be 1 - pchisq(chiSq, q) behind a guard
+  // that mapped a NaN to p = 0, because the old series-only incomplete gamma
+  // overflowed on large statistics. The guard only caught the NaN end of that
+  // failure: in the band around chiSq ≈ 1000 the old code returned a finite
+  // 0.51, so an overwhelmingly significant Wald test reported p ≈ 0.49 and
+  // nothing looked wrong. pchisqUpper is exact across the whole range and
+  // resolves p far below where 1 - P rounds to zero.
+  const rawPval = pchisqUpper(chiSq, q);
+  const chiSqPval = isFinite(rawPval) ? Math.max(0, Math.min(1, rawPval)) : 0;
 
   // F variant: F = χ²/q on (q, n−k). Only meaningful when the estimator reports
   // finite-sample t statistics — an ML fit has no residual df to divide by.

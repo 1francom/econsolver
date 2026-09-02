@@ -14,6 +14,17 @@
 // Returns null for anything it does not handle, so the caller falls back to the
 // existing wide-format emitters unchanged.
 
+import { SERIES_TRANSFORMS } from "../../math/SampleTests.js";
+
+// One vocabulary for the x / |x| / x² transform, shared with the engine and the
+// panel. A transform added there without a spelling here would silently export
+// a test run on the untransformed series — the script would run and disagree
+// with the app.
+const tExpr = (id, lang, x) => {
+  const t = SERIES_TRANSFORMS.find(e => e.id === id) ?? SERIES_TRANSFORMS[0];
+  return t[lang](x);
+};
+
 const num = (v, fallback = "0") => {
   const n = Number(v);
   return isFinite(n) ? String(n) : fallback;
@@ -65,6 +76,18 @@ export function columnRefSnippet(language, op, dataset, params = {}) {
     if (op === "correlationTest")   return L("# Correlation test", `print(cor.test(${A}, ${B}, method = ${JSON.stringify(method)}, alternative = ${ALT}))`);
     if (op === "twoSampleMeanTest") return L("# Two-sample mean test", `print(t.test(${A}, ${B}, mu = ${mu0}, alternative = ${ALT}, var.equal = ${params.pooled ? "TRUE" : "FALSE"}))`);
     if (op === "varianceRatioTest") return L("# Variance-ratio test", `print(var.test(${A}, ${B}, alternative = ${ALT}))`);
+    if (op === "ljungBoxTest") return L(
+      `# ${params.type === "Box-Pierce" ? "Box-Pierce" : "Ljung-Box"} test for serial correlation`,
+      `x <- ${A}[!is.na(${A})]`,
+      ...(params.transform && params.transform !== "raw" ? [`x <- ${tExpr(params.transform, "rExpr", "x")}`] : []),
+      `print(Box.test(x, lag = ${num(params.lags, "10")}, type = ${JSON.stringify(params.type === "Box-Pierce" ? "Box-Pierce" : "Ljung-Box")}, fitdf = ${num(params.fitdf, "0")}))`,
+    );
+    if (op === "normalityTest") return L(
+      "# Jarque-Bera test for normality (requires: install.packages(\"tseries\"))",
+      `x <- ${A}[!is.na(${A})]`,
+      ...(params.transform && params.transform !== "raw" ? [`x <- ${tExpr(params.transform, "rExpr", "x")}`] : []),
+      "print(tseries::jarque.bera.test(x))",
+    );
     if (op === "varianceTest") return L(
       "# One-sample variance test",
       `x <- ${A}[!is.na(${A})]`,
@@ -91,6 +114,19 @@ export function columnRefSnippet(language, op, dataset, params = {}) {
       `p_value = ${alt === "less" ? "cdf" : alt === "greater" ? "1 - cdf" : "2 * min(cdf, 1 - cdf)"}`,
       'print({"F": f_stat, "df1": len(a) - 1, "df2": len(b) - 1, "p_value": p_value})',
     );
+    if (op === "ljungBoxTest") return L(
+      `# ${params.type === "Box-Pierce" ? "Box-Pierce" : "Ljung-Box"} test for serial correlation`,
+      "from statsmodels.stats.diagnostic import acorr_ljungbox",
+      `x = ${A}`,
+      ...(params.transform && params.transform !== "raw" ? [`x = ${tExpr(params.transform, "pyExpr", "x")}`] : []),
+      `print(acorr_ljungbox(x, lags=[${num(params.lags, "10")}], model_df=${num(params.fitdf, "0")}, boxpierce=${params.type === "Box-Pierce" ? "True" : "False"}, return_df=True))`,
+    );
+    if (op === "normalityTest") return L(
+      "# Jarque-Bera test for normality",
+      `x = ${A}`,
+      ...(params.transform && params.transform !== "raw" ? [`x = ${tExpr(params.transform, "pyExpr", "x")}`] : []),
+      "print(stats.jarque_bera(x))",
+    );
     if (op === "varianceTest") return L(
       "# One-sample variance test", `x = ${A}`,
       `sigma2_0 = ${mu0}`,
@@ -110,6 +146,34 @@ export function columnRefSnippet(language, op, dataset, params = {}) {
     if (op === "twoSampleMeanTest") return L("* Two-sample mean test", `ttest ${a} == ${b}, unpaired${params.pooled ? "" : " unequal"}`, note);
     if (op === "varianceRatioTest") return L("* Variance-ratio test", `sdtest ${a} == ${b}`, note);
     if (op === "correlationTest")   return L("* Correlation test", method === "spearman" ? `spearman ${a} ${b}, stats(rho p)` : `pwcorr ${a} ${b}, sig`, "* These commands report the standard two-sided significance.");
+    // wntestq needs a time index, so the series is put on one inside a
+    // preserve/restore block rather than tsset-ing the user's data behind
+    // their back.
+    if (op === "ljungBoxTest") return L(
+      "* Ljung-Box test for serial correlation",
+      "preserve",
+      `quietly keep if !missing(${a})`,
+      `generate double _lbx = ${tExpr(params.transform ?? "raw", "stataExpr", a)}`,
+      "generate long _lbt = _n",
+      "tsset _lbt",
+      `wntestq _lbx, lags(${num(params.lags, "10")})`,
+      ...(params.type === "Box-Pierce" ? ["* NOTE: wntestq is the Ljung-Box portmanteau Q. Base Stata has no Box-Pierce variant, so this is NOT the statistic the app displayed."] : []),
+      ...(Number(params.fitdf) > 0 ? [`* NOTE: wntestq has no fitdf option; the app used df = lags - ${num(params.fitdf, "0")}, this reports df = lags.`] : []),
+      "restore",
+    );
+    if (op === "normalityTest") return L(
+      "* Jarque-Bera test for normality",
+      "* Base Stata has no Jarque-Bera command — sktest is D'Agostino-Belanger-D'Agostino,",
+      "* a different test — so JB is computed from the sample moments directly.",
+      "preserve",
+      `quietly keep if !missing(${a})`,
+      `generate double _jbx = ${tExpr(params.transform ?? "raw", "stataExpr", a)}`,
+      "quietly summarize _jbx, detail",
+      "scalar JB = r(N)/6 * (r(skewness)^2 + (r(kurtosis) - 3)^2/4)",
+      "scalar JB_p = chi2tail(2, JB)",
+      'display "JB = " JB "  df = 2  p = " JB_p',
+      "restore",
+    );
     if (op === "varianceTest") return L(
       "* One-sample variance test", `scalar sigma2_0 = ${mu0}`, `quietly summarize ${a}`,
       "scalar chi2_stat = (r(N) - 1) * r(Var) / sigma2_0",
