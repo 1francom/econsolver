@@ -19,6 +19,7 @@ import { callClaude } from "./services/AI/AIService.js";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { getExplorePins, saveExplorePins } from "./services/Persistence/plotHistory.js";
 import ExplorePinBar from "./components/explore/ExplorePinBar.jsx";
+import ScatterMatrix from "./components/explore/ScatterMatrix.jsx";
 import SampleTestPanel from "./components/tabs/statsim/SampleTestPanel.jsx";
 import { menuLabel, normalizeOp, evalPredicate } from "./pipeline/predicate.js";
 
@@ -2632,6 +2633,9 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           { heading: "Correlation", items: [
             "Pearson correlation heatmap across all numeric variables",
             "Red = negative · Teal = positive",
+            "Below it, R's pairs(): a scatterplot matrix over the variables you pick, correlations and significance above the diagonal",
+            "Two variables can share a correlation of 0.0 and look nothing alike — the matrix shows the shape the single number hides",
+            "Copies as pairs() / pd.plotting.scatter_matrix / graph matrix",
           ]},
           { heading: "Plot Builder", items: [
             "Layer-based chart editor — stack as many layers as you need on one canvas",
@@ -2701,6 +2705,13 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
                 <CorrHeatmap headers={headers} rows={filteredRows} info={info} duckTable={filterConds.length ? null : duckTable}/>
               </div>
               <PlotExportBar getEl={() => corrRef.current} filename="correlation_heatmap" />
+            </div>
+            {/* The matrix answers the same question at a different resolution:
+                a correlation of 0.0 on a perfect U and one on a shapeless cloud
+                are the same heatmap cell and obviously different panels. */}
+            <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
+              <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Scatterplot matrix · pairs()</div>
+              <ScatterMatrix headers={headers} rows={filteredRows} info={info} usingPreview={usingPreview}/>
             </div>
           </div>
         )}
