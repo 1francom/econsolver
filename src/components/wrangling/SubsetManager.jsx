@@ -67,7 +67,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
         value={filter.col}
         onChange={e => onChange({ ...filter, col: e.target.value })}
         style={{
-          flex: 2, background: C.bg, color: C.text, border: `1px solid ${C.border}`,
+          flex: 2, minWidth: 0, background: C.bg, color: C.text, border: `1px solid ${C.border}`,
           borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px",
         }}
       >
@@ -80,7 +80,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
         value={filter.op}
         onChange={e => onChange({ ...filter, op: e.target.value })}
         style={{
-          flex: 1, background: C.bg, color: C.teal, border: `1px solid ${C.border}`,
+          flex: 1, minWidth: 0, background: C.bg, color: C.teal, border: `1px solid ${C.border}`,
           borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 5px",
         }}
       >
@@ -93,7 +93,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
         onChange={e => onChange({ ...filter, val: e.target.value })}
         placeholder="value"
         style={{
-          flex: 2, background: C.bg, color: C.text, border: `1px solid ${C.border}`,
+          flex: 2, minWidth: 0, background: C.bg, color: C.text, border: `1px solid ${C.border}`,
           borderRadius: 3, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "3px 6px",
           outline: "none",
         }}
@@ -105,6 +105,7 @@ function FilterRow({ filter, headers, onChange, onRemove }) {
         style={{
           background: "none", border: "none", color: C.textMuted,
           cursor: "pointer", fontSize: T.body.fontSize, padding: "0 3px", lineHeight: 1,
+          flexShrink: 0,
         }}
         title="Remove condition"
       >×</button>
@@ -130,7 +131,7 @@ function SubsetCard({ subset, headers, rows, onChange, onRemove }) {
           value={subset.name}
           onChange={e => onChange({ ...subset, name: e.target.value })}
           style={{
-            flex: 1, background: "transparent", border: "none",
+            flex: 1, minWidth: 0, background: "transparent", border: "none",
             borderBottom: `1px solid ${C.border2}`,
             color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, padding: "2px 0",
             outline: "none",
@@ -145,6 +146,7 @@ function SubsetCard({ subset, headers, rows, onChange, onRemove }) {
           style={{
             background: "none", border: "none", color: C.textMuted,
             cursor: "pointer", fontSize: T.body.fontSize, padding: "0 2px", lineHeight: 1,
+            flexShrink: 0,
           }}
           title="Delete subset"
         >×</button>
