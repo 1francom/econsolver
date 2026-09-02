@@ -7,6 +7,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { HintBox } from "./components/HelpSystem.jsx";
 import { applyStep, runPipeline, runPipelineAsync } from "./pipeline/runner.js";
 import { validatePanel, buildInfo } from "./pipeline/validator.js";
+import { freezeParent } from "./pipeline/lineage.js";
 import { buildDataQualityReport, exportMarkdown } from "./core/validation/dataQuality.js";
 
 // ── Tab components ─────────────────────────────────────────────────────────
@@ -114,10 +115,31 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   // and then flip — the kind of flicker that reads as a race.
   const [context, setContext] = useState(null);
   const [contextWarnings, setContextWarnings] = useState([]);
+  // Per-dataset pipelines for every OTHER dataset, loaded from IDB by the effect
+  // below. addStep needs them to freeze a join's right operand (see lineage.js).
+  const [rightPipelines, setRightPipelines] = useState({});
   // Rebuild only when the SET of referenced datasets changes — not on every
   // step. Depending on `pipeline` itself would replay every other dataset's
   // pipeline (and re-extract whole DuckDB tables) on each edit.
   const refIdKey = useMemo(() => referencedDatasetIds(pipeline).sort().join("|"), [pipeline]);
+
+  // Every other dataset's pipeline, loaded once per project. Deliberately NOT
+  // folded into the context effect below: that one early-returns while nothing
+  // is referenced yet, which is exactly the moment the user stages their FIRST
+  // join — the frozen right snapshot would then be [], silently claiming the
+  // right dataset had no pipeline.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { loadProjectPipelines } = await import("./services/Persistence/indexedDB.js");
+        const byId = (await loadProjectPipelines(ownerPid))?.datasetPipelines ?? {};
+        if (!cancelled) setRightPipelines(byId);
+      } catch { /* no IDB record yet — freezeParent records an empty snapshot */ }
+    })();
+    return () => { cancelled = true; };
+  }, [ownerPid, allDatasets]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -169,6 +191,10 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   // so passing the reference directly is safe.
   const [processed,    setProcessed]    = useState({ rows: rawData.rows, headers: rawData.headers, _duckdb: rawData._duckdb ?? null });
   const [isProcessing, setIsProcessing] = useState(false);
+  // A step may throw by design — `lookup` refuses to run when its right key is
+  // not unique. runPipeline is called inside a setTimeout, so an uncaught throw
+  // there would leave isProcessing stuck true with nothing on screen.
+  const [pipelineError, setPipelineError] = useState(null);
   const [elapsedMs,    setElapsedMs]    = useState(0);
   const timerRef = useRef(null);
 
@@ -223,7 +249,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
                 extractAllRows(rawData._duckdb.tableName)
                   .catch(() => rawData.rows)
                   .then(fullRows => {
-                    if (!cancelled) done(runPipeline(fullRows, rawData.headers, pipeline, context));
+                    if (cancelled) return;
+                    try {
+                      setPipelineError(null);
+                      done(runPipeline(fullRows, rawData.headers, pipeline, context));
+                    } catch (err) {
+                      setPipelineError(err?.message ?? "Pipeline step failed.");
+                      done({ rows: fullRows, headers: rawData.headers });
+                    }
                   });
               })
           )
@@ -243,11 +276,25 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           .then(result => { if (!cancelled) done(result); })
           .catch(e => {
             console.warn("[WranglingModule] async pipeline failed, falling to sync:", e);
-            if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+            if (cancelled) return;
+            try {
+              setPipelineError(null);
+              done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+            } catch (err) {
+              setPipelineError(err?.message ?? "Pipeline step failed.");
+              done({ rows: rawData.rows, headers: rawData.headers });
+            }
           });
       } else {
         const timerId = setTimeout(() => {
-          if (!cancelled) done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+          if (cancelled) return;
+          try {
+            setPipelineError(null);
+            done(runPipeline(rawData.rows, rawData.headers, pipeline, context));
+          } catch (e) {
+            setPipelineError(e?.message ?? "Pipeline step failed.");
+            done({ rows: rawData.rows, headers: rawData.headers });
+          }
         }, 0);
         return () => { cancelled = true; clearTimeout(timerId); clearInterval(timerRef.current); };
       }
@@ -357,20 +404,39 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     // Cross-dataset steps (join/append) also register a G-step in the global
     // pipeline so the exporter can build the dependency graph.
     let gStepId = null;
-    if (sessionDispatch && (s.type === "join" || s.type === "append")) {
+    if (sessionDispatch && (s.type === "join" || s.type === "append" || s.type === "lookup")) {
       gStepId = `G_${stepId}`;
+      const selfDs  = { id: pid, name: filename, filename, loadOpts: rawData?._loadOpts ?? null };
+      const rightDs = (allDatasets ?? []).find(d => d.id === s.rightId) ?? null;
+      const rightRec  = rightPipelines?.[s.rightId] ?? {};
+      const rightPipe = Array.isArray(rightRec.steps) ? rightRec.steps
+                      : Array.isArray(rightRec.pipeline) ? rightRec.pipeline
+                      : [];
       sessionDispatch({
         type: "ADD_GLOBAL_STEP",
         step: {
           id:              gStepId,
+          v:               2,
           localStepId:     stepId,
-          opType:          s.type === "join" ? `${s.how || "left"}_join` : "append",
+          opType:          s.type === "join" ? `${s.how || "left"}_join` : s.type,
           leftDatasetId:   pid,
           rightDatasetId:  s.rightId,
-          outputDatasetId: pid,         // result stays in the left dataset's pipeline
-          params:          s.type === "join"
-            ? { leftKey: s.leftKey, rightKey: s.rightKey, suffix: s.suffix }
+          // Forma 2 (default): the result augments the LEFT dataset in place.
+          outputDatasetId: s.outputDatasetId ?? pid,
+          params:          (s.type === "join" || s.type === "lookup")
+            ? { how: s.how ?? null, leftKey: s.leftKey, rightKey: s.rightKey, suffix: s.suffix }
             : {},
+          // Frozen, self-sufficient parent records — see pipeline/lineage.js.
+          // Captured BEFORE this step is appended, so the snapshot is exactly the
+          // state the join consumed.
+          left:  freezeParent(selfDs, pipeline),
+          right: rightDs
+            ? freezeParent({ id:       rightDs.id,
+                             name:     rightDs.name ?? rightDs.filename,
+                             filename: rightDs.filename ?? null,
+                             loadOpts: rightDs.rawData?._loadOpts ?? null },
+                           rightPipe)
+            : null,
         },
       });
     }
@@ -384,7 +450,107 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       params: { stepType: s.type, desc: s.desc ?? s.description ?? null, ...(gStepId ? { gStepId } : {}) },
       label:  `[${filename ?? pid}] ${s.type}${s.desc ? " — " + s.desc : ""}`,
     });
-  }, [snapshot, pid, sessionDispatch, appendLog, filename]);
+    // `pipeline`, `allDatasets`, `rightPipelines` and `rawData` are load-bearing
+    // deps: freezeParent reads them at call time. Omitting `pipeline` would
+    // freeze whatever it was on first render — an empty array — which is the
+    // stale-closure class of bug that hit estimate() for SC/EventStudy/LSDV.
+  }, [snapshot, pid, sessionDispatch, appendLog, filename,
+      pipeline, allDatasets, rightPipelines, rawData]);
+
+  // Forma 1: run the staged joins against the CURRENT rows and save the result
+  // as a NEW dataset, leaving this pipeline untouched. Provenance lives in the
+  // child's frozen record (see pipeline/lineage.js), so editing or deleting this
+  // dataset later cannot break the child's replication script.
+  const forkJoin = useCallback(async (name, staged) => {
+    if (!onSaveSubset || !Array.isArray(staged) || !staged.length) return;
+    // `rows` is the 500-row PREVIEW for a DuckDB-backed dataset. Forking off it
+    // would create a new dataset holding 500 of 550,000 rows, with nothing said.
+    let baseRows = rows;
+    if (processed?._duckdb?.tableName) {
+      try {
+        const { extractAllRows } = await import("./services/data/duckdb.js");
+        baseRows = await extractAllRows(processed._duckdb.tableName);
+      } catch (e) {
+        setPipelineError(`Could not read the full table (${e?.message ?? e}) — the new dataset was NOT created, rather than created with only the ${rows.length} preview rows.`);
+        return;
+      }
+    }
+    // A forma-1 join never enters this dataset's pipeline, so its right operands
+    // are NOT in `context` — that is built from referencedDatasetIds(pipeline).
+    // Passing it anyway left runner.js's `if (!right) break;` to no-op the join
+    // silently, and the fork saved a plain copy of the parent. Build the context
+    // these staged joins actually need.
+    let forkCtx;
+    try {
+      const { buildDatasetContext } = await import("./pipeline/datasetContext.js");
+      const { extractAllRows } = await import("./services/data/duckdb.js");
+      const rightIds = [...new Set(staged.map(j => j.rightId).filter(Boolean))];
+      const built = await buildDatasetContext(
+        allDatasets ?? [],
+        (id) => {
+          const rec = rightPipelines?.[id] ?? {};
+          return Array.isArray(rec.steps) ? rec.steps
+               : Array.isArray(rec.pipeline) ? rec.pipeline
+               : [];
+        },
+        async (d) => {
+          const tbl = d.rawData?._duckdb?.tableName;
+          return tbl
+            ? { rows: await extractAllRows(tbl), headers: d.rawData.headers }
+            : { rows: d.rawData.rows, headers: d.rawData.headers };
+        },
+        { only: rightIds },
+      );
+      const missing = rightIds.filter(id => !built.datasets[id]);
+      if (missing.length) {
+        setPipelineError(`Could not load the dataset${missing.length > 1 ? "s" : ""} to join against — the new dataset was NOT created, rather than created without the join.`);
+        return;
+      }
+      forkCtx = { datasets: built.datasets };
+    } catch (e) {
+      setPipelineError(`Could not prepare the join (${e?.message ?? e}) — the new dataset was NOT created.`);
+      return;
+    }
+
+    let cur = { rows: baseRows, headers };
+    try {
+      for (const j of staged) {
+        const before = cur.headers.length;
+        cur = applyStep(cur.rows, cur.headers, { ...j, type: "join" }, forkCtx);
+        // runner.js no-ops a join whose right operand is missing rather than
+        // failing. A column-adding join that added nothing means it did not run;
+        // saving that would hand the user a silent copy of the parent.
+        const adds = j.how !== "semi" && j.how !== "anti";
+        if (adds && cur.headers.length === before) {
+          throw new Error(`The join against "${(allDatasets ?? []).find(d => d.id === j.rightId)?.filename ?? j.rightId}" added no columns — it did not run.`);
+        }
+      }
+    } catch (e) {
+      setPipelineError(`${e?.message ?? "Join failed."} The new dataset was NOT created.`);
+      return;
+    }
+    const parentFrozen = freezeParent(
+      { id: pid, name: filename, filename, loadOpts: rawData?._loadOpts ?? null },
+      pipeline
+    );
+    const joinRecords = staged.map(j => {
+      const rd = (allDatasets ?? []).find(d => d.id === j.rightId) ?? { id: j.rightId };
+      const rec = rightPipelines?.[j.rightId] ?? {};
+      const rp  = Array.isArray(rec.steps) ? rec.steps
+                : Array.isArray(rec.pipeline) ? rec.pipeline
+                : [];
+      return {
+        how: j.how ?? "left", leftKey: j.leftKey, rightKey: j.rightKey, suffix: j.suffix ?? "_r",
+        right: freezeParent({ id:       rd.id,
+                              name:     rd.name ?? rd.filename,
+                              filename: rd.filename ?? null,
+                              loadOpts: rd.rawData?._loadOpts ?? null }, rp),
+      };
+    });
+    setPipelineError(null);
+    onSaveSubset(name, cur.rows, cur.headers, null, { parent: parentFrozen, joins: joinRecords });
+  }, [rows, headers, pid, filename, rawData, pipeline, processed,
+      onSaveSubset, allDatasets, rightPipelines]);
 
   // Expose addStep via ref so DataStudio can dispatch patch steps from DataViewer
   useEffect(() => {
@@ -399,53 +565,71 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     });
   }, [snapshot]);
 
+  // A cross-dataset step owns a G-step in the global pipeline. Removing the
+  // local step without removing its G-step leaves the exporter emitting a join
+  // the app no longer performs — a script that silently disagrees with the app.
+  const dropGStepFor = useCallback(step => {
+    if (step?.gStepId && sessionDispatch) {
+      sessionDispatch({ type: "REMOVE_GLOBAL_STEP", id: step.gStepId });
+    }
+  }, [sessionDispatch]);
+
   const rmStep = useCallback(i => {
     // Deleting the last step needs no warning — nothing downstream.
     if (i >= pipeline.length - 1) {
+      dropGStepFor(pipeline[i]);
       setPipeline(p => { snapshot(p); return p.filter((_, j) => j !== i); });
       return;
     }
     // Mid-pipeline delete — warn the user about downstream steps.
     setPendingDelete({ index: i, downstreamCount: pipeline.length - 1 - i });
-  }, [snapshot, pipeline.length]);
+  }, [snapshot, pipeline, dropGStepFor]);
 
   // "Delete this step only" — leaves downstream steps (they may silently degrade).
   // "cascade" — removes this step and everything after it (clean slate from that point).
   const confirmDeleteStep = useCallback(mode => {
     if (!pendingDelete) return;
     const i = pendingDelete.index;
+    // Cascade removes this step AND everything after it, so every G-step owned
+    // by that tail goes too — not just the one at index i.
+    (mode === "cascade" ? pipeline.slice(i) : [pipeline[i]]).forEach(dropGStepFor);
     setPipeline(p => {
       snapshot(p);
       return mode === "cascade" ? p.slice(0, i) : p.filter((_, j) => j !== i);
     });
     setPendingDelete(null);
-  }, [pendingDelete, snapshot]);
+  }, [pendingDelete, snapshot, pipeline, dropGStepFor]);
 
   const cancelDelete = useCallback(() => setPendingDelete(null), []);
 
   const rmLastStep = useCallback(() => {
+    dropGStepFor(pipeline[pipeline.length - 1]);
     setPipeline(p => {
       snapshot(p);
       return p.slice(0, -1);
     });
-  }, [snapshot]);
+  }, [snapshot, pipeline, dropGStepFor]);
 
   const clear = useCallback(() => {
+    pipeline.forEach(dropGStepFor);
     setPipeline(p => {
       if (p.length === 0) return p;
       snapshot(p);
       return [];
     });
     setBranchPointIndex(null);
-  }, [snapshot]);
+  }, [snapshot, pipeline, dropGStepFor]);
 
   // One-click pipeline replication — atomically replaces the entire pipeline
   // with steps from an imported pipeline.json. Undoable via the History panel.
+  // The outgoing steps' G-steps go with them: an import wholesale replaces the
+  // pipeline, so any join it drops must drop its interaction too.
   const replacePipeline = useCallback(next => {
     if (!Array.isArray(next)) return;
+    pipeline.forEach(dropGStepFor);
     setPipeline(p => { snapshot(p); return next; });
     setBranchPointIndex(null);
-  }, [snapshot]);
+  }, [snapshot, pipeline, dropGStepFor]);
 
   const undo = useCallback(() => {
     if (!undoStack.current.length) return;
@@ -478,10 +662,31 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
   const [showSaveSubset, setShowSaveSubset] = useState(false);
   const [subsetName,     setSubsetName]     = useState("");
 
-  function doSaveSubset() {
+  async function doSaveSubset() {
     const name = subsetName.trim() ||
       (filename ? filename.replace(/\.[^.]+$/, "") + "_subset.csv" : "subset.csv");
-    if (onSaveSubset) onSaveSubset(name, rows, headers);
+    // Freeze the parent as of NOW. The child must stay reconstructible even if
+    // this pipeline is later edited or this dataset is deleted — R value
+    // semantics: `df2 <- df1 %>% ...` copies, it does not alias.
+    const frozen = freezeParent(
+      { id: pid, name: filename, filename, loadOpts: rawData?._loadOpts ?? null },
+      pipeline
+    );
+    // `rows` is the 500-row PREVIEW for a DuckDB-backed dataset — saving it
+    // would materialise 500 of 550,000 rows under a name that claims to be the
+    // whole thing. Refuse rather than save a truncated dataset.
+    let outRows = rows;
+    if (processed?._duckdb?.tableName) {
+      try {
+        const { extractAllRows } = await import("./services/data/duckdb.js");
+        outRows = await extractAllRows(processed._duckdb.tableName);
+      } catch (e) {
+        setPipelineError(`Could not read the full table (${e?.message ?? e}) — the dataset was NOT saved, rather than saved with only the ${rows.length} preview rows.`);
+        setShowSaveSubset(false);
+        return;
+      }
+    }
+    if (onSaveSubset) onSaveSubset(name, outRows, headers, null, { parent: frozen });
     setShowSaveSubset(false);
     setSubsetName("");
   }
@@ -565,7 +770,10 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
               <span style={{ color:C.gold }}>
                 {rawData._duckdb ? rawData._duckdb.rowCount.toLocaleString() : rawData.rows.length}
               </span> raw ·{" "}
-              <span>{rows.length}</span> current ·{" "}
+              {/* For a DuckDB-backed dataset `rows` is the 500-row preview, so
+                  showing rows.length made a 550,000-row table read "500 current"
+                  — as if the pipeline had dropped 549,500 rows. */}
+              <span>{(processed?._duckdb?.rowCount ?? rows.length).toLocaleString()}</span> current ·{" "}
               <span style={{ color: headers.length > rawData.headers.length ? C.green : C.textMuted }}>
                 {headers.length}
               </span> cols
@@ -582,6 +790,14 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             {contextWarnings.length > 0 && (
               <div style={{ marginTop:4, fontSize: T.caption.fontSize, color:C.yellow, fontFamily: T.code.fontFamily }}>
                 ⚠ {contextWarnings.join(" · ")}
+              </div>
+            )}
+            {/* A step that refuses to run (e.g. lookup against a non-unique key)
+                must say so. Without this the spinner would just stop and the
+                table would silently show the previous state. */}
+            {pipelineError && (
+              <div style={{ marginTop:4, fontSize: T.caption.fontSize, color:C.gold, fontFamily: T.code.fontFamily }}>
+                ⚠ {pipelineError} — showing the unprocessed data. Remove or fix that step in the pipeline sidebar.
               </div>
             )}
           </div>
@@ -666,7 +882,9 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             <ExportMenu rows={rows} headers={headers} pipeline={pipeline} filename={filename}
               datasetName={filename ? filename.replace(/\.[^.]+$/, "") : "dataset"}
               allDatasets={Object.fromEntries((allDatasets || []).map(d => [d.id, { name: d.name || d.filename, filename: d.filename }]))}
-              datasetId={pid}/>
+              datasetId={pid}
+              duckdbTableName={processed?._duckdb?.tableName ?? null}
+              totalRows={processed?._duckdb?.rowCount ?? rows.length}/>
             <ImportPipelineButton currentLength={pipeline.length} onImport={replacePipeline}
               currentDatasetId={pid}
               datasetIds={(allDatasets || []).map(d => d.id)} />
@@ -786,9 +1004,12 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Group summarize: aggregate (mean, sum, count, min, max) by group — collapses rows",
             "Pivot longer / wider: reshape between wide and long",
             "Balance panel: fill in the missing entity-time cells",
-            "Join another dataset: left, inner, right, full, semi or anti",
+            "Join another dataset: left, inner, right, full, semi or anti — matching dplyr, so a key with several matches on the right produces several rows. The preview tells you the resulting row count before you commit",
+            "Attach lookup columns: the m:1 alternative (Stata's merge m:1). Never changes the row count, and refuses to run if the right key repeats — use it to pin metadata onto a panel",
+            "A join can write its result to a new dataset instead of changing the current one; the parent's pipeline is left untouched",
             "Append (stack rows), bind columns, union, intersect, setdiff",
             "Join steps remember the real filenames, so the exported script reads the right files",
+            "The right dataset is referenced in its cleaned state — its own pipeline runs first",
           ]},
           { heading: "Panel Structure", items: [
             "Declare the entity column (i) and the time column (t)",
@@ -840,9 +1061,15 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         {tab === "structure" && (
           <PanelTab rows={rows} headers={headers} info={info} panel={panel} setPanel={setPanel} onAdd={addStep}/>
         )}
+        {/* joinLeftTable is the CURRENT pipeline output's table — the join
+            preview counts against that. `duckdbTableName` is the RAW table and
+            feeds FeatureTab, which wants exactly that; they are not the same. */}
         {tab === "workbench" && (
           <WorkbenchTab rows={rows} headers={headers} info={info} panel={panel}
             filename={filename} allDatasets={allDatasets} onAdd={addStep}
+            joinContext={context} onForkJoin={forkJoin}
+            leftTotal={processed?._duckdb?.rowCount ?? rows.length}
+            joinLeftTable={processed?._duckdb?.tableName ?? null}
             duckdbTableName={rawData?._duckdb?.tableName}/>
         )}
         {tab === "dictionary" && (

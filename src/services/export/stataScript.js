@@ -503,8 +503,28 @@ function transpileStep(step, allDatasets = {}) {
         lk === rk ? null : `  rename ${rk} ${lk}  /* align key names */`,
         `  save "__right_tmp.dta", replace`,
         `restore`,
-        `merge 1:1 ${lk} using "__right_tmp.dta", ${keep} nogen suffixes("" "${sfx}")`,
+        `* NOTE: 1:m assumes the key is unique in THIS dataset (the master). If both`,
+        `* sides repeat the key, Stata's merge cannot express it — use joinby instead:`,
+        `*   joinby ${lk} using "__right_tmp.dta", unmatched(master)`,
+        `* joinby has no suffixes() option, so homonym columns resolve differently`,
+        `* there than in the R/Python scripts. UNVERIFIED against a real Stata run.`,
+        `merge 1:m ${lk} using "__right_tmp.dta", ${keep} nogen suffixes("" "${sfx}")`,
         `erase "__right_tmp.dta"`,
+      ].filter(Boolean).join("\n");
+    }
+    case "lookup": {
+      const lk  = step.leftKey  ?? "id";
+      const rk  = step.rightKey ?? lk;
+      const sfx = step.suffix   ?? "_r";
+      return [
+        `* Attach lookup columns: m:1 errors if the right key is not unique — same contract as Litux`,
+        `preserve`,
+        `  ${stataRightLoad(step.rightId, allDatasets)}`,
+        lk === rk ? null : `  rename ${rk} ${lk}  /* align key names */`,
+        `  save "__lookup_tmp.dta", replace`,
+        `restore`,
+        `merge m:1 ${lk} using "__lookup_tmp.dta", keep(master match) nogen suffixes("" "${sfx}")`,
+        `erase "__lookup_tmp.dta"`,
       ].filter(Boolean).join("\n");
     }
     case "append": {

@@ -1,5 +1,5 @@
 // ─── ECON STUDIO · components/wrangling/MergeTab.jsx ───────────────────────
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTheme, Lbl, Collapsible, Btn } from "./shared.jsx";
 import { applyStep } from "../../pipeline/runner.js";
 
@@ -7,11 +7,17 @@ const emptyJoin = () => ({ rightId:"", leftKey:"", rightKey:"", how:"left", suff
 
 // ─── MERGE TAB ───────────────────────────────────────────────────────────────
 // JOIN and APPEND operations against other loaded datasets.
-// RHS always uses raw (pre-pipeline) data of the referenced dataset.
-function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
+// RHS uses the CLEANED (post-pipeline) data of the referenced dataset — that is
+// what runner.js joins against (WranglingModule's buildDatasetContext replays
+// each right dataset's own pipeline first). This comment used to claim "raw
+// (pre-pipeline)", which described the PREVIEW's bug rather than the behaviour.
+function MergeTab({ rows, headers, filename, allDatasets, onAdd, onForkJoin, joinContext = null, leftTotal = null, duckdbTableName = null }) {
   const { C, T } = useTheme();
   // JOIN state — array of staged joins, runs in order through runner.js
   const [joins, setJoins]         = useState([emptyJoin()]);
+  // "" = augment THIS dataset (forma 2, the default). Otherwise the name of the
+  // NEW dataset the join writes to (forma 1).
+  const [joinDest, setJoinDest]   = useState("");
   // APPEND state
   const [appendId, setAppendId]   = useState("");
   const [combineId, setCombineId] = useState("");
@@ -28,6 +34,30 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
   const addJoin = () =>
     setJoins(js => [...js, emptyJoin()]);
 
+  // Context object for applyStep. Prefer the CLEANED right side supplied by
+  // WranglingModule (buildDatasetContext replays each right dataset's pipeline) —
+  // that is what the real join runs against. Falling back to raw would make the
+  // preview report matches against data the join never sees.
+  //
+  // Declared BEFORE headerChain and matchPreviews: both call rightOf() inside a
+  // useMemo body, which runs during render, so declaring it after them put it in
+  // the temporal dead zone and threw on the first render that resolved a key.
+  const joinCtx = useMemo(() => {
+    if (joinContext?.datasets && Object.keys(joinContext.datasets).length) return joinContext;
+    const datasets = {};
+    allDatasets.forEach(d => { datasets[d.id] = { rows: d.rawData.rows, headers: d.rawData.headers }; });
+    return { datasets };
+  }, [joinContext, allDatasets]);
+
+  // Resolve one right dataset, cleaned when available, raw otherwise. The
+  // context is built lazily from `referencedDatasetIds(pipeline)`, so a dataset
+  // the user has only just picked in this panel is not in it yet.
+  const rightOf = useCallback((id) => {
+    if (joinCtx.datasets[id]) return joinCtx.datasets[id];
+    const d = allDatasets.find(x => x.id === id);
+    return d ? { rows: d.rawData.rows, headers: d.rawData.headers } : { rows: [], headers: [] };
+  }, [joinCtx, allDatasets]);
+
   // Simulate header chain through staged joins so each row's left-key picker
   // can reference columns added by earlier joins.
   const headerChain = useMemo(() => {
@@ -38,7 +68,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
       const prev = chain[i];
       if (!right || !sj.rightKey || sj.how === "anti" || sj.how === "semi") { chain.push(prev.slice()); continue; }
       const next = prev.slice();
-      for (const h of right.rawData.headers) {
+      for (const h of rightOf(sj.rightId).headers) {
         if (h === sj.rightKey) continue;
         const dest = next.includes(h) ? `${h}${sj.suffix || "_r"}` : h;
         if (!next.includes(dest)) next.push(dest);
@@ -46,14 +76,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
       chain.push(next);
     }
     return chain; // chain[i] = headers available as left side for staged join i
-  }, [joins, headers, allDatasets]);
-
-  // Context object for applyStep — keyed by dataset id, raw (pre-pipeline) rows/headers.
-  const joinContext = useMemo(() => {
-    const datasets = {};
-    allDatasets.forEach(d => { datasets[d.id] = { rows: d.rawData.rows, headers: d.rawData.headers }; });
-    return { datasets };
-  }, [allDatasets]);
+  }, [joins, headers, allDatasets, rightOf]);
 
   // Match preview for every staged join — materializes the row chain through prior
   // joins (via applyStep) so join 2+ can report a real match % too, not just join 0.
@@ -64,7 +87,8 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
       const j = joins[i];
       const r = allDatasets.find(d => d.id === j.rightId);
       if (!r || !j.leftKey || !j.rightKey) { previews.push(null); break; }
-      const rKeys = new Set(r.rawData.rows.map(rr => String(rr[j.rightKey] ?? "")));
+      const rRows = rightOf(j.rightId).rows;
+      const rKeys = new Set(rRows.map(rr => String(rr[j.rightKey] ?? "")));
       let matched = 0, keyNulls = 0;
       curRows.forEach(row => {
         const v = row[j.leftKey];
@@ -72,8 +96,38 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
         if (rKeys.has(String(v))) matched++;
       });
       const validRows = curRows.length - keyNulls;
+      // TRUNCATION. `rows` and a DuckDB-backed right dataset's rawData.rows are
+      // both the 500-row PREVIEW. Matching preview against preview is not a
+      // sample of the real answer — with the two files in different key orders
+      // the intersection is empty, so a join that matches 550,000 rows reports
+      // 0%. Never present these numbers as the truth when either side is cut.
+      const rTotal   = r.rawData?._duckdb?.rowCount ?? rRows.length;
+      const rCut     = rTotal > rRows.length;
+      const lCut     = (leftTotal ?? rows.length) > rows.length;
+      const truncated = rCut || lCut;
+      // Cardinality of the right side per key — this is what decides whether the
+      // join expands. "100% matched" says nothing about the OUTPUT row count,
+      // which is the number that surprised people: a 20-row metadata table
+      // joined onto a 200-row panel reads 100% and returns 200, not 20.
+      const rightCounts = new Map();
+      rRows.forEach(rr => {
+        const k = String(rr[j.rightKey] ?? "");
+        rightCounts.set(k, (rightCounts.get(k) ?? 0) + 1);
+      });
+      let maxPerKey = 0;
+      rightCounts.forEach(n => { if (n > maxPerKey) maxPerKey = n; });
+      const noCols = j.how === "semi" || j.how === "anti";
+      let outRows = 0;
+      curRows.forEach(row => {
+        const n = rightCounts.get(String(row[j.leftKey] ?? "")) ?? 0;
+        if (noCols) outRows += (j.how === "semi" ? (n > 0 ? 1 : 0) : (n > 0 ? 0 : 1));
+        else outRows += n > 0 ? n : ((j.how === "left" || j.how === "full") ? 1 : 0);
+      });
       previews.push({ matched, total: curRows.length, validRows, keyNulls,
-                       pct: validRows ? matched / validRows : 0 });
+                       pct: validRows ? matched / validRows : 0,
+                       maxPerKey: noCols ? 0 : maxPerKey, outRows,
+                       truncated, lCut, rCut, leftTotal: leftTotal ?? rows.length, rTotal,
+                       sampleL: rows.length, sampleR: rRows.length });
       // Materialize this join's output so the NEXT staged join previews against real rows.
       if (i < joins.length - 1) {
         if (j.how === "semi" || j.how === "anti") {
@@ -83,12 +137,46 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             return j.how === "semi" ? has : !has;
           });
         } else {
-          curRows = applyStep(curRows, headerChain[i] || headers, { ...j, type: "join" }, joinContext).rows;
+          curRows = applyStep(curRows, headerChain[i] || headers, { ...j, type: "join" }, joinCtx).rows;
         }
       }
     }
     return previews;
-  }, [joins, allDatasets, rows, headerChain, headers, joinContext]);
+  }, [joins, allDatasets, rows, headerChain, headers, joinCtx, rightOf, leftTotal]);
+
+  // ── SQL match preview ──────────────────────────────────────────────────────
+  // When the JS preview would be computed on truncated data, compute the real
+  // numbers in DuckDB over the full tables instead. Only for the FIRST staged
+  // join: later ones consume a materialised intermediate that has no table, so
+  // those keep the honest "unavailable" notice.
+  const [sqlStats, setSqlStats] = useState(null);   // { key, stats } | { key, error }
+  const j0    = joins[0];
+  const r0    = allDatasets.find(d => d.id === j0?.rightId);
+  const r0Tbl = r0?.rawData?._duckdb?.tableName ?? null;
+  const sqlKey = (duckdbTableName && r0Tbl && j0?.leftKey && j0?.rightKey)
+    ? [duckdbTableName, r0Tbl, j0.leftKey, j0.rightKey, j0.how].join("|")
+    : null;
+
+  useEffect(() => {
+    if (!sqlKey) { setSqlStats(null); return; }
+    let cancelled = false;
+    setSqlStats({ key: sqlKey, pending: true });
+    (async () => {
+      try {
+        const { joinPreviewStats } = await import("../../pipeline/duckdbRunner.js");
+        const stats = await joinPreviewStats({
+          leftTable: duckdbTableName, rightTable: r0Tbl,
+          leftKey: j0.leftKey, rightKey: j0.rightKey, how: j0.how || "left",
+        });
+        if (!cancelled) setSqlStats({ key: sqlKey, stats });
+      } catch (e) {
+        // Never fall through to the JS numbers here — they are the wrong answer,
+        // not a degraded one. Say the preview could not be computed.
+        if (!cancelled) setSqlStats({ key: sqlKey, error: e?.message ?? String(e) });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sqlKey, duckdbTableName, r0Tbl, j0?.leftKey, j0?.rightKey, j0?.how]);
 
   const appendPreview = useMemo(() => {
     if (!appendDs) return null;
@@ -118,6 +206,16 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
 
   function doJoinAll() {
     if (!completeJoins.length) return;
+    if (joinDest !== "") {
+      // Forma 1 — write to a NEW dataset. The steps are deliberately NOT added
+      // to this dataset's pipeline: the parent's history stays clean, and the
+      // provenance lives in the child's frozen record and in INTERACTIONS.
+      // Equivalent to `joined <- left_join(this, right)` rather than
+      // `this <- this %>% left_join(right)`.
+      onForkJoin?.(joinDest.trim() || "joined_data", completeJoins);
+      setJoins([emptyJoin()]);
+      return;
+    }
     for (const j of completeJoins) {
       const rDs = allDatasets.find(d => d.id === j.rightId);
       onAdd({ type:"join", rightId:j.rightId, leftKey:j.leftKey, rightKey:j.rightKey,
@@ -177,7 +275,9 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             Equivalent to dplyr's <span style={{color:C.blue}}>left_join()</span> / <span style={{color:C.blue}}>inner_join()</span>.
             Stage multiple joins below — they apply sequentially, so a later join can use
             a column added by an earlier one. Each right dataset is referenced in its
-            <em> raw</em> (pre-pipeline) state.
+            <em> cleaned</em> state — its own pipeline runs first. A key with several
+            matches on the right produces several rows, exactly as in dplyr; use
+            <em> Attach lookup columns</em> when you want one row per left row.
           </div>
 
           {/* ── Staged joins ────────────────────────────────────────────── */}
@@ -216,7 +316,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                         fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}>
                       {j.rightId===d.id?"✓ ":""}{d.filename}
                       <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:6}}>
-                        {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                        {(d.rawData._duckdb?.rowCount ?? d.rawData.rows.length).toLocaleString()}×{d.rawData.headers.length}
                       </span>
                     </button>
                   ))}
@@ -251,7 +351,53 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
 
                   {/* Match preview — materialized through the chain for every staged join */}
                   {matchPreviews[idx] && (() => {
-                    const mp = matchPreviews[idx];
+                    let mp = matchPreviews[idx];
+                    // Either side cut to its 500-row preview? Then the match
+                    // stats are meaningless — matching one file's first 500 keys
+                    // against another's is not a sample, and with different key
+                    // orders it reads 0% for a join that matches every row. Say
+                    // so instead of showing a number that would stop the user.
+                    // Real numbers from DuckDB, when available for this join.
+                    const sql = (idx === 0 && sqlStats?.key === sqlKey) ? sqlStats : null;
+                    if (sql?.stats) {
+                      mp = { ...mp, ...sql.stats, truncated: false, fromSQL: true,
+                             pct: sql.stats.validRows ? sql.stats.matched / sql.stats.validRows : 0 };
+                    } else if (mp.truncated && sql?.pending) return (
+                      <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
+                        border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,
+                        borderRadius:4,marginBottom:"1rem",
+                        fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
+                        Counting matches over the full tables…
+                      </div>
+                    );
+                    else if (mp.truncated && sql?.error) return (
+                      <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
+                        border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,
+                        borderRadius:4,marginBottom:"1rem",
+                        fontSize: T.code.fontSize,color:C.gold,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
+                        ⚠ Could not count matches over the full tables ({sql.error}).
+                        <div style={{marginTop:4,color:C.textMuted}}>
+                          Not falling back to the {mp.sampleL.toLocaleString()}-row preview — on tables this
+                          size that is the wrong answer, not a rough one.
+                        </div>
+                      </div>
+                    );
+                    if (mp.truncated) return (
+                      <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
+                        border:`1px solid ${C.gold}30`,borderLeft:`3px solid ${C.gold}`,
+                        borderRadius:4,marginBottom:"1rem",
+                        fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily,lineHeight:1.6}}>
+                        <span style={{color:C.gold}}>Match preview unavailable</span> — this join runs on the
+                        full tables ({mp.leftTotal.toLocaleString()} × {mp.rTotal.toLocaleString()} rows), but only{" "}
+                        {mp.lCut ? `${mp.sampleL.toLocaleString()} left` : ""}{mp.lCut && mp.rCut ? " and " : ""}
+                        {mp.rCut ? `${mp.sampleR.toLocaleString()} right` : ""} rows are loaded in the browser.
+                        <div style={{marginTop:4,color:C.textMuted}}>
+                          Counting matches on those samples would compare one file's first rows against the
+                          other's — with different key orders that reads 0% for a join that matches everything.
+                          Add the join to see the real result.
+                        </div>
+                      </div>
+                    );
                     const mc = mp.pct > 0.8 ? C.green : mp.pct > 0.4 ? C.yellow : C.red;
                     return (
                       <div style={{padding:"0.55rem 0.8rem",background:C.surface2,
@@ -268,7 +414,16 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                         <div style={{fontSize: T.code.fontSize,color:C.textDim,fontFamily: T.code.fontFamily}}>
                           <span style={{color:mc}}>{mp.matched.toLocaleString()}</span>
                           {" of "}{mp.validRows.toLocaleString()} left rows matched
+                          {" · "}
+                          <span style={{color:C.textMuted}}>result: {mp.outRows.toLocaleString()} rows</span>
                         </div>
+                        {mp.maxPerKey > 1 && (
+                          <div style={{fontSize: T.caption.fontSize,color:C.gold,fontFamily: T.code.fontFamily,marginTop:4}}>
+                            1:m — right key '{j.rightKey}' has up to {mp.maxPerKey} rows per key, so matched
+                            rows are duplicated (same as dplyr). Want one row per left row instead?
+                            Use <b>Attach lookup columns</b>.
+                          </div>
+                        )}
                         {mp.keyNulls > 0 && (
                           <div style={{fontSize: T.caption.fontSize,color:C.orange,fontFamily: T.code.fontFamily,marginTop:4}}>
                             ⚠ {mp.keyNulls} row{mp.keyNulls!==1?"s":""} have null in key column '{j.leftKey}'.
@@ -327,6 +482,39 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             );
           })}
 
+          {/* Result destination — forma 2 (in place) vs forma 1 (new dataset) */}
+          <div style={{marginBottom:"1rem"}}>
+            <Lbl color={C.gold}>Result</Lbl>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+              {[["", `this dataset (${filename ?? "current"})`], ["new", "new dataset"]].map(([k,l])=>{
+                const on = k === "" ? joinDest === "" : joinDest !== "";
+                return (
+                  <button key={k}
+                    onClick={()=>setJoinDest(k === "" ? "" : (joinDest || "joined_data"))}
+                    style={{padding:"0.3rem 0.7rem",border:`1px solid ${on?C.gold:C.border2}`,
+                      background:on?`${C.gold}18`:"transparent",color:on?C.gold:C.textDim,
+                      borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,
+                      fontFamily: T.code.fontFamily}}>
+                    {on?"✓ ":""}{l}
+                  </button>
+                );
+              })}
+              {joinDest !== "" && (
+                <input value={joinDest} onChange={e=>setJoinDest(e.target.value)} placeholder="joined_data"
+                  style={{flex:1,minWidth:140,boxSizing:"border-box",padding:"0.35rem 0.55rem",
+                    background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,
+                    color:C.text,fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,outline:"none"}}/>
+              )}
+            </div>
+            {joinDest !== "" && (
+              <div style={{marginTop:6,fontSize: T.caption.fontSize,color:C.textMuted,
+                fontFamily: T.code.fontFamily,lineHeight:1.6}}>
+                Creates <span style={{color:C.gold}}>{joinDest.trim() || "joined_data"}</span> and leaves{" "}
+                {filename ?? "this dataset"} untouched — its pipeline is not modified.
+              </div>
+            )}
+          </div>
+
           {/* Add-another + submit */}
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1rem"}}>
             <button onClick={addJoin}
@@ -338,9 +526,11 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
             <span style={{flex:1}}/>
             <Btn onClick={doJoinAll} color={C.teal} v="solid"
               dis={completeJoins.length===0}
-              ch={completeJoins.length<=1
-                ? `Add JOIN to pipeline →`
-                : `Add ${completeJoins.length} joins to pipeline →`}/>
+              ch={joinDest !== ""
+                ? `Create ${joinDest.trim() || "joined_data"} →`
+                : completeJoins.length<=1
+                  ? `Add JOIN to pipeline →`
+                  : `Add ${completeJoins.length} joins to pipeline →`}/>
           </div>
         </div>
       )}
@@ -368,7 +558,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                   fontSize: T.code.fontSize,fontFamily: T.code.fontFamily,transition:"all 0.1s"}}>
                 {appendId===d.id?"✓ ":""}{d.filename}
                 <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:6}}>
-                  {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                  {(d.rawData._duckdb?.rowCount ?? d.rawData.rows.length).toLocaleString()}×{d.rawData.headers.length}
                 </span>
               </button>
             ))}
@@ -452,7 +642,7 @@ function MergeTab({ rows, headers, filename, allDatasets, onAdd }) {
                   borderRadius:3,cursor:"pointer",fontSize: T.code.fontSize,fontFamily: T.code.fontFamily}}>
                 {combineId===d.id?"✓ ":""}{d.filename}
                 <span style={{fontSize: T.caption.fontSize,color:C.textMuted,marginLeft:6}}>
-                  {d.rawData.rows.length.toLocaleString()}×{d.rawData.headers.length}
+                  {(d.rawData._duckdb?.rowCount ?? d.rawData.rows.length).toLocaleString()}×{d.rawData.headers.length}
                 </span>
               </button>
             ))}

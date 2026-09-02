@@ -465,6 +465,15 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       ].join("\n");
     }
 
+    case "lookup": {
+      const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
+      return [
+        `# Attach lookup columns from: "${rightName}" (right key must be unique)`,
+        `right_df <- ${rRightLoad(step.rightId, allDatasets)}`,
+        `${dfVar} <- left_join(${dfVar}, right_df, by = c(${rStr(step.leftKey)} = ${rStr(step.rightKey)}), suffix = c("", ${rStr(step.suffix ?? "_r")}), relationship = "many-to-one")`,
+      ].join("\n");
+    }
+
     case "append": {
       const rightName = allDatasets[step.rightId]?.name ?? step.rightId;
       return [

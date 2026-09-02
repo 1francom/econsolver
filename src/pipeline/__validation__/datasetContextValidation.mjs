@@ -72,13 +72,27 @@ const LEFT_HEADERS = ["code", "pop"];
     JSON.stringify(out.headers));
 }
 
-// ── T4: a dataset with NO steps passes rawData through, keeping _duckdb ───
-// Dropping the table pointer here would push every join off the SQL fast path.
+// ── T4: a dataset with NO steps keeps _duckdb AND gets its full rows ──────
+// Dropping the table pointer would push every join off the SQL fast path. But
+// forwarding rawData untouched was its own bug: a DuckDB-backed dataset's
+// `rawData.rows` is only the 500-row PREVIEW, so any JS-path join silently
+// matched against 500 rows. T4b used to assert object IDENTITY here — which is
+// exactly what forwarded the preview. It now asserts the real contract: pointer
+// preserved, rows loaded in full.
 {
-  const duck = ds("D", ["k"], [{ k: 1 }], { _duckdb: { tableName: "t_d", rowCount: 900000 } });
-  const { datasets } = await buildDatasetContext([duck], noSteps, loadRows, { only: ["D"] });
+  const duck = ds("D", ["k"], [{ k: 1 }], { _duckdb: { tableName: "t_d", rowCount: 3 } });
+  // Stand-in for extractAllRows: the table really holds 3 rows, the preview 1.
+  const fullLoad = async (d) => d.rawData._duckdb
+    ? { rows: [{ k: 1 }, { k: 2 }, { k: 3 }], headers: d.rawData.headers }
+    : { rows: d.rawData.rows, headers: d.rawData.headers };
+  const { datasets } = await buildDatasetContext([duck], noSteps, fullLoad, { only: ["D"] });
   check("T4 no-step dataset keeps its _duckdb pointer", datasets.D?._duckdb?.tableName === "t_d");
-  check("T4b and is the very same object (no copy)", datasets.D === duck.rawData);
+  check("T4b and carries the FULL table, not the preview",
+    datasets.D?.rows?.length === 3, `got ${datasets.D?.rows?.length}`);
+  // A plain (non-DuckDB) dataset still passes straight through — no needless copy.
+  const plain = ds("P", ["k"], [{ k: 1 }]);
+  const { datasets: pd } = await buildDatasetContext([plain], noSteps, loadRows, { only: ["P"] });
+  check("T4c non-DuckDB no-step dataset is passed through untouched", pd.P === plain.rawData);
 }
 
 // ── T5: a dataset WITH steps must NOT expose _duckdb ──────────────────────
