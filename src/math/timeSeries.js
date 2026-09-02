@@ -3,13 +3,37 @@
 // Pure JS — no React, no side effects.
 //
 // Exports:
+//   SERIES_TRANSFORMS / applySeriesTransform  — the x / |x| / x² vocabulary
 //   computeACF(y, maxLag?)       → number[]  (lag 0 = 1.0)
+//   correlogramSeries(rows, col, opts) → { data, band, n, maxLag } | null
 //   computePACF(acf, maxLag?)    → number[]  (lag 0 = 1.0)
 //   adfTest(y, maxLags?)         → AdfResult[]
 //
 // ADF uses MacKinnon (1994) response-surface critical values, constant-only model.
 
 import { runOLS } from "./LinearEngine.js";
+import { qnorm } from "./calcEngine.js";
+
+// ─── SERIES TRANSFORMS ────────────────────────────────────────────────────────
+// The QRM stylised-facts workflow runs the same test three times: on the series,
+// on its absolute values, and on its squares. Raw returns are close to serially
+// uncorrelated while |r| and r² are strongly autocorrelated — that contrast IS
+// the volatility-clustering finding, so the transform is part of the test's
+// specification, not a separate cleaning step the user has to build a column for.
+// The Python spellings go through numpy rather than pandas methods on purpose:
+// `x.abs()` works on a Series but not on the np.asarray the literal-vector
+// emitters build, and np.abs works on both.
+export const SERIES_TRANSFORMS = [
+  { id: "raw",    label: "x",   rExpr: x => x,           pyExpr: x => x,            stataExpr: x => x },
+  { id: "abs",    label: "|x|", rExpr: x => `abs(${x})`, pyExpr: x => `np.abs(${x})`, stataExpr: x => `abs(${x})` },
+  { id: "square", label: "x²",  rExpr: x => `(${x})^2`,  pyExpr: x => `${x}**2`,      stataExpr: x => `(${x})^2` },
+];
+
+export function applySeriesTransform(values, transform = "raw") {
+  if (transform === "abs")    return values.map(Math.abs);
+  if (transform === "square") return values.map(v => v * v);
+  return values;
+}
 
 // ─── ACF ─────────────────────────────────────────────────────────────────────
 // ρ_k = [ Σ_{t=k}^{n-1} (y_t − ȳ)(y_{t-k} − ȳ) ] / [ Σ_t (y_t − ȳ)² ]
@@ -122,4 +146,52 @@ export function adfTest(y, maxLags = 2) {
     results.push({ lag: p, stat, pVal, cv5pct: cv5, stationary: stat < cv5 });
   }
   return results;
+}
+
+// ─── ACF / PACF SERIES ────────────────────────────────────────────────────────
+// R's acf()/pacf() drawn as a Plot layer: one bar per lag plus the ±z/√n
+// significance band. The autocorrelations come from computeACF/computePACF —
+// the same estimators the Explore ACF panel and the Ljung-Box test use, so a
+// plot and a p-value in this app can never disagree about the same series.
+//
+// The series is read in ROW ORDER: an autocorrelation is only meaningful on a
+// series that is already sorted by time, exactly as in R, where acf() trusts
+// the order of the vector it is handed.
+//
+// Lag 0 is included for ACF (where it is 1 by construction) and omitted for
+// PACF, matching what R plots in each case.
+export function correlogramSeries(rows, col, opts) {
+  const { maxLag: maxLagRaw = 20, kind = "acf", transform = "raw", ci: ciRaw = 0.95 } = opts || {};
+  const values = [];
+  for (const r of rows) {
+    const raw = r?.[col];
+    if (raw === null || raw === undefined || raw === "") continue;
+    const v = Number(raw);
+    if (Number.isFinite(v)) values.push(v);
+  }
+  const x = applySeriesTransform(values, transform);
+  const n = x.length;
+  if (n < 5) return null;
+
+  const wanted = Number(maxLagRaw) > 0 ? Math.round(Number(maxLagRaw)) : 20;
+  const maxLag = Math.max(1, Math.min(wanted, n - 2));
+
+  const mean = x.reduce((s, v) => s + v, 0) / n;
+  if (!(x.reduce((s, v) => s + (v - mean) ** 2, 0) > 1e-15)) return null;
+
+  const acf = computeACF(x, maxLag);
+  if (acf.length < 2) return null;
+  const vals = kind === "pacf" ? computePACF(acf, maxLag) : acf;
+
+  // R's acf() band: qnorm((1 + ci)/2) / sqrt(n).
+  const ci = Number(ciRaw) > 0 && Number(ciRaw) < 1 ? Number(ciRaw) : 0.95;
+  const band = qnorm((1 + ci) / 2) / Math.sqrt(n);
+
+  const startLag = kind === "pacf" ? 1 : 0;
+  const data = [];
+  for (let k = startLag; k <= maxLag; k++) {
+    if (!Number.isFinite(vals[k])) continue;
+    data.push({ lag: k, value: vals[k] });
+  }
+  return { data, band, n, maxLag };
 }

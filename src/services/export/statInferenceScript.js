@@ -1,7 +1,7 @@
 // Standalone R / Python / Stata snippets for data-level Stat & Simulation tests.
 
 import { groupInferenceSnippet, columnRefSnippet } from "./statInferenceGroupScript.js";
-import { SERIES_TRANSFORMS } from "../../math/SampleTests.js";
+import { SERIES_TRANSFORMS } from "../../math/timeSeries.js";
 
 const tExpr = (id, lang, x) => {
   const t = SERIES_TRANSFORMS.find(e => e.id === id) ?? SERIES_TRANSFORMS[0];

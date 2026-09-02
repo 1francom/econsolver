@@ -22,8 +22,9 @@ import {
   oneSampleMeanTest, varianceTest, parameterTest,
   twoSampleMeanTest, pairedMeanTest, onePropTest, twoPropTest, correlationTest, varianceRatioTest,
   splitByGroup, groupLevels, countsByGroup,
-  ljungBoxTest, normalityTest, SERIES_TRANSFORMS,
+  ljungBoxTest, normalityTest,
 } from "../../../math/SampleTests.js";
+import { SERIES_TRANSFORMS } from "../../../math/timeSeries.js";
 import { sortFactorLevels } from "../../modeling/helpers.js";
 import { generateStatInferenceScript } from "../../../services/export/statInferenceScript.js";
 

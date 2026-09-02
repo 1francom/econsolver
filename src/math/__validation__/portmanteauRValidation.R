@@ -25,6 +25,7 @@ transform_series <- function(x, kind) {
 }
 
 cases <- list()
+correlograms <- list()
 for (name in names(bench$series)) {
   x <- as.numeric(unlist(bench$series[[name]]))
   for (tf in c("raw", "abs", "square")) {
@@ -35,6 +36,18 @@ for (name in names(bench$series)) {
       cases[[length(cases) + 1]] <- list(
         series = name, transform = tf, lags = lags, type = type,
         stat = unname(bt$statistic), pValue = unname(bt$p.value), df = lags
+      )
+    }
+    for (nlags in c(10, 20)) {
+      # R's acf() uses the 1/n denominator and pacf() is Durbin-Levinson on it —
+      # the conventions computeACF/computePACF implement.
+      a <- acf(z, lag.max = nlags, plot = FALSE)$acf[, 1, 1]
+      pa <- pacf(z, lag.max = nlags, plot = FALSE)$acf[, 1, 1]
+      correlograms[[length(correlograms) + 1]] <- list(
+        series = name, transform = tf, nlags = nlags,
+        acf = as.numeric(a),
+        # R's pacf omits lag 0; the JSON carries it as 1, matching statsmodels.
+        pacf = c(1, as.numeric(pa))
       )
     }
     jb <- jarque.bera.test(z)
@@ -48,8 +61,9 @@ for (name in names(bench$series)) {
   }
 }
 
-bench$meta$source <- paste("R", getRversion(), "Box.test + tseries::jarque.bera.test")
+bench$meta$source <- paste("R", getRversion(), "Box.test + tseries::jarque.bera.test + acf/pacf")
 bench$meta$generated <- format(Sys.Date())
 bench$cases <- cases
+bench$correlograms <- correlograms
 write_json(bench, path, auto_unbox = TRUE, digits = 17, pretty = TRUE)
-cat("wrote", length(cases), "cases to", path, "\n")
+cat("wrote", length(cases), "cases and", length(correlograms), "correlograms to", path, "\n")

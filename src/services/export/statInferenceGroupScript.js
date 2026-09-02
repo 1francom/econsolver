@@ -14,7 +14,7 @@
 // Returns null for anything it does not handle, so the caller falls back to the
 // existing wide-format emitters unchanged.
 
-import { SERIES_TRANSFORMS } from "../../math/SampleTests.js";
+import { SERIES_TRANSFORMS } from "../../math/timeSeries.js";
 
 // One vocabulary for the x / |x| / x² transform, shared with the engine and the
 // panel. A transform added there without a spelling here would silently export

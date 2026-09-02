@@ -1,6 +1,20 @@
 // Deterministic PlotBuilder config -> R/ggplot2 translator.
 
 import { toDfVar } from "../../pipeline/exporter.js";
+import { SERIES_TRANSFORMS } from "../../math/timeSeries.js";
+
+// The x / |x| / x² vocabulary is owned by SERIES_TRANSFORMS, the same table the
+// engine, the test panel and the correlogram layer read. A transform added
+// there but not spelled here would export a plot of the untransformed series.
+function seriesExpr(id, lang, x) {
+  const t = SERIES_TRANSFORMS.find(e => e.id === id) ?? SERIES_TRANSFORMS[0];
+  return t[lang](x);
+}
+const acfLagMax = (opts) => {
+  const n = Number(opts?.maxLag);
+  return Number.isFinite(n) && n >= 1 ? Math.round(n) : 20;
+};
+const acfIsPacf = (opts) => (opts?.kind ?? "acf") === "pacf";
 import { buildPyLoadLine, buildRLoadLine } from "./loadLine.js";
 
 const BREWER_SCHEMES = {
@@ -397,10 +411,36 @@ export function resolvePlotPreamble(raw, { language, baseDfVar = "df" } = {}) {
   return { code, dfVar: named ?? "plot_df" };
 }
 
+// A correlogram is not a ggplot geom. R draws it with base graphics — acf() /
+// pacf() — which is also exactly what a QRM script would contain, so the layer
+// is emitted as those calls beside the ggplot chain rather than approximated by
+// a stat_ that plots different numbers. (ggAcf() from forecast exists, but
+// pulling a package in for one layer would make the whole script depend on it.)
+function acfRCall(layer, dfVar) {
+  const col = layer?.aes?.x;
+  if (!col) return null;
+  const opts = layer.opts ?? {};
+  const series = `${dfVar}[[${rString(col)}]]`;
+  const clean = `x <- ${series}[!is.na(${series})]`;
+  const tf = opts.transform && opts.transform !== "raw"
+    ? [`x <- ${seriesExpr(opts.transform, "rExpr", "x")}`]
+    : [];
+  const ci = Number(opts.ci);
+  const ciArg = Number.isFinite(ci) && ci > 0 && ci < 1 && ci !== 0.95 ? `, ci = ${ci}` : "";
+  return [
+    "# Correlogram — base R, no ggplot geom equivalent",
+    clean,
+    ...tf,
+    `${acfIsPacf(opts) ? "pacf" : "acf"}(x, lag.max = ${acfLagMax(opts)}${opts.showCI === false ? ", ci = 0" : ciArg})`,
+  ].join("\n");
+}
+
 export function buildGgplot(plotEntry, { dfVar = "df" } = {}) {
   const entry = plotEntry ?? {};
-  const layers = (Array.isArray(entry.layers) ? entry.layers : [])
+  const allLayers = (Array.isArray(entry.layers) ? entry.layers : [])
     .filter(layer => layer?.visible !== false && layer?.geom !== "map");
+  const acfCalls = allLayers.filter(l => l.geom === "acf").map(l => acfRCall(l, dfVar)).filter(Boolean);
+  const layers = allLayers.filter(layer => layer.geom !== "acf");
   const geoms = layers.map(layer => buildLayer(layer, dfVar)).filter(Boolean);
   // A tile layer owns the fill scale — ggplot allows only one per plot, so the
   // categorical brewer fill is suppressed here just as the app's colour channel
@@ -446,6 +486,12 @@ export function buildGgplot(plotEntry, { dfVar = "df" } = {}) {
   if (labels.length) components.push(`labs(${labels.join(", ")})`);
   components.push(...palette.components);
 
+  // An ACF-only plot has no ggplot chain to emit; emitting `ggplot(df)` alone
+  // would produce an empty grey panel next to the correlogram.
+  if (acfCalls.length && !geoms.length) {
+    return acfCalls.join("\n\n");
+  }
+
   const chain = [`ggplot(${dfVar})`, ...components].join(" +\n  ");
   return [
     "library(ggplot2)",
@@ -455,6 +501,7 @@ export function buildGgplot(plotEntry, { dfVar = "df" } = {}) {
     `plot <- ${chain}`,
     "",
     "plot",
+    ...(acfCalls.length ? ["", ...acfCalls] : []),
   ].filter(line => line != null).join("\n");
 }
 
@@ -717,6 +764,7 @@ function matplotlibLayer(layer, index, dfVar) {
   const lines = [];
   let usesSeaborn = false;
   let usesNumpy = false;
+  let usesTsaPlots = false;
 
   switch (layer?.geom) {
     case "point": {
@@ -869,11 +917,35 @@ function matplotlibLayer(layer, index, dfVar) {
       break;
     }
 
+    case "acf": {
+      if (!aes.x) break;
+      usesTsaPlots = true;
+      const src = `${pyColumn(dfVar, aes.x)}.dropna().astype(float)`;
+      const expr = (opts.transform && opts.transform !== "raw")
+        ? seriesExpr(opts.transform, "pyExpr", src)
+        : src;
+      if (opts.transform === "abs") usesNumpy = true;
+      const ci = Number(opts.ci);
+      // statsmodels' default alpha is 0.05, so a 95% band needs no argument —
+      // and 1 - 0.95 in binary floating point is 0.050000000000000044.
+      const alphaArg = opts.showCI === false
+        ? ", alpha=None"
+        : (Number.isFinite(ci) && ci > 0 && ci < 1 && ci !== 0.95
+            ? `, alpha=${pyNumber(Number((1 - ci).toFixed(6)), 0.05)}`
+            : "");
+      // method="ywm" is Durbin-Levinson on the biased ACF — R's pacf() and this
+      // app's computePACF. statsmodels' stattools default ("ywadjusted") differs
+      // in the third decimal, so it is pinned rather than left to the version.
+      const methodArg = acfIsPacf(opts) ? ', method="ywm"' : "";
+      lines.push(`${acfIsPacf(opts) ? "plot_pacf" : "plot_acf"}(${expr}, lags=${acfLagMax(opts)}, ax=ax${methodArg}${alphaArg})`);
+      break;
+    }
+
     default:
       break;
   }
 
-  return { lines, usesSeaborn, usesNumpy };
+  return { lines, usesSeaborn, usesNumpy, usesTsaPlots };
 }
 
 function pyDomain(domain) {
@@ -900,9 +972,11 @@ export function buildMatplotlibPlot(plotEntry, { dfVar = "df" } = {}) {
   const built = layers.map((layer, index) => matplotlibLayer(layer, index + 1, panelVar));
   const usesSeaborn = built.some(layer => layer.usesSeaborn);
   const usesNumpy = built.some(layer => layer.usesNumpy);
+  const usesTsaPlots = built.some(layer => layer.usesTsaPlots);
   const lines = ["import matplotlib.pyplot as plt"];
   if (usesSeaborn) lines.push("import seaborn as sns");
   if (usesNumpy) lines.push("import numpy as np");
+  if (usesTsaPlots) lines.push("from statsmodels.graphics.tsaplots import plot_acf, plot_pacf");
   lines.push("");
 
   const axisLines = [];
@@ -1029,6 +1103,27 @@ function stataLayer(layer) {
       return aes.x && aes.y && aes.color
         ? { comment: `* geom_tile has no base-Stata equivalent - requires the community command heatplot:\n*   ssc install heatplot\n*   heatplot ${aes.color} i.${aes.y} i.${aes.x}` }
         : { comment: "* geom_tile layer skipped - needs x, y and a fill column" };
+    case "acf": {
+      if (!aes.x) return null;
+      const transformed = opts.transform && opts.transform !== "raw";
+      const target = transformed ? "_acfx" : aes.x;
+      return {
+        // ac/pac require tsset, so the series is put on a running index. This
+        // runs in the caller's data on purpose — a preserve/restore around a
+        // graph command would drop the variable before the graph is drawn.
+        pre: [
+          ...(transformed ? [`capture drop _acfx`, `generate double _acfx = ${seriesExpr(opts.transform, "stataExpr", aes.x)}`] : []),
+          "capture drop _acft",
+          "generate long _acft = _n",
+          "tsset _acft",
+        ],
+        standalone: `${acfIsPacf(opts) ? "pac" : "ac"} ${target}, lags(${acfLagMax(opts)})`,
+        comment: opts.showCI === false
+          ? "* NOTE: the app drops missing values before computing the correlogram; ac/pac read the tsset calendar, so gaps count as missing observations. Stata always draws the confidence band — the app's band-off setting has no equivalent."
+          : "* NOTE: the app drops missing values before computing the correlogram; ac/pac read the tsset calendar, so gaps count as missing observations.",
+      };
+    }
+
     case "hline":
     case "vline": {
       const pat = STATA_LPATTERNS[lineTypeName(opts.dash, "dashed")] ?? "dash";
@@ -1075,9 +1170,13 @@ export function buildStataPlot(plotEntry, { dataVar = "" } = {}) {
     options.push(`by(${entry.facetCol}, cols(${ncol}))`);
   }
 
+  // Executable setup a layer needs before any graph command runs (ac/pac need
+  // a tsset time index, and a transformed series needs its variable).
+  const pre = built.flatMap(layer => layer.pre ?? []);
   const lines = [
     `* assumes the relevant dataset is loaded${dataVar ? ` (${dataVar})` : ""}`,
     ...comments,
+    ...pre,
   ];
   if (twoway.length) {
     lines.push(`twoway ${twoway.map(command => `(${command})`).join(" ")}${options.length ? `, ${options.join(" ")}` : ""}`);

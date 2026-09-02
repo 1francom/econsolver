@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ljungBoxTest, normalityTest } from "../SampleTests.js";
+import { computeACF, computePACF, applySeriesTransform, correlogramSeries } from "../timeSeries.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bench = JSON.parse(readFileSync(join(here, "portmanteauBenchmarks.json"), "utf8"));
@@ -54,6 +55,24 @@ for (const c of bench.cases) {
   check(`${tag} ${c.type}(${c.lags}) df`,   r.df, c.df, 0);
 }
 
+// ── Correlograms ─────────────────────────────────────────────────────────────
+// computeACF/computePACF back the Explore ACF panel, the Ljung-Box statistic and
+// the PlotBuilder correlogram layer, and had never been checked against a
+// reference. The PACF convention matters: R's pacf() is Durbin-Levinson on the
+// BIASED (1/n) acf — statsmodels "ldbiased"/"ywm" — while statsmodels' own
+// stattools default ("ywadjusted") differs in the third decimal.
+for (const c of (bench.correlograms ?? [])) {
+  const x = applySeriesTransform(bench.series[c.series].map(Number), c.transform);
+  const tag = `${c.series}/${c.transform}/nlags=${c.nlags}`;
+  const gotAcf = computeACF(x, c.nlags);
+  const gotPacf = computePACF(gotAcf, c.nlags);
+  for (let k = 0; k <= c.nlags; k++) {
+    check(`${tag} acf[${k}]`, gotAcf[k], c.acf[k], TOL_STAT);
+    // Lag 0 of a PACF is 1 by definition in both implementations.
+    check(`${tag} pacf[${k}]`, gotPacf[k], c.pacf[k], TOL_STAT);
+  }
+}
+
 // ── Guards: the contract, not the arithmetic ─────────────────────────────────
 const guards = [
   ["missing values are dropped, not read as zeros",
@@ -89,6 +108,41 @@ const guards = [
    }],
   ["Jarque-Bera needs 8 observations",
    () => !!normalityTest([1,2,3,4,5,6,7]).error],
+  // ── correlogramSeries: what the PlotBuilder ACF layer draws ────────────────
+  ["ACF keeps lag 0 and PACF starts at lag 1, as R plots them",
+   () => {
+     const rows = bench.series.ar1_phi06_n120.map(v => ({ r: v }));
+     const a = correlogramSeries(rows, "r", { maxLag: 10, kind: "acf" });
+     const p = correlogramSeries(rows, "r", { maxLag: 10, kind: "pacf" });
+     return a.data[0].lag === 0 && Math.abs(a.data[0].value - 1) < 1e-12
+         && p.data[0].lag === 1 && a.data.length === 11 && p.data.length === 10;
+   }],
+  ["the band is R's qnorm((1+ci)/2)/sqrt(n)",
+   () => {
+     const rows = bench.series.white_noise_n200.map(v => ({ r: v }));
+     const s95 = correlogramSeries(rows, "r", { maxLag: 5 });
+     const s99 = correlogramSeries(rows, "r", { maxLag: 5, ci: 0.99 });
+     return Math.abs(s95.band - 1.959963985 / Math.sqrt(200)) < 1e-8
+         && Math.abs(s99.band - 2.575829304 / Math.sqrt(200)) < 1e-8;
+   }],
+  ["the layer's values are the same numbers the test uses",
+   () => {
+     const vals = bench.series.garchish_n300;
+     const rows = vals.map(v => ({ r: v }));
+     const s = correlogramSeries(rows, "r", { maxLag: 10, transform: "square" });
+     const t = ljungBoxTest(vals, { lags: 10, transform: "square" });
+     // acf[] on the test result is lags 1..h; the layer keeps lag 0 at index 0.
+     return s.data.slice(1).every((d, i) => Math.abs(d.value - t.acf[i]) < 1e-12);
+   }],
+  ["a lag request beyond the series is clamped, not returned as NaN bars",
+   () => {
+     const rows = Array.from({ length: 12 }, (_, i) => ({ r: Math.sin(i) }));
+     const s = correlogramSeries(rows, "r", { maxLag: 50 });
+     return s.maxLag === 10 && s.data.every(d => Number.isFinite(d.value));
+   }],
+  ["a constant or too-short series draws nothing rather than a flat correlogram",
+   () => correlogramSeries(Array(40).fill({ r: 3 }), "r", { maxLag: 5 }) === null
+      && correlogramSeries([{ r: 1 }, { r: 2 }], "r", { maxLag: 5 }) === null],
 ];
 
 for (const [label, fn] of guards) {

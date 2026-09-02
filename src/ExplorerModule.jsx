@@ -2635,10 +2635,12 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           ]},
           { heading: "Plot Builder", items: [
             "Layer-based chart editor — stack as many layers as you need on one canvas",
-            "Geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, h-line, v-line",
+            "Geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, ACF, h-line, v-line",
             "Aesthetic mappings (x, y, colour), stacking and jitter, palette presets, axis and label controls",
             "facet_wrap: split into one panel per level of a column, with a column-count control",
             "Histogram and density take either a bin count or a bin width — bin width uses ggplot's centred edges",
+            "ACF draws R's correlogram: pick the series column, choose ACF or PACF, a max lag and the ±z/√n band; it reads row order, so sort by time first",
+            "The ACF geom also runs on |x| and x² — the correlogram of squared returns is the volatility-clustering picture",
             "Saved plots store the recipe, not a picture — they redraw against the current data, and that is why they can be exported as a runnable script",
             "Save overwrites the plot you loaded from the history; Save as new forks it into its own entry, so you can keep an original and a variant side by side",
             "Export as SVG or PNG, or copy the equivalent R / Python / Stata plot script",

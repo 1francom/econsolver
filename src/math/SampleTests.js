@@ -5,7 +5,7 @@
 // No React, no UI imports — math only.
 
 import { pt, pnorm, pchisq, pchisqUpper, pf } from "./calcEngine.js";
-import { computeACF } from "./timeSeries.js";
+import { computeACF, applySeriesTransform } from "./timeSeries.js";
 import { jarqueBera } from "../core/diagnostics/normality.js";
 
 function finite(v) {
@@ -317,27 +317,6 @@ export function varianceRatioTest(a, b, { alternative = "two-sided" } = {}) {
   const stat = A.variance / B.variance;
   const pValue = clamp01(pFromCdf(pf(stat, df1, df2), alternative));
   return { test: "var-ratio", nA: A.n, nB: B.n, estimate: stat, df1, df2, nullValue: 1, statLabel: "F", stat, alternative, pValue };
-}
-
-// ─── SERIES TRANSFORMS ────────────────────────────────────────────────────────
-// The QRM stylised-facts workflow runs the same test three times: on the series,
-// on its absolute values, and on its squares. Raw returns are close to serially
-// uncorrelated while |r| and r² are strongly autocorrelated — that contrast IS
-// the volatility-clustering finding, so the transform is part of the test's
-// specification, not a separate cleaning step the user has to build a column for.
-// The Python spellings go through numpy rather than pandas methods on purpose:
-// `x.abs()` works on a Series but not on the np.asarray the literal-vector
-// emitters build, and np.abs works on both.
-export const SERIES_TRANSFORMS = [
-  { id: "raw",    label: "x",   rExpr: x => x,           pyExpr: x => x,            stataExpr: x => x },
-  { id: "abs",    label: "|x|", rExpr: x => `abs(${x})`, pyExpr: x => `np.abs(${x})`, stataExpr: x => `abs(${x})` },
-  { id: "square", label: "x²",  rExpr: x => `(${x})^2`,  pyExpr: x => `${x}**2`,      stataExpr: x => `(${x})^2` },
-];
-
-export function applySeriesTransform(values, transform = "raw") {
-  if (transform === "abs")    return values.map(Math.abs);
-  if (transform === "square") return values.map(v => v * v);
-  return values;
 }
 
 // ─── LJUNG-BOX / BOX-PIERCE PORTMANTEAU TEST ──────────────────────────────────
