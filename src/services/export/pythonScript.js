@@ -1347,6 +1347,19 @@ function subsetFiltersToPython(filters, dfName = "df") {
 // configs: Array of { model: ModelConfig, label: string, subsetName?, subsetFilters? }
 // opts:    { filename?: string, pipeline?: Step[] }
 export function generateMultiModelPythonScript(configs = [], dataDictionary = null, opts = {}) {
+  // statsmodels' summary_col has no coef_omit equivalent (R's modelsummary and
+  // Stata's esttab both do), so say so rather than emit something that does not
+  // reproduce the table shown in the app.
+  const _omitVars = (opts.omitVars ?? []).filter(Boolean);
+  const omitNote = _omitVars.length
+    ? `# NOTE: ${_omitVars.length} variable(s) are hidden in the app's comparison table`
+      + `
+#       (${_omitVars.slice(0, 6).join(', ')}${_omitVars.length > 6 ? ', …' : ''}).`
+      + `
+#       summary_col has no coef_omit; drop those rows from \`table\` manually,`
+      + `
+#       or switch to the R export, which emits modelsummary(coef_omit=).`
+    : null;
   if (!configs.length) return "# No models provided.";
 
   const filename     = opts.filename ?? "dataset.csv";
@@ -1438,6 +1451,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
 
     lines.push(`# ── Results ─────────────────────────────────────────────────────────────────`);
     lines.push(`from statsmodels.iolib.summary2 import summary_col`);
+    if (omitNote) lines.push(omitNote);
     lines.push(`table = summary_col(list(results.values()), model_names=list(results.keys()), stars=True, float_format="%.4f")`);
     lines.push(`print(table)`);
     lines.push(``);
@@ -1474,6 +1488,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
       lines.push(`from statsmodels.iolib.summary2 import summary_col`);
       const smList   = smFits.map(f => f.name).join(", ");
       const smLabels = smFits.map(f => `"${f.label}"`).join(", ");
+      if (omitNote) lines.push(omitNote);
       lines.push(`print(summary_col([${smList}], model_names=[${smLabels}], stars=True, float_format="%.4f"))`);
       lines.push(`# linearmodels models`);
       lines.push(`from linearmodels.iv.model import compare as lm_compare`);
@@ -1483,6 +1498,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
       lines.push(`from statsmodels.iolib.summary2 import summary_col`);
       const fitList   = smFits.map(f => f.name).join(", ");
       const labelList = smFits.map(f => `"${f.label}"`).join(", ");
+      if (omitNote) lines.push(omitNote);
       lines.push(`table = summary_col([${fitList}], model_names=[${labelList}], stars=True, float_format="%.4f")`);
       lines.push(`print(table)`);
     } else {

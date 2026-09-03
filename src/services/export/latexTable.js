@@ -19,7 +19,10 @@ import { stars } from "../../math/index.js";
  * @returns {string} LaTeX table source
  */
 export function buildStargazer(models, options = {}) {
-  const { showFirstStage = false, varLabels = {} } = options;
+  const { showFirstStage = false, varLabels = {}, omitVars = [] } = options;
+  // Presentation only: an omitted variable is still IN the regression (this is
+  // stargazer's omit= / modelsummary's coef_omit=), it is just not given a row.
+  const omitted = new Set(omitVars);
 
   const fmtB = (b, p) => {
     if (b == null || !isFinite(b)) return "        N/A";
@@ -42,7 +45,7 @@ export function buildStargazer(models, options = {}) {
   const allVars = [];
   models.forEach(({ result: r }) => {
     (r.varNames ?? []).forEach(v => {
-      if (v !== "(Intercept)" && !allVars.includes(v)) allVars.push(v);
+      if (v !== "(Intercept)" && !omitted.has(v) && !allVars.includes(v)) allVars.push(v);
     });
   });
 
@@ -129,11 +132,13 @@ export function buildStargazer(models, options = {}) {
     rows.push(`  ${" ".repeat(label.length)}${sep}${models.map(m => modelVal(m, v, "se")).join(sep)} \\\\`);
   });
 
-  // Intercept always last
+  // Intercept last, unless it was omitted too
   const intV = "(Intercept)";
-  rows.push(`  \\hline`);
-  rows.push(`  Intercept${sep}${models.map(m => modelVal(m, intV, "b")).join(sep)} \\\\`);
-  rows.push(`  ${" ".repeat(9)}${sep}${models.map(m => modelVal(m, intV, "se")).join(sep)} \\\\`);
+  if (!omitted.has(intV)) {
+    rows.push(`  \\hline`);
+    rows.push(`  Intercept${sep}${models.map(m => modelVal(m, intV, "b")).join(sep)} \\\\`);
+    rows.push(`  ${" ".repeat(9)}${sep}${models.map(m => modelVal(m, intV, "se")).join(sep)} \\\\`);
+  }
 
   // ─── Fit stats ────────────────────────────────────────────────────────────
   rows.push(`  \\hline`);

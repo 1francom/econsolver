@@ -1271,6 +1271,10 @@ function stataLocalName(label) {
 // ─── MULTI-MODEL EXPORT ────────────────────────────────────────────────────────
 // configs: Array of { model: ModelConfig, label: string, subsetName?, subsetFilters? }
 export function generateMultiModelStataScript(configs = [], dataDictionary = null, opts = {}) {
+  // Hidden variables are dropped from the esttab OUTPUT only; every regressor
+  // stays in the estimation, so the coefficients are unaffected.
+  const _omitVars = (opts.omitVars ?? []).filter(Boolean);
+  const dropVars = _omitVars.length ? `  drop(${_omitVars.map(stVar).join(" ")}) ///` : null;
   if (!configs.length) return "* No models provided.";
 
   const filename     = opts.filename ?? "dataset.csv";
@@ -1353,6 +1357,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
     lines.push(`  mtitles(${mlabels}) ///`);
     lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
+    if (dropVars) lines.push(dropVars);
     lines.push(`  se r2 N replace`);
     lines.push("");
   } else {
@@ -1387,6 +1392,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
     lines.push(`  mtitles(${mlabels}) ///`);
     lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
+    if (dropVars) lines.push(dropVars);
     lines.push(`  se r2 N replace`);
     lines.push("");
   }

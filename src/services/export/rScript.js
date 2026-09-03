@@ -1685,6 +1685,13 @@ function subsetFiltersToR(filters) {
 // dataDictionary: Record<string,string> | null
 // opts:           { filename?: string, pipeline?: Step[] }
 export function generateMultiModelRScript(configs = [], dataDictionary = null, opts = {}) {
+  // Variables hidden in the comparison are dropped from the printed table only
+  // — modelsummary's coef_omit, the same contract as stargazer's omit=. The
+  // regressors stay in every fit, so the estimates themselves are unchanged.
+  const _omitVars = (opts.omitVars ?? []).filter(Boolean);
+  const coefOmit = _omitVars.length
+    ? `  coef_omit  = "^(${_omitVars.map(v => v.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")).join("|")})$",`
+    : null;
   if (!configs.length) return "# No models provided.";
 
   const filename     = opts.filename ?? "dataset.csv";
@@ -1765,6 +1772,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
       `modelsummary::modelsummary(`,
       `  results,`,
       `  stars      = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
+      ...(coefOmit ? [coefOmit] : []),
       `  gof_omit   = "AIC|BIC|Log|F$",`,
       `  output     = "comparison_results.docx"`,
       `)`,
@@ -1789,6 +1797,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
       `modelsummary::modelsummary(`,
       `  list(${listItems}),`,
       `  stars      = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
+      ...(coefOmit ? [coefOmit] : []),
       `  gof_omit   = "AIC|BIC|Log|F$",`,
       `  output     = "comparison_results.docx"`,
       `)`,
