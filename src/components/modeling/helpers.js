@@ -62,9 +62,15 @@ function reorderForReference(sortedLevels, ref) {
 
 export function applyFactors(rows, vars, factorVars, factorRefs = {}) {
   const toExpand = vars.filter(v => factorVars.has(v));
-  if (!toExpand.length) return { rows, vars };
+  if (!toExpand.length) return { rows, vars, factorMap: {} };
   let expandedVars = [...vars];
   let expandedRows = rows;
+  // dummy column -> { factor, level, ref }. Emitted here rather than recovered by
+  // parsing the column name downstream: names are `${col}_${level}` with spaces
+  // folded to underscores, so "country_name_south_africa" cannot be split back
+  // into factor and level unambiguously. The expansion is the only place that
+  // knows the true pair.
+  const factorMap = {};
   for (const col of toExpand) {
     const rawLevels  = [...new Set(rows.map(r => r[col]).filter(v => v != null))];
     const levels      = reorderForReference(sortFactorLevels(rawLevels), factorRefs[col]);
@@ -82,8 +88,11 @@ export function applyFactors(rows, vars, factorVars, factorRefs = {}) {
       return { ...r, ...dummies };
     });
     expandedVars = expandedVars.flatMap(v => v === col ? dummyCols : [v]);
+    dummyCols.forEach((dc, i) => {
+      factorMap[dc] = { factor: col, level: dummyLevels[i], ref: levels[0] };
+    });
   }
-  return { rows: expandedRows, vars: expandedVars };
+  return { rows: expandedRows, vars: expandedVars, factorMap };
 }
 
 // ─── INTERACTION EXPANSION HELPER ────────────────────────────────────────────

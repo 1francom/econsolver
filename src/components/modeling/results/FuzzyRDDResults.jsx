@@ -141,7 +141,7 @@ export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar
             { label: "FS-F",   value: r.firstStageFstat?.toFixed(2) ?? "—",        color: r.weak ? C.red : C.gold },
           ]} />
           <Lbl color={C.textMuted}>Second-Stage Coefficient Table</Lbl>
-          <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar} df={r.df} />
+          <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar} df={r.df} factorMap={r.factorMap} />
           <FuzzyLatexExport stage="second" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} runningVar={runningVar} />
           <PlotSelector accentColor={C.orange} defaultId="rdd" plots={[
             { id: "rdd",    label: "RDD Plot",

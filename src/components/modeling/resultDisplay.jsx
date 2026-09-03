@@ -265,7 +265,7 @@ function ciMultiplier(df) {
   return 1.96;
 }
 
-export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [], binaryVars = [], irr = null }) {
+export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [], binaryVars = [], irr = null, factorMap = null }) {
   const binarySet = new Set(binaryVars);
   const { C, T } = useTheme();
   const [open, setOpen] = useState(null);
@@ -527,6 +527,28 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                           {b >= 0 ? "+" : ""}{b.toFixed(4)}
                         </span>, ceteris paribus. Interpret jointly with the constituent main
                         effects, not in isolation.{" "}
+                      </>
+                    );
+                  }
+
+                  // Factor level. Must come before the isBinary branch: a factor
+                  // dummy IS 0/1, but "than the reference group" hides which level
+                  // that is, and the column name (`country_name_south_africa`)
+                  // cannot be split back into factor and level. The map from the
+                  // expansion carries the true pair plus the reference actually used.
+                  const fm = factorMap?.[v];
+                  if (fm) {
+                    return (
+                      <>
+                        For <span style={{ color: C.text }}>{fm.factor}</span> ={" "}
+                        <span style={{ color: C.text }}>{fm.level}</span>,{" "}
+                        <span style={{ color: C.text }}>{yVar}</span> is{" "}
+                        <span style={{ color: b >= 0 ? C.green : C.red }}>
+                          {Math.abs(b).toFixed(4)} {b >= 0 ? "higher" : "lower"}
+                        </span>{" "}
+                        than <span style={{ color: C.text }}>{fm.factor}</span> ={" "}
+                        <span style={{ color: C.text }}>{fm.ref}</span> (the reference level),
+                        ceteris paribus.{" "}
                       </>
                     );
                   }

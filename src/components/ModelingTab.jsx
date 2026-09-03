@@ -2944,7 +2944,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table — 95% Confidence Intervals</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={resultY} df={r.df} />
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={resultY} df={r.df} factorMap={r.factorMap} />
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Plot & Diagnostics</Lbl>
                 <PlotSelector
@@ -3013,7 +3013,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>Spatial Coefficients</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} factorMap={r.factorMap} />
                 </div>
                 {r.warnings?.length > 0 && (
                   <div style={{ fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily, marginBottom: "1rem", lineHeight: 1.6 }}>
@@ -3079,7 +3079,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ))}
                 <Lbl color={C.textMuted}>Coefficients — IV-Poisson (exp link) — toggle β / IRR</Lbl>
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se}
-                  tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel="z" irr={r.IRR} />
+                  tStats={r.tStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel="z" irr={r.IRR} factorMap={r.factorMap} />
                 <ExportBar yVar={yVar[0]} results={r} model="IVPoisson"
                   onReport={() => openReport({ ...r, modelLabel: "IV-Poisson", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
                   replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: { ...baseReplicateConfig.model, type: "IVPoisson", yVar: yVar[0] } } : null}
@@ -3131,7 +3131,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <Lbl color={C.textMuted}>Event-Time Coefficient Plot</Lbl>
                 <EventCoeffsPlot eventCoeffs={r.eventCoeffs} yLabel={yVar[0]} />
                 <Lbl color={C.textMuted}>Coefficient Table</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} factorMap={r.factorMap} />
                 <ExportBar yVar={yVar[0]} results={r} model="EventStudy"
                   onReport={() => openReport({ ...r, modelLabel: "Event Study", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
                   replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: {
@@ -3188,7 +3188,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <Lbl color={C.textMuted}>Event-Time ATT Plot (log points; PPML)</Lbl>
                 <EventCoeffsPlot eventCoeffs={r.eventCoeffs} yLabel={yVar[0]} />
                 <Lbl color={C.textMuted}>Saturated Coefficient Table (interactions + controls)</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel={r.testStatLabel} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel={r.testStatLabel} factorMap={r.factorMap} />
                 <ExportBar yVar={yVar[0]} results={r} model="SunAbraham"
                   onReport={() => openReport({ ...r, modelLabel: "Sun & Abraham Event Study", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
                   replicateConfig={baseReplicateConfig ? { ...baseReplicateConfig, model: {
@@ -3273,7 +3273,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <RegressionEquation varNames={r.varNames} beta={r.beta} yVar={yVar[0]} />
                 <Lbl color={C.textMuted}>Structural Coefficient Table (excl. dummies)</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} factorMap={r.factorMap} />
                 <PlotSelector accentColor={C.blue} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
                     node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
@@ -3307,7 +3307,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "n",       value: r.n,                              color: C.text },
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} factorMap={r.factorMap} />
                 <PlotSelector accentColor={C.violet} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
                     node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poisson" filename="poisson_coefficients.svg" /> },
@@ -3345,7 +3345,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     : `AIC/BIC penalty includes entity FEs (k = ${r.k} regressors + ${r.nUnits ?? Object.keys(r.alphas ?? {}).length} entity FEs — comparable to R LSDV AIC)`}
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} factorMap={r.factorMap} />
                 {isNegBin && (
                   <div style={{ marginTop: "1rem", marginBottom: "1rem", padding: "0.85rem 1rem", background: C.surface2, border: `1px solid ${C.violet}40`, borderLeft: `3px solid ${C.violet}`, borderRadius: 4 }}>
                     <div style={{ fontSize: T.caption.fontSize, color: C.violet, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6, fontFamily: T.code.fontFamily }}>
@@ -3502,7 +3502,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>Full Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} binaryVars={result.type === "DiD" ? ["Post", "Treated"] : []} />
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} binaryVars={result.type === "DiD" ? ["Post", "Treated"] : []} factorMap={r.factorMap} />
                 </div>
                 <PlotSelector
                   accentColor={C.teal}
@@ -3593,7 +3593,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     yVar={yVar[0]} df={null}
                     statLabel="z"
                     meMap={meMap}
-                  />
+                  factorMap={r.factorMap} />
                 </div>
 
                 {/* ── Marginal Effects at the Mean ── */}
@@ -3729,7 +3729,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 ]} />
                 <Lbl color={C.textMuted}>RDD Coefficient Table</Lbl>
                 <div style={{ marginBottom: "1.2rem" }}>
-                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} />
+                  <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} factorMap={r.factorMap} />
                 </div>
                 <PlotSelector
                   accentColor={C.orange}
