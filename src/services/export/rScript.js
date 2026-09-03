@@ -394,10 +394,10 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     case "group_summarize": {
       const by   = (step.by ?? []).map(rName).join(", ");
       const aggs = (step.aggs ?? []).map(a => {
-        const fnMap = { mean: "mean", sum: "sum", count: "n",
+        const fnMap = { mean: "mean", sum: "sum", count: "n", n: "n",
                         min: "min", max: "max", sd: "sd", median: "median" };
         const fn = fnMap[a.fn] ?? a.fn;
-        return a.fn === "count"
+        return (a.fn === "count" || a.fn === "n")
           ? `    ${rName(a.nn)} = n()`
           : `    ${rName(a.nn)} = ${fn}(${rName(a.col)}, na.rm = TRUE)`;
       }).join(",\n");

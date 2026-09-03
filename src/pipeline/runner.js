@@ -495,7 +495,10 @@ export function applyStep(rows, headers, s, context = {}) {
           const { col, fn, q } = agg;
           const nn = aggName(agg);
           const vals = _rows.map(r => r[col]).filter(v => typeof v === "number" && isFinite(v));
-          if (fn === "count") { out[nn] = _rows.length; return; }
+          // n() and count are the same thing here: both are the group's row
+          // count, dplyr's n(). `n` exists so the UI can offer it without
+          // demanding a column the result does not depend on.
+          if (fn === "n" || fn === "count") { out[nn] = _rows.length; return; }
           if (!vals.length)  { out[nn] = null; return; }
           if (fn === "sum")    { out[nn] = vals.reduce((a, b) => a + b, 0); return; }
           if (fn === "min")    { out[nn] = Math.min(...vals); return; }

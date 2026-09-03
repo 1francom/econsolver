@@ -662,10 +662,10 @@ export function toR(step, df = "df", allDatasets = {}) {
 
     case "group_summarize": {
       const by   = (step.by ?? []).map(rName).join(", ");
-      const fnMap = { mean:"mean", sum:"sum", count:"n", min:"min", max:"max", sd:"sd", median:"median" };
+      const fnMap = { mean:"mean", sum:"sum", count:"n", n:"n", min:"min", max:"max", sd:"sd", median:"median" };
       const aggs = (step.aggs ?? []).map(a => {
         const fn = fnMap[a.fn] ?? a.fn;
-        return a.fn === "count"
+        return (a.fn === "count" || a.fn === "n")
           ? `    ${rName(a.nn)} = n()`
           : `    ${rName(a.nn)} = ${fn}(${rName(a.col)}, na.rm = TRUE)`;
       }).join(",\n");
@@ -1232,13 +1232,22 @@ export function toStata(step, df = "df", allDatasets = {}) {
     case "group_summarize": {
       const by   = (step.by ?? []).map(stVar).join(" ");
       const fnMap = { mean:"mean", sum:"sum", count:"count", min:"min", max:"max", sd:"sd", median:"median" };
+      // Stata's collapse (count) counts NON-MISSING values of the variable,
+      // while runner.js returns the group's row count for both "count" and "n"
+      // (and the R export emits n()). Materialise a constant and sum it so the
+      // do-file reproduces the app instead of silently dropping missing rows.
+      const needsRowCount = (step.aggs ?? []).some(a => a.fn === "count" || a.fn === "n");
+      const ROWVAR = "_litux_one";
       const aggs = (step.aggs ?? []).map(a => {
         const fn = fnMap[a.fn] ?? a.fn;
-        return a.fn === "count"
-          ? `(count) ${stVar(a.nn)} = ${stVar(a.col)}`
+        return (a.fn === "count" || a.fn === "n")
+          ? `(sum) ${stVar(a.nn)} = ${ROWVAR}`
           : `(${fn}) ${stVar(a.nn)} = ${stVar(a.col)}`;
       }).join(" ");
-      return `collapse ${aggs}, by(${by})`;
+      return [
+        needsRowCount ? `gen byte ${ROWVAR} = 1` : null,
+        `collapse ${aggs}, by(${by})`,
+      ].filter(Boolean).join("\n");
     }
 
     case "pivot_longer": {
@@ -1821,10 +1830,13 @@ export function toPython(step, df = "df", allDatasets = {}) {
 
     case "group_summarize": {
       const by   = `[${(step.by ?? []).map(pyCol).join(", ")}]`;
-      const fnMap = { mean:"mean", sum:"sum", count:"size", min:"min", max:"max", sd:"std", median:"median" };
+      const fnMap = { mean:"mean", sum:"sum", count:"size", n:"size", min:"min", max:"max", sd:"std", median:"median" };
       const aggs  = (step.aggs ?? []).map(a => {
         const fn = fnMap[a.fn] ?? a.fn;
-        return `    ${pyStr(a.nn)}: pd.NamedAgg(column=${pyStr(a.col)}, aggfunc=${pyStr(fn)})`;
+        // n() needs no column; "size" counts rows whichever column it rides on,
+        // so anchor it to a grouping key that is guaranteed to exist.
+        const col = a.col || (step.by ?? [])[0] || "";
+        return `    ${pyStr(a.nn)}: pd.NamedAgg(column=${pyStr(col)}, aggfunc=${pyStr(fn)})`;
       }).join(",\n");
       return [
         `${df} = (${df}`,

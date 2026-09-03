@@ -302,10 +302,19 @@ function transpileStep(step, allDatasets = {}) {
       return step.dir === "desc" ? `gsort -${stVar(step.col)}` : `sort ${stVar(step.col)}`;
     case "group_summarize": {
       const fnMap = { mean: "mean", sum: "sum", count: "count", min: "min", max: "max", sd: "sd", median: "median" };
+      // See stepTranslators.js: (count) is a non-missing count in Stata, but the
+      // app (and the R export's n()) return the row count. Sum a constant instead.
+      const needsRowCount = (step.aggs ?? []).some(a => a.fn === "count" || a.fn === "n");
+      const ROWVAR = "_litux_one";
       const collapse = (step.aggs ?? []).map(a =>
-        `(${fnMap[a.fn] ?? "mean"}) ${stVar(a.nn)}=${stVar(a.col)}`).join(" ");
+        (a.fn === "count" || a.fn === "n")
+          ? `(sum) ${stVar(a.nn)}=${ROWVAR}`
+          : `(${fnMap[a.fn] ?? "mean"}) ${stVar(a.nn)}=${stVar(a.col)}`).join(" ");
       const by = (step.by ?? []).map(stVar).join(" ");
-      return `collapse ${collapse}, by(${by})`;
+      return [
+        needsRowCount ? `gen byte ${ROWVAR} = 1` : null,
+        `collapse ${collapse}, by(${by})`,
+      ].filter(Boolean).join("\n");
     }
     case "group_transform": {
       const by = step.by ?? [];

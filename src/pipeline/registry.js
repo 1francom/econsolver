@@ -628,6 +628,7 @@ export const STEP_REGISTRY = [
       { key: "by",   type: "cols", label: "Group by columns" },
       { key: "aggs", type: "aggs", label: "Aggregations",
         fnOptions: [
+          { value: "n",      label: "Row count — n()" },
           { value: "mean",   label: "Mean" },
           { value: "sum",    label: "Sum" },
           { value: "count",  label: "Count" },

@@ -347,8 +347,9 @@ function transpileStep(step, allDatasets = {}) {
       return `df = df.sort_values(${pyStr(step.col)}, ascending=${step.dir === "desc" ? "False" : "True"}).reset_index(drop=True)`;
     case "group_summarize": {
       const aggDict = (step.aggs ?? []).map(a => {
-        const fn = a.fn === "sd" ? "std" : a.fn === "count" ? "size" : a.fn;
-        return `${pyStr(a.nn)}: (${pyStr(a.col)}, "${fn}")`;
+        const fn = a.fn === "sd" ? "std" : (a.fn === "count" || a.fn === "n") ? "size" : a.fn;
+        const col = a.col || (step.by ?? [])[0] || "";
+        return `${pyStr(a.nn)}: (${pyStr(col)}, "${fn}")`;
       }).join(", ");
       return `df = df.groupby(${pyList(step.by ?? [])}, as_index=False).agg(**{${aggDict}})`;
     }
