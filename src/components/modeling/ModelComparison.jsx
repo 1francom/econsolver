@@ -14,6 +14,7 @@ import { generateMultiModelRScript }     from "../../services/export/rScript.js"
 import { generateMultiModelPythonScript } from "../../services/export/pythonScript.js";
 import { generateMultiModelStataScript }  from "../../services/export/stataScript.js";
 import { buildStargazer }                 from "../../services/export/latexTable.js";
+import { deriveFactorSpec }               from "../../services/export/factorSpec.js";
 
 
 function getTypeColor(type, C) {
@@ -372,11 +373,26 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
           omitVars: hiddenVars ? [...hiddenVars] : [] }
       );
     }
-    const configs = models.map(m => ({
+    const configs = models.map(m => {
+      // Without these the exporters see only the post-expansion design matrix and
+      // emit 94 municipality_* dummies as separate regressors instead of
+      // factor(municipality). This config object is the third of the three
+      // spec->export whitelists (CodeEditor and ReportingModule are the others);
+      // a field missing here silently degrades only the comparison export.
+      const fs = deriveFactorSpec(m);
+      return {
       model: {
         type: m.type,
         yVar:       m.spec?.yVar       ?? m.yVar       ?? "y",
         xVars:      m.spec?.xVars      ?? m.xVars      ?? [],
+        factorVars:       fs.factorVars,
+        factorRefs:       fs.factorRefs,
+        xVarsRaw:         fs.xVarsRaw,
+        wVarsRaw:         fs.wVarsRaw,
+        interactionTerms: fs.interactionTerms,
+        noIntercept:      m.spec?.noIntercept ?? false,
+        feCols:           m.spec?.feCols      ?? null,
+        offsetCol:        m.spec?.offsetCol   ?? null,
         wVars:      m.spec?.wVars      ?? m.wVars      ?? [],
         zVars:      m.spec?.zVars      ?? m.zVars      ?? [],
         entityCol:  m.spec?.entityCol  ?? null,
@@ -395,7 +411,8 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
       label:         m.label         ?? m.type ?? "Model",
       subsetName:    m.subsetName    ?? null,
       subsetFilters: m.subsetFilters ?? null,
-    }));
+      };
+    });
     // Hidden variables are dropped from the TABLE the script prints, never from
     // the regressions — omitting a regressor would change the estimates.
     const scriptOpts = { filename, pipeline, omitVars: hiddenVars ? [...hiddenVars] : [] };
