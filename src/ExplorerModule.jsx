@@ -10,7 +10,7 @@ const arrMax = (a, fb = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0])
 import { buildInfo } from "./WranglingModule.jsx";
 import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
 import { pnorm } from "./math/calcEngine.js";
-import PlotBuilder from "./components/PlotBuilder.jsx";
+import ExplorePlotTab from "./components/explore/ExplorePlotTab.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 import { downloadPNG } from "./services/export/plotExporter.js";
@@ -2645,6 +2645,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           ]},
           { heading: "Plot Builder", items: [
             "Layer-based chart editor — stack as many layers as you need on one canvas",
+            "Data source: the dataset itself, or a Goodman-Bacon decomposition of a staggered DiD — one row per 2×2 comparison, with a template for the weight-vs-estimate scatter and its weighted-sum reference line",
             "Geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, h-line, v-line",
             "Aesthetic mappings (x, y, colour), stacking and jitter, palette presets, axis and label controls",
             "facet_wrap: split into one panel per level of a column, with a column-count control",
@@ -2713,7 +2714,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} scriptPreamble={plotScriptPreamble} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
+        {tab==="plot"&&<ExplorePlotTab headers={headers} rows={filteredRows} panel={panel} numericCols={numericCols} pid={pid} histPid={histPid} filename={filename} scriptPreamble={plotScriptPreamble} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{height:"70vh", minHeight:520}}/>}
       </div>
       <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
     </div>

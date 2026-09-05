@@ -22,45 +22,12 @@
 import { useState, useMemo } from "react";
 import { useTheme } from "./shared.jsx";
 import { runBaconDecomposition, checkBaconIdentity, BACON_TYPES } from "../../math/did/baconDecomp.js";
+import { baconScript } from "../../services/export/baconScript.js";
 
 const fmt = (n, d = 4) => (typeof n === "number" && isFinite(n)) ? n.toFixed(d) : "—";
 
-// Replication snippets. The panel reports a number the user cannot otherwise
-// reproduce, so it carries its own — same pattern as CoefficientTestPanel.
-function baconScript(lang, { yCol, unitCol, timeCol, treatCol }) {
-  if (lang === "r") {
-    return [
-      `# Goodman-Bacon decomposition — install.packages("bacondecomp")`,
-      `library(bacondecomp)`,
-      `df_bacon <- bacon(${yCol} ~ ${treatCol},`,
-      `                  data = df, id_var = "${unitCol}", time_var = "${timeCol}")`,
-      ``,
-      `# Weighted sum reproduces the TWFE coefficient`,
-      `sum(df_bacon$estimate * df_bacon$weight)`,
-      ``,
-      `# Weight vs estimate, by comparison type`,
-      `library(ggplot2)`,
-      `ggplot(df_bacon) +`,
-      `  geom_point(aes(x = weight, y = estimate, colour = type, shape = type), size = 2) +`,
-      `  geom_hline(yintercept = sum(df_bacon$estimate * df_bacon$weight), colour = "red") +`,
-      `  labs(x = "Weight", y = "2x2 DD Estimate") + theme_minimal()`,
-    ].join("\n");
-  }
-  if (lang === "stata") {
-    return [
-      `* Goodman-Bacon decomposition — ssc install bacondecomp`,
-      `xtset ${unitCol} ${timeCol}`,
-      `bacondecomp ${yCol} ${treatCol}, ddetail`,
-    ].join("\n");
-  }
-  return [
-    `# No maintained Python port of bacondecomp exists as of this writing.`,
-    `# Run the decomposition in R (bacondecomp::bacon) or Stata (bacondecomp),`,
-    `# or compute the 2x2s and Goodman-Bacon (2021) weights directly:`,
-    `#   weights depend only on group sizes and treated-period shares,`,
-    `#   so they can be built from ${unitCol}/${timeCol}/${treatCol} alone.`,
-  ].join("\n");
-}
+// Replication snippets live in services/export/baconScript.js — Explore's
+// Plot Builder emits the same ones, and one owner keeps them from drifting.
 
 export default function BaconPanel({ rows, yCol, unitCol, timeCol, treatCol, betaTWFE }) {
   const { C, T } = useTheme();
