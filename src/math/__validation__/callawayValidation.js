@@ -535,7 +535,10 @@ export function suiteAggregation() {
     { g:2, t:1, e:-1, isPre:true,  isRef:false, att:0.0, inf: new Float64Array(nUnits) },
   ];
   const groupProb = new Map([[2, 1.0]]);
-  const res = aggregate({ cells2x2, groupProb, n: nUnits,
+  // Single cohort, so every unit is in g=2 and the weight-estimation term is
+  // identically zero — the numbers below are unaffected by it.
+  const unitG = Float64Array.from([2, 2, 2, 2]);
+  const res = aggregate({ cells2x2, groupProb, n: nUnits, unitG,
     inference: { method:"analytic", nBoot:0, seed:42 } });
 
   const results = [];
@@ -551,6 +554,67 @@ export function suiteAggregation() {
 
   results.forEach(r => console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`));
   return { pass: results.filter(r=>r.pass).length, fail: results.filter(r=>!r.pass).length, total: results.length };
+}
+
+/**
+ * SUITE T3B: weight-estimation term in the aggregation influence function.
+ *
+ * P(G=g) is estimated from the sample, so an aggregation weighted by it carries
+ * extra variance (R's did::compute.aggte `wif()`). Before this term existed the
+ * overall group SE came out SMALLER than either cohort's own SE — impossible
+ * for a weighted average, and the signature to watch for if this regresses.
+ *
+ * Benchmarks below are hand-derived, not engine-generated:
+ *   pg = [1/3, 1/3] over 300 units (100 in g=2, 100 in g=3, 100 never-treated),
+ *   att = [22, 4], so sum(pg) = 2/3 and, for a unit in cohort g=2,
+ *     num_k = (1{G=g_k} - 1/3)/(2/3)          -> [ 1, -0.5]
+ *     den_k = (sum_k dev) * pg_k / sum(pg)^2  -> [0.25, 0.25]
+ *     wif   = num - den                       -> [0.75, -0.75]
+ *     wif . att = 0.75*22 - 0.75*4 = +13.5   (-13.5 for g=3, 0 for never-treated)
+ *   With zero cell influence functions the whole IF is that term, so
+ *     SE = sqrt(200 * 13.5^2)/300 = 0.6363961.
+ * The same construction reproduced R's 0.6227 on the LMU PS6 fixture.
+ */
+export function suiteWeightEstimationIF() {
+  const nUnits = 300;
+  const zeros = () => new Float64Array(nUnits);
+  const unitG = new Float64Array(nUnits);
+  for (let i = 0; i < nUnits; i++) unitG[i] = i < 100 ? 2 : i < 200 ? 3 : Infinity;
+  const groupProb = new Map([[2, 1 / 3], [3, 1 / 3]]);
+  const analytic = { method: "analytic", nBoot: 0, seed: 42 };
+
+  // Cell IFs are zero, so any nonzero SE below comes purely from the weights.
+  const run = (att2, att3) => aggregate({
+    cells2x2: [
+      { g: 2, t: 2, e: 0, isPre: false, isRef: false, att: att2, inf: zeros() },
+      { g: 3, t: 3, e: 0, isPre: false, isRef: false, att: att3, inf: zeros() },
+    ],
+    groupProb, n: nUnits, unitG, inference: analytic,
+  });
+
+  const het = run(22, 4);
+  const hom = run(22, 22);
+
+  const results = [];
+  results.push({ label: "heterogeneous: overall att = 13",
+    pass: near(het.aggregations.group.overall, 13, 1e-9) });
+  results.push({ label: "heterogeneous: overall SE = 0.6363961 (hand-derived)",
+    pass: near(het.aggregations.group.se, 0.6363961, 1e-6) });
+  results.push({ label: "overall SE exceeds each cohort SE (was inverted before the fix)",
+    pass: het.aggregations.group.byG.every(x => het.aggregations.group.se > x.se) });
+  results.push({ label: "homogeneous ATTs: weight term vanishes exactly",
+    pass: near(hom.aggregations.group.se, 0, 1e-12) });
+  results.push({ label: "missing unitG throws rather than silently under-reporting",
+    pass: (() => {
+      try {
+        aggregate({ cells2x2: [{ g: 2, t: 2, e: 0, isPre: false, isRef: false, att: 1, inf: zeros() }],
+          groupProb, n: nUnits, inference: analytic });
+        return false;
+      } catch { return true; }
+    })() });
+
+  results.forEach(r => console.log(r.pass ? `  ✓ ${r.label}` : `  ✗ ${r.label}`));
+  return { pass: results.filter(r => r.pass).length, fail: results.filter(r => !r.pass).length, total: results.length };
 }
 
 // ── R-fixture comparison suite ────────────────────────────────────────────────
@@ -619,6 +683,7 @@ export function runCallawayCSValidation() {
     { name: "T2E: Control set fallback", fn: suiteControlSetFallback },
     // Task 3: Aggregation
     { name: "T3: aggregate() — 4 schemes + analytic SE + Wald pre-test", fn: suiteAggregation },
+    { name: "T3B: weight-estimation term in aggregation IF", fn: suiteWeightEstimationIF },
     // Task 4+: Full engine tests
     { name: "Synthetic DGP (OR estimator, never-treated)",  fn: suiteSyntheticDGP },
     { name: "Not-yet-treated comparison group",             fn: suiteNotYetTreated },
