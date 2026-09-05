@@ -537,6 +537,21 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                   // cannot be split back into factor and level. The map from the
                   // expansion carries the true pair plus the reference actually used.
                   const fm = factorMap?.[v];
+                  // ref === null: through-the-origin gave this factor full dummy
+                  // coding, so no level was omitted and the coefficient is that
+                  // level's own fitted mean — there is nothing to contrast against.
+                  if (fm && fm.ref == null) {
+                    return (
+                      <>
+                        For <span style={{ color: C.text }}>{fm.factor}</span> ={" "}
+                        <span style={{ color: C.text }}>{fm.level}</span>, the fitted{" "}
+                        <span style={{ color: C.text }}>{yVar}</span> baseline is{" "}
+                        <span style={{ color: b >= 0 ? C.green : C.red }}>{b.toFixed(4)}</span>.
+                        {" "}This factor is coded with every level and no reference,
+                        because the model is fitted through the origin.{" "}
+                      </>
+                    );
+                  }
                   if (fm) {
                     return (
                       <>

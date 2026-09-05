@@ -681,12 +681,28 @@ function transpileStep(step, allDatasets = {}) {
 // ─── STATA VARLIST BUILDER ────────────────────────────────────────────────────
 // Builds Stata varlist RHS. Factor vars use i. prefix; interactions use ## (*) or # (:).
 // Continuous vars inside interactions get the c. prefix (required by Stata).
-function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs = {}) {
+function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs = {}, opts = {}) {
+  const { noIntercept = false } = opts;
   const fmtBase  = v => stFactorTerm(v, fvSet, factorRefs);
   const fmtInInt = v => fvSet.has(v) ? stFactorTerm(v, fvSet, factorRefs) : `c.${v}`;
   const rawX = xVarsRaw ?? xVars ?? [];
   const rawW = wVarsRaw ?? wVars ?? [];
-  const parts = [...rawX, ...rawW].map(fmtBase);
+  const mainVars = [...rawX, ...rawW];
+  const parts = mainVars.map(fmtBase);
+  // Through-the-origin: R and patsy both code the FIRST factor with every level
+  // and leave the rest on contrasts. Stata does NOT — `i.` keeps a base level
+  // whether or not `noconstant` is set — so that first factor needs `ibn.`
+  // explicitly, or the do-file estimates a different (more restrictive) model
+  // than the app does. Applied BEFORE the interaction loop below, which looks
+  // parts up by their fmtBase spelling; a factor inside an interaction is
+  // therefore skipped rather than rewritten out from under that lookup.
+  let ibnVar = null;
+  if (noIntercept) {
+    const inIx = new Set();
+    for (const { var1, var2 } of (interactionTerms ?? [])) { if (var1) inIx.add(var1); if (var2) inIx.add(var2); }
+    const i = mainVars.findIndex(v => fvSet.has(v) && !inIx.has(v));
+    if (i >= 0) { parts[i] = `ibn.${mainVars[i]}`; ibnVar = mainVars[i]; }
+  }
   for (const { var1, var2, type } of (interactionTerms ?? [])) {
     if (!var1 || !var2) continue;
     const f1 = fmtInInt(var1); const f2 = fmtInInt(var2);
@@ -698,7 +714,7 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
       parts.push(`${f1}#${f2}`);
     }
   }
-  return parts.join(" ") || "1";
+  return { list: parts.join(" ") || "1", ibnVar };
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
@@ -743,7 +759,9 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => stFactorTerm(v, fvSet, factorRefs);
-  const xList = buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs);
+  const { list: xList, ibnVar } = buildStataVarlist(
+    xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs,
+    { noIntercept: noIntercept && type === "OLS" });
   // A string-level reference couldn't be expressed as ib(#). — surfaced once,
   // near the estimation command, rather than silently reverting to i.col.
   const unexpressibleRefs = Object.entries(factorRefs)
@@ -859,6 +877,14 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       // second one, which is a syntax error.
       const olsOpt = noIntercept ? (opt ? `${opt} noconstant` : `, noconstant`) : opt;
       if (noIntercept) lines.push(`* Regression through the origin — no intercept estimated.`);
+      if (ibnVar) {
+        lines.push(`* ibn.${ibnVar} keeps every level of the first factor, with no base level.`);
+        lines.push(`* That matches what R's 0 + factor(${ibnVar}) and patsy's 0 + C(${ibnVar}) do;`);
+        lines.push(`* plain i. would omit a level and fit a different model under noconstant.`);
+      } else if (noIntercept && fvSet.size) {
+        lines.push(`* NOTE: the first factor here sits inside an interaction, so it was left on i.`);
+        lines.push(`* R would code it with every level. Check this term against the app's output.`);
+      }
       lines.push(`reg ${yVar} ${xList}${olsOpt}`);
       lines.push(`estimates store m_ols`);
       break;

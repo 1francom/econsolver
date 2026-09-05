@@ -152,4 +152,48 @@ console.log("Test 5: custom reference (year ref=10) vs R lm(relevel(factor(year)
     "an unknown reference level falls back to the default (first-level) dummy set");
 }
 
-console.log("\nAll factor-expansion checks passed (Bug 1 + Bug 2 fixed + custom reference category, validated against R 4.4.1 lm()/relevel()).");
+
+console.log("\nTest 6: through the origin — first factor keeps every level, the rest keep a reference");
+{
+  const raw = readFileSync(join(__dirname, "factorExpansionFixture.csv"), "utf8").trim().split(/\r?\n/);
+  const hdr = raw[0].split(",");
+  const rows = raw.slice(1).map(line => {
+    const p = line.split(",");
+    const r = Object.fromEntries(hdr.map((h, i) => [h, p[i]]));
+    return { y: Number(r.y), x1: Number(r.x1),
+             year: Number(r.year), grader: r.grader === "" ? null : r.grader };
+  });
+
+  const bench = JSON.parse(readFileSync(join(__dirname, "factorExpansionBenchmarks.json"), "utf8"));
+  const ni = bench.noIntercept;
+  assert(ni != null, "benchmarks.json has a noIntercept block (re-run factorExpansionRValidation.R if missing)");
+
+  // fullFirstFactor is consumed by `year` (first factor in formula order), so
+  // year contributes 9/10/11 while grader still contributes only B/C.
+  const { rows: er, vars, factorMap, usedFullExpansion } =
+    applyFactors(rows, ["x1", "year", "grader"], new Set(["year", "grader"]), {}, { fullFirstFactor: true });
+  assert(usedFullExpansion === true, "usedFullExpansion reports that the flag was consumed");
+  assert(JSON.stringify(vars) === JSON.stringify(["x1", "year_9", "year_10", "year_11", "grader_B", "grader_C"]),
+    "param names: year fully coded, grader on contrasts, got " + JSON.stringify(vars));
+  assert(factorMap.year_9.ref === null,  "a fully-coded level carries ref === null (no omitted category)");
+  assert(factorMap.grader_B.ref === "A", "the second factor still records its reference level");
+
+  const res = runOLS(er, "y", vars, {}, { noIntercept: true });
+  ni.names.forEach((rName, i) => {
+    const rCoef = ni.coefficients[rName];
+    const rSE   = ni.se[rName];
+    assert(Math.abs(res.beta[i] - rCoef) < 1e-6, "coef[" + rName + "]: R=" + rCoef + " Litux=" + res.beta[i]);
+    assert(Math.abs(res.se[i]  - rSE)   < 1e-4, "SE[" + rName + "]: R=" + rSE + " Litux=" + res.se[i]);
+  });
+  assert(res.df === ni.dfResidual, "residual df matches R (" + ni.dfResidual + "), got " + res.df);
+  assert(vars.length === ni.nParams, "parameter count matches R (" + ni.nParams + "), got " + vars.length);
+
+  // The regression that motivated the fix: dropping a reference from BOTH
+  // factors is a DIFFERENT model, not a cosmetic relabelling. If this ever
+  // stops differing, the fix above has silently become a no-op.
+  const both = applyFactors(rows, ["x1", "year", "grader"], new Set(["year", "grader"]));
+  const resBoth = runOLS(both.rows, "y", both.vars, {}, { noIntercept: true });
+  assert(Math.abs(resBoth.beta[0] - ni.coefficients.x1) > 1e-6,
+    "reference-on-both really does change x1 (guards against the fix silently no-op ing)");
+}
+console.log("\nAll factor-expansion checks passed (Bug 1 + Bug 2 + custom reference + through-the-origin factor coding, validated against R 4.4.1 lm()/relevel()).");

@@ -43,5 +43,26 @@
       "factor(grader)B": 0.038481199188,
       "factor(grader)C": 0.035609095185
     }
+  },
+  "noIntercept": {
+    "coefficients": {
+      "x1": 0.48901128578,
+      "factor(year)9": 2.0443148995,
+      "factor(year)10": 3.2261123742,
+      "factor(year)11": 1.2430194853,
+      "factor(grader)B": 0.57719137471,
+      "factor(grader)C": -0.41274216303
+    },
+    "se": {
+      "x1": 0.0059952972934,
+      "factor(year)9": 0.041927033969,
+      "factor(year)10": 0.044720699932,
+      "factor(year)11": 0.052257739306,
+      "factor(grader)B": 0.038481199188,
+      "factor(grader)C": 0.035609095185
+    },
+    "names": ["x1", "factor(year)9", "factor(year)10", "factor(year)11", "factor(grader)B", "factor(grader)C"],
+    "dfResidual": 36,
+    "nParams": 6
   }
 }

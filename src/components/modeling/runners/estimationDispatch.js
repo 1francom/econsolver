@@ -58,8 +58,15 @@ function _dispatchEstimation(dataRows, ctx, meta = {}) {
   // ── Interaction + factor expansion (outside try to avoid TDZ) ──────────────
   const { rows: ixRows, xVars: ixX, wVars: ixW } =
     expandInteractions(dataRows, xVars, wVars, interactionTerms, factorVars, factorRefs);
-  const { rows: _r1, vars: expX, factorMap: fmX } = applyFactors(ixRows, ixX, factorVars, factorRefs);
-  const { rows: expRows, vars: expW, factorMap: fmW } = applyFactors(_r1, ixW, factorVars, factorRefs);
+  // Through-the-origin: R gives the FIRST factor in formula order full dummy
+  // coding and only then switches to contrasts. X is scanned before W, so the
+  // flag is offered to X and passed on to W only if X had no factor to consume
+  // it — otherwise both factors would be fully coded and the design would be
+  // collinear.
+  const { rows: _r1, vars: expX, factorMap: fmX, usedFullExpansion: fullUsedX } =
+    applyFactors(ixRows, ixX, factorVars, factorRefs, { fullFirstFactor: noIntercept });
+  const { rows: expRows, vars: expW, factorMap: fmW } =
+    applyFactors(_r1, ixW, factorVars, factorRefs, { fullFirstFactor: noIntercept && !fullUsedX });
   const factorMap = { ...(fmX ?? {}), ...(fmW ?? {}) };
   meta.factorMap = factorMap;
   dataRows = expRows; // parameter reassignment: safe in JS
