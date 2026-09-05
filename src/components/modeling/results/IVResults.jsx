@@ -55,7 +55,7 @@ export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = 
           ]} />
           <Lbl color={C.textMuted}>Second Stage Coefficients</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable dict={dict} rows={rows} varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.testStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} />
+            <CoeffTable dict={dict} rows={rows} varNames={second.varNames} beta={second.beta} se={second.se} tStats={second.testStats} pVals={second.pVals} yVar={yVar[0]} df={second.df} factorMap={second.factorMap} />
           </div>
           {second.arCI && xVars.length === 1 && (() => {
             const fmt = v => (v == null || !isFinite(v)) ? "—" : v.toFixed(4);
@@ -152,7 +152,7 @@ export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = 
               ⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. Stock-Yogo threshold is F &gt; 10. 2SLS estimates may be biased toward OLS.
             </InfoBox>
           )}
-          <CoeffTable dict={dict} rows={rows} varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+          <CoeffTable dict={dict} rows={rows} varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} factorMap={fs.factorMap} />
           <PlotSelector
             accentColor={C.gold}
             defaultId="xhat"
@@ -215,7 +215,7 @@ export function GMMResults({ result, yVar, xVars, wVars, zVars, rows, dict = {},
           )}
           <Lbl color={C.textMuted}>GMM Coefficients (HC-robust SE)</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable dict={dict} rows={rows} varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
+            <CoeffTable dict={dict} rows={rows} varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} factorMap={result.factorMap} />
           </div>
           <PlotSelector accentColor={C.gold} defaultId="yhat"
             plots={[
@@ -239,7 +239,7 @@ export function GMMResults({ result, yVar, xVars, wVars, zVars, rows, dict = {},
             { label: "n", value: fs.n, color: C.text },
           ]} />
           {fs.weak && <InfoBox color={C.red}>⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. GMM efficiency gains diminish with weak instruments.</InfoBox>}
-          <CoeffTable dict={dict} rows={rows} varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+          <CoeffTable dict={dict} rows={rows} varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} factorMap={fs.factorMap} />
         </div>
       ))}
     </div>
@@ -289,7 +289,7 @@ export function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}
           ]} />
           <Lbl color={C.textMuted}>LIML Coefficients</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable dict={dict} rows={rows} varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} />
+            <CoeffTable dict={dict} rows={rows} varNames={result.varNames} beta={result.beta} se={result.se} tStats={result.testStats} pVals={result.pVals} yVar={yVar[0]} df={result.df} factorMap={result.factorMap} />
           </div>
           <PlotSelector accentColor={C.gold} defaultId="yhat"
             plots={[
@@ -313,7 +313,7 @@ export function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}
             { label: "n", value: fs.n, color: C.text },
           ]} />
           {fs.weak && <InfoBox color={C.red}>⚠ Weak instrument: F = {fs.Fstat?.toFixed(2)}. LIML is particularly sensitive to weak instruments.</InfoBox>}
-          <CoeffTable dict={dict} rows={rows} varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} />
+          <CoeffTable dict={dict} rows={rows} varNames={fs.varNames} beta={fs.beta} se={fs.se} tStats={fs.tStats} pVals={fs.pVals} yVar={fs.endVar} factorMap={fs.factorMap} />
         </div>
       ))}
     </div>

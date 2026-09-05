@@ -144,11 +144,16 @@ async function applyStepSQL(step, tbl, headers, conn, context = {}) {
       if (!by?.length || !aggs.length) return null;
 
       const FN_MAP = {
-        mean: "AVG", sum: "SUM", count: "COUNT",
+        mean: "AVG", sum: "SUM",
         min: "MIN", max: "MAX", sd: "STDDEV_SAMP", median: "MEDIAN",
       };
       const groupList = by.map(esc).join(", ");
       const aggExprs = aggs.map(({ col, fn, nn }) => {
+        // COUNT(col) skips NULLs, but runner.js returns _rows.length for both
+        // "count" and "n" — so the same step returned a different number
+        // depending only on whether the dataset was DuckDB-backed. COUNT(*) is
+        // the row count and matches the JS path (and the R export's n()).
+        if (fn === "n" || fn === "count") return `COUNT(*) AS ${esc(nn)}`;
         const sqlFn = FN_MAP[fn] || "COUNT";
         return `${sqlFn}(${esc(col)}) AS ${esc(nn)}`;
       }).join(", ");

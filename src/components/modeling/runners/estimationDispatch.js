@@ -18,7 +18,23 @@ import {
 import { applyFactors, expandInteractions, resolveEstimator } from "../helpers.js";
 import { materializeFEInteraction } from "../../../core/generate/feInteraction.js";
 
+// Wrapper: attaches the factor dummy -> {factor, level, ref} map produced by the
+// expansion onto whatever result the dispatcher returns, so the coefficient table
+// can name levels and reference categories without reparsing column names.
+// Done here, once, rather than at each of the ~20 return sites.
 export function dispatchEstimation(dataRows, ctx) {
+  const meta = {};
+  const out = _dispatchEstimation(dataRows, ctx, meta);
+  const fm = meta.factorMap;
+  if (fm && Object.keys(fm).length) {
+    if (out?.result)   out.result.factorMap   = fm;
+    if (out?.panelFE)  out.panelFE.factorMap  = fm;
+    if (out?.panelFD)  out.panelFD.factorMap  = fm;
+  }
+  return out;
+}
+
+function _dispatchEstimation(dataRows, ctx, meta = {}) {
   const {
     yVar, xVars, wVars, factorVars, factorRefs = {},
     interactionTerms = [],
@@ -42,8 +58,17 @@ export function dispatchEstimation(dataRows, ctx) {
   // ── Interaction + factor expansion (outside try to avoid TDZ) ──────────────
   const { rows: ixRows, xVars: ixX, wVars: ixW } =
     expandInteractions(dataRows, xVars, wVars, interactionTerms, factorVars, factorRefs);
-  const { rows: _r1, vars: expX } = applyFactors(ixRows, ixX, factorVars, factorRefs);
-  const { rows: expRows, vars: expW } = applyFactors(_r1, ixW, factorVars, factorRefs);
+  // Through-the-origin: R gives the FIRST factor in formula order full dummy
+  // coding and only then switches to contrasts. X is scanned before W, so the
+  // flag is offered to X and passed on to W only if X had no factor to consume
+  // it — otherwise both factors would be fully coded and the design would be
+  // collinear.
+  const { rows: _r1, vars: expX, factorMap: fmX, usedFullExpansion: fullUsedX } =
+    applyFactors(ixRows, ixX, factorVars, factorRefs, { fullFirstFactor: noIntercept });
+  const { rows: expRows, vars: expW, factorMap: fmW } =
+    applyFactors(_r1, ixW, factorVars, factorRefs, { fullFirstFactor: noIntercept && !fullUsedX });
+  const factorMap = { ...(fmX ?? {}), ...(fmW ?? {}) };
+  meta.factorMap = factorMap;
   dataRows = expRows; // parameter reassignment: safe in JS
 
   // ── FE interaction materialization (PanelTab "FE interaction" picker) ───────

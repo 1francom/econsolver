@@ -60,15 +60,45 @@ function reorderForReference(sortedLevels, ref) {
   return [chosen, ...rest];
 }
 
-export function applyFactors(rows, vars, factorVars, factorRefs = {}) {
+/**
+ * Expand factor columns into dummy columns.
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.fullFirstFactor=false]
+ *   Regression through the origin. With no intercept R's model.matrix codes the
+ *   FIRST factor in formula order with all of its levels and only then falls
+ *   back to contrasts — `y ~ 0 + x + f1 + f2` yields f1a,f1b,f1c,f2q. Dropping a
+ *   reference from both instead pins the omitted baseline cell to exactly zero,
+ *   which is a different and more restrictive model: on the LMU PS6 dynamic TWFE
+ *   it moved the treatment coefficient from 4.000000 to 4.081224. Verified
+ *   against R (see rule probe in factorExpansionValidation).
+ *   The flag is consumed by the first factor only; `usedFullExpansion` in the
+ *   return value tells the caller whether that happened, so a second call (W
+ *   after X) can keep contrasts.
+ * @returns {{rows, vars, factorMap, usedFullExpansion: boolean}}
+ */
+export function applyFactors(rows, vars, factorVars, factorRefs = {}, opts = {}) {
+  const { fullFirstFactor = false } = opts;
   const toExpand = vars.filter(v => factorVars.has(v));
-  if (!toExpand.length) return { rows, vars };
+  if (!toExpand.length) return { rows, vars, factorMap: {}, usedFullExpansion: false };
+  let fullPending = fullFirstFactor;
+  let usedFullExpansion = false;
   let expandedVars = [...vars];
   let expandedRows = rows;
+  // dummy column -> { factor, level, ref }. Emitted here rather than recovered by
+  // parsing the column name downstream: names are `${col}_${level}` with spaces
+  // folded to underscores, so "country_name_south_africa" cannot be split back
+  // into factor and level unambiguously. The expansion is the only place that
+  // knows the true pair.
+  const factorMap = {};
   for (const col of toExpand) {
     const rawLevels  = [...new Set(rows.map(r => r[col]).filter(v => v != null))];
     const levels      = reorderForReference(sortFactorLevels(rawLevels), factorRefs[col]);
-    const dummyLevels = levels.slice(1); // drop first = reference category
+    // Full coding for the first factor under no-intercept (see opts above);
+    // every other factor drops its first level as the reference category.
+    const useFull     = fullPending;
+    if (useFull) { fullPending = false; usedFullExpansion = true; }
+    const dummyLevels = useFull ? levels : levels.slice(1);
     const dummyCols   = dummyLevels.map(lv => `${col}_${lv.replace(/\s+/g, "_")}`);
     expandedRows = expandedRows.map(r => {
       if (r[col] == null) {
@@ -82,8 +112,13 @@ export function applyFactors(rows, vars, factorVars, factorRefs = {}) {
       return { ...r, ...dummies };
     });
     expandedVars = expandedVars.flatMap(v => v === col ? dummyCols : [v]);
+    dummyCols.forEach((dc, i) => {
+      // ref === null marks a fully-coded factor: there IS no omitted category, so
+      // the coefficient is a level mean, not a contrast against one.
+      factorMap[dc] = { factor: col, level: dummyLevels[i], ref: useFull ? null : levels[0] };
+    });
   }
-  return { rows: expandedRows, vars: expandedVars };
+  return { rows: expandedRows, vars: expandedVars, factorMap, usedFullExpansion };
 }
 
 // ─── INTERACTION EXPANSION HELPER ────────────────────────────────────────────

@@ -302,10 +302,19 @@ function transpileStep(step, allDatasets = {}) {
       return step.dir === "desc" ? `gsort -${stVar(step.col)}` : `sort ${stVar(step.col)}`;
     case "group_summarize": {
       const fnMap = { mean: "mean", sum: "sum", count: "count", min: "min", max: "max", sd: "sd", median: "median" };
+      // See stepTranslators.js: (count) is a non-missing count in Stata, but the
+      // app (and the R export's n()) return the row count. Sum a constant instead.
+      const needsRowCount = (step.aggs ?? []).some(a => a.fn === "count" || a.fn === "n");
+      const ROWVAR = "_litux_one";
       const collapse = (step.aggs ?? []).map(a =>
-        `(${fnMap[a.fn] ?? "mean"}) ${stVar(a.nn)}=${stVar(a.col)}`).join(" ");
+        (a.fn === "count" || a.fn === "n")
+          ? `(sum) ${stVar(a.nn)}=${ROWVAR}`
+          : `(${fnMap[a.fn] ?? "mean"}) ${stVar(a.nn)}=${stVar(a.col)}`).join(" ");
       const by = (step.by ?? []).map(stVar).join(" ");
-      return `collapse ${collapse}, by(${by})`;
+      return [
+        needsRowCount ? `gen byte ${ROWVAR} = 1` : null,
+        `collapse ${collapse}, by(${by})`,
+      ].filter(Boolean).join("\n");
     }
     case "group_transform": {
       const by = step.by ?? [];
@@ -672,12 +681,28 @@ function transpileStep(step, allDatasets = {}) {
 // ─── STATA VARLIST BUILDER ────────────────────────────────────────────────────
 // Builds Stata varlist RHS. Factor vars use i. prefix; interactions use ## (*) or # (:).
 // Continuous vars inside interactions get the c. prefix (required by Stata).
-function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs = {}) {
+function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs = {}, opts = {}) {
+  const { noIntercept = false } = opts;
   const fmtBase  = v => stFactorTerm(v, fvSet, factorRefs);
   const fmtInInt = v => fvSet.has(v) ? stFactorTerm(v, fvSet, factorRefs) : `c.${v}`;
   const rawX = xVarsRaw ?? xVars ?? [];
   const rawW = wVarsRaw ?? wVars ?? [];
-  const parts = [...rawX, ...rawW].map(fmtBase);
+  const mainVars = [...rawX, ...rawW];
+  const parts = mainVars.map(fmtBase);
+  // Through-the-origin: R and patsy both code the FIRST factor with every level
+  // and leave the rest on contrasts. Stata does NOT — `i.` keeps a base level
+  // whether or not `noconstant` is set — so that first factor needs `ibn.`
+  // explicitly, or the do-file estimates a different (more restrictive) model
+  // than the app does. Applied BEFORE the interaction loop below, which looks
+  // parts up by their fmtBase spelling; a factor inside an interaction is
+  // therefore skipped rather than rewritten out from under that lookup.
+  let ibnVar = null;
+  if (noIntercept) {
+    const inIx = new Set();
+    for (const { var1, var2 } of (interactionTerms ?? [])) { if (var1) inIx.add(var1); if (var2) inIx.add(var2); }
+    const i = mainVars.findIndex(v => fvSet.has(v) && !inIx.has(v));
+    if (i >= 0) { parts[i] = `ibn.${mainVars[i]}`; ibnVar = mainVars[i]; }
+  }
   for (const { var1, var2, type } of (interactionTerms ?? [])) {
     if (!var1 || !var2) continue;
     const f1 = fmtInInt(var1); const f2 = fmtInInt(var2);
@@ -689,7 +714,7 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
       parts.push(`${f1}#${f2}`);
     }
   }
-  return parts.join(" ") || "1";
+  return { list: parts.join(" ") || "1", ibnVar };
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
@@ -713,15 +738,30 @@ const PANEL_TYPES = new Set(["FE", "FD", "TWFE", "LSDV", "EventStudy", "PoissonF
 function stFactorTerm(v, fvSet, factorRefs) {
   if (!fvSet.has(v)) return v;
   const ref = factorRefs[v];
-  if (ref != null && /^-?\d+(\.\d+)?$/.test(String(ref))) return `ib(${ref}).${v}`;
+  // `ib#.` takes the base level pressed straight against ib — `ib2.municipality`.
+  // The parenthesised form is reserved for the keywords ib(first)./ib(last)./
+  // ib(freq)., so `ib(2).` is a syntax error. Stata factor variables also admit
+  // only NON-NEGATIVE INTEGER levels, so a negative or fractional reference has
+  // no ib#. form at all and falls back to i. like a string one does.
+  if (ref != null && /^\d+$/.test(String(ref))) return `ib${ref}.${v}`;
   return `i.${v}`;
 }
 
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null }) {
+function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVarsIn, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null }) {
+  // Prefer the PRE-EXPANSION lists in EVERY branch, not only in the plain
+  // formula path: the other estimators mapped their factor formatter over the
+  // post-expansion columns, so `municipality` arrived as municipality_10,
+  // municipality_11, … — names the factor set does not contain, so no
+  // C()/i. wrapper and no reference. allX follows so the two never disagree.
+  const xVars = (Array.isArray(xVarsRaw) && xVarsRaw.length) ? xVarsRaw : (xVarsIn ?? []);
+  const wVars = (Array.isArray(wVarsRaw) && wVarsRaw.length) ? wVarsRaw : (wVarsIn ?? []);
+  const allX  = (Array.isArray(xVarsRaw) && xVarsRaw.length) ? [...xVars, ...wVars] : (allXIn ?? []);
   const lines = [];
   const fvSet = new Set(factorVars);
   const fmtS  = v => stFactorTerm(v, fvSet, factorRefs);
-  const xList = buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs);
+  const { list: xList, ibnVar } = buildStataVarlist(
+    xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs,
+    { noIntercept: noIntercept && type === "OLS" });
   // A string-level reference couldn't be expressed as ib(#). — surfaced once,
   // near the estimation command, rather than silently reverting to i.col.
   const unexpressibleRefs = Object.entries(factorRefs)
@@ -837,6 +877,14 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       // second one, which is a syntax error.
       const olsOpt = noIntercept ? (opt ? `${opt} noconstant` : `, noconstant`) : opt;
       if (noIntercept) lines.push(`* Regression through the origin — no intercept estimated.`);
+      if (ibnVar) {
+        lines.push(`* ibn.${ibnVar} keeps every level of the first factor, with no base level.`);
+        lines.push(`* That matches what R's 0 + factor(${ibnVar}) and patsy's 0 + C(${ibnVar}) do;`);
+        lines.push(`* plain i. would omit a level and fit a different model under noconstant.`);
+      } else if (noIntercept && fvSet.size) {
+        lines.push(`* NOTE: the first factor here sits inside an interaction, so it was left on i.`);
+        lines.push(`* R would code it with every level. Check this term against the app's output.`);
+      }
       lines.push(`reg ${yVar} ${xList}${olsOpt}`);
       lines.push(`estimates store m_ols`);
       break;
@@ -882,9 +930,9 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       break;
 
     case "2SLS": {
-      const endog = xVars.join(" ");
+      const endog = xVars.map(fmtS).join(" ");
       const instr = zVars.join(" ");
-      const exog  = wVars.join(" ");
+      const exog  = wVars.map(fmtS).join(" ");
       lines.push(`* Two-Stage Least Squares / IV`);
       // ivregress does not accept vce(hc2)/vce(hc3) — fall back to robust (HC1)
       // and say so, rather than emitting a line that errors out in Stata.
@@ -900,7 +948,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     }
 
     case "DiD": {
-      const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
+      const extra = wVars.length ? ` ${wVars.map(fmtS).join(" ")}` : "";
       lines.push(`* Difference-in-Differences (2×2)`);
       lines.push(`gen did = ${postVar} * ${treatVar}`);
       lines.push(`reg ${yVar} ${postVar} ${treatVar} did${extra}${opt}`);
@@ -909,7 +957,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     }
 
     case "TWFE": {
-      const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
+      const extra = wVars.length ? ` ${wVars.map(fmtS).join(" ")}` : "";
       // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
       // Fallback preserves the pre-existing entity+time default byte-for-byte.
       const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
@@ -923,10 +971,10 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "RDD": {
       const kernelOpt = kernel === "uniform" ? "nw(1)" : kernel === "epanechnikov" ? "kernel(epanechnikov)" : "kernel(triangular)";
-      const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
+      const extra = wVars.length ? ` ${wVars.map(fmtS).join(" ")}` : "";
       lines.push(`* Sharp RDD — local linear regression`);
       lines.push(`* If rdrobust not installed: ssc install rdrobust`);
-      lines.push(`rdrobust ${yVar} ${runningVar}, c(${cutoff ?? 0}) h(${bandwidth ?? "# set bandwidth"}) ${kernelOpt}${extra ? ` covs(${wVars.join(" ")})` : ""}`);
+      lines.push(`rdrobust ${yVar} ${runningVar}, c(${cutoff ?? 0}) h(${bandwidth ?? "# set bandwidth"}) ${kernelOpt}${extra ? ` covs(${wVars.map(fmtS).join(" ")})` : ""}`);
       lines.push(`* Manual approach (WLS local linear):`);
       lines.push(`gen _above = (${runningVar} >= ${cutoff ?? 0})`);
       lines.push(`gen _run_c = ${runningVar} - ${cutoff ?? 0}`);
@@ -994,7 +1042,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
                       : kernel === "epanechnikov" ? "kernel(epanechnikov)"
                       : "kernel(triangular)";
       const dVar  = treatVar ?? "D";
-      const extra = wVars.length ? ` covs(${wVars.join(" ")})` : "";
+      const extra = wVars.length ? ` covs(${wVars.map(fmtS).join(" ")})` : "";
       lines.push(`* Fuzzy RDD via rdrobust`);
       lines.push(`* If not installed: ssc install rdrobust`);
       lines.push(`rdrobust ${yVar} ${runningVar}, fuzzy(${dVar}) c(${cutoff ?? 0}) h(${bandwidth ?? "# set bandwidth"}) ${kernelOpt}${extra}`);
@@ -1013,7 +1061,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const distV  = distCol      ?? runningVar ?? "dist";
       const trtV   = treatmentCol ?? treatVar   ?? "treatment";
       const h      = bandwidth ? Number(bandwidth).toFixed(6) : null;
-      const extra  = wVars.length ? ` covs(${wVars.join(" ")})` : "";
+      const extra  = wVars.length ? ` covs(${wVars.map(fmtS).join(" ")})` : "";
       lines.push(`* Spatial RD (Keele & Titiunik 2015)`);
       lines.push(`* Build signed running variable: positive on treated side, cutoff = 0`);
       lines.push(`gen _signed_dist = (2 * ${trtV} - 1) * abs(${distV})`);
@@ -1028,13 +1076,13 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`gen _above_run = _above * _signed_dist`);
       const bwStata = h ?? "# replace with bandwidth";
       lines.push(`gen _w = max(0, 1 - abs(_signed_dist) / ${bwStata}) if abs(_signed_dist) <= ${bwStata}`);
-      lines.push(`reg ${yVar} _above _signed_dist _above_run${wVars.length ? " " + wVars.join(" ") : ""} [aw=_w]${opt}`);
+      lines.push(`reg ${yVar} _above _signed_dist _above_run${wVars.length ? " " + wVars.map(fmtS).join(" ") : ""} [aw=_w]${opt}`);
       lines.push(`drop _signed_dist _above _above_run _w`);
       break;
     }
 
     case "EventStudy": {
-      const extra = wVars.length ? ` ${wVars.join(" ")}` : "";
+      const extra = wVars.length ? ` ${wVars.map(fmtS).join(" ")}` : "";
       // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
       // reghdfe natively absorbs any number of dimensions, so no <=2-dim branching is
       // needed here (unlike PanelOLS/xtreg in the Python/Stata FE and LSDV cases).
@@ -1057,7 +1105,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       const fes = (feCols && feCols.length ? feCols : [entityCol ?? "unit", periodCol ?? timeCol ?? "period"]);
       const coh = cohortCol ?? "cohort";
       const per = periodCol ?? timeCol ?? "period";
-      const cov = (xVars ?? []).length ? ` ${xVars.join(" ")}` : "";
+      const cov = (xVars ?? []).length ? ` ${xVars.map(fmtS).join(" ")}` : "";
       const ref = refPeriod != null ? Number(refPeriod) : -1;
       lines.push(`* ── Sun & Abraham (2021) interaction-weighted event study over Poisson PPML ──`);
       lines.push(`* Control convention: ${controlMode === "never" ? "never-treated only" : "never- + not-yet-treated (auto)"}`);
@@ -1110,8 +1158,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     }
 
     case "GMM": {
-      const endog  = wVars.join(" ");
-      const exog   = xVars.join(" ");
+      const endog  = wVars.map(fmtS).join(" ");
+      const exog   = xVars.map(fmtS).join(" ");
       const instrs = [...xVars, ...zVars].join(" ");
       lines.push(`* Two-Step Efficient GMM`);
       lines.push(`* Structural: ${yVar} ~ ${exog || "(no exog)"} + (${endog || "endog"}) endogenous`);
@@ -1127,8 +1175,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     }
 
     case "LIML": {
-      const endog  = wVars.join(" ");
-      const exog   = xVars.join(" ");
+      const endog  = wVars.map(fmtS).join(" ");
+      const exog   = xVars.map(fmtS).join(" ");
       lines.push(`* Limited Information Maximum Likelihood (LIML)`);
       if (wVars.length) {
         lines.push(`ivregress liml ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")})${optNoHC23}`);
@@ -1152,7 +1200,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "PoissonFE": {
       const fes  = (feCols && feCols.length ? feCols : [entityCol ?? "entity"]);
-      const cov  = xVars.join(" ");
+      const cov  = xVars.map(fmtS).join(" ");
       lines.push(`* Poisson FE (PPML with ${fes.length}-way fixed effects)`);
       lines.push(`* ppmlhdfe recommended — if not installed: ssc install ppmlhdfe`);
       lines.push(`ppmlhdfe ${yVar}${cov ? ` ${cov}` : ""}, absorb(${fes.join(" ")})${pOpt || " vce(cluster " + fes[0] + ")"}`);
@@ -1163,7 +1211,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
 
     case "NegBinFE": {
       const fes = (feCols && feCols.length ? feCols : [entityCol ?? "entity"]);
-      const cov = xVars.join(" ");
+      const cov = xVars.map(fmtS).join(" ");
       const feTerms = fes.map(f => `i.${f}`).join(" ");
       const offsetOpt = offsetCol ? " offset(__nb_offset)" : "";
       lines.push(`* Negative Binomial FE (NB2 with fixed-effect indicators)`);
@@ -1262,6 +1310,10 @@ function stataLocalName(label) {
 // ─── MULTI-MODEL EXPORT ────────────────────────────────────────────────────────
 // configs: Array of { model: ModelConfig, label: string, subsetName?, subsetFilters? }
 export function generateMultiModelStataScript(configs = [], dataDictionary = null, opts = {}) {
+  // Hidden variables are dropped from the esttab OUTPUT only; every regressor
+  // stays in the estimation, so the coefficients are unaffected.
+  const _omitVars = (opts.omitVars ?? []).filter(Boolean);
+  const dropVars = _omitVars.length ? `  drop(${_omitVars.map(stVar).join(" ")}) ///` : null;
   if (!configs.length) return "* No models provided.";
 
   const filename     = opts.filename ?? "dataset.csv";
@@ -1315,6 +1367,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
             treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
             interactionTerms: ixm = [], xVarsRaw: xrm = null, wVarsRaw: wrm = null,
+            factorVars: fvm = [], factorRefs: frm = {},
             seType: seM = "classical", clusterVar: clM = null, clusterVar2: cl2M = null, noIntercept: niM = false } = configs[0].model ?? {};
     const allX = [...xVars, ...wVars];
 
@@ -1325,7 +1378,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       lines.push(`preserve`);
       if (filterExpr) lines.push(`  keep if ${filterExpr}`);
       else            lines.push(`  * Full sample — no filter`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm, seType: seM, clusterVar: clM, clusterVar2: cl2M, noIntercept: niM });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm, factorVars: fvm, factorRefs: frm, seType: seM, clusterVar: clM, clusterVar2: cl2M, noIntercept: niM });
       let hasStore = false;
       modelLines.forEach(l => {
         const ov = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
@@ -1344,6 +1397,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
     lines.push(`  mtitles(${mlabels}) ///`);
     lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
+    if (dropVars) lines.push(dropVars);
     lines.push(`  se r2 N replace`);
     lines.push("");
   } else {
@@ -1357,10 +1411,11 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
               treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
               interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null,
+              factorVars: fvc = [], factorRefs: frc = {},
               seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null, noIntercept: niC = false } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, factorVars: fvc, factorRefs: frc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
       let hasStore = false;
       modelLines.forEach(l => {
         const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
@@ -1378,6 +1433,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
     lines.push(`esttab ${mList} using comparison_results.rtf, ///`);
     lines.push(`  mtitles(${mlabels}) ///`);
     lines.push(`  star(* 0.1 ** 0.05 *** 0.01) ///`);
+    if (dropVars) lines.push(dropVars);
     lines.push(`  se r2 N replace`);
     lines.push("");
   }

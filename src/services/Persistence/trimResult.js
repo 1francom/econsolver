@@ -22,7 +22,7 @@ export function trimResult(r) {
     beta, se, pVals, tStats, testStats, R2, adjR2, R2Within, R2Between, units, n, df, Fstat, Fpval,
     att, attSE, attP, late, lateSE, lateP, seType, kernel, bandwidth, cutoff,
     runningVar, treatVar, postVar, entityCol, timeCol,
-    firstStages, jStat, jDf, jPval, kappa,
+    firstStages, jStat, jDf, jPval, kappa, factorMap,
   } = r;
   return {
     id,
@@ -38,5 +38,11 @@ export function trimResult(r) {
       ? { firstStages: firstStages.map(trimFirstStage).filter(Boolean) }
       : {}),
     jStat, jDf, jPval, kappa,
+    // Dummy -> {factor, level, ref}. Small (a few short strings per level) and
+    // not reconstructible from varNames alone: `country_name_South_Africa`
+    // cannot be split back into column and level. Without it a restored model
+    // loses its factor-level interpretations and its grouped hide control — the
+    // same husk-after-reload failure the panel wrapper had.
+    ...(factorMap && Object.keys(factorMap).length ? { factorMap } : {}),
   };
 }

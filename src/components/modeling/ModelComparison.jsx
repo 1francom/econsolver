@@ -14,6 +14,7 @@ import { generateMultiModelRScript }     from "../../services/export/rScript.js"
 import { generateMultiModelPythonScript } from "../../services/export/pythonScript.js";
 import { generateMultiModelStataScript }  from "../../services/export/stataScript.js";
 import { buildStargazer }                 from "../../services/export/latexTable.js";
+import { deriveFactorSpec }               from "../../services/export/factorSpec.js";
 
 
 function getTypeColor(type, C) {
@@ -47,18 +48,21 @@ function CopyBtn({ text, label = "Copy" }) {
 
 // ─── STARGAZER TABLE ──────────────────────────────────────────────────────────
 // HTML coefficient table: variables in rows, models in columns.
-function StargazerTable({ models }) {
+function StargazerTable({ models, hiddenVars = null, onHideVar = null }) {
   const { C, T } = useTheme();
   // Collect all variable names (union), intercept last
   const allVars = useMemo(() => {
     const set = new Set();
-    models.forEach(m => (m.varNames ?? []).forEach(v => { if (v !== "(Intercept)") set.add(v); }));
+    models.forEach(m => (m.varNames ?? []).forEach(v => {
+      if (v !== "(Intercept)" && !hiddenVars?.has(v)) set.add(v);
+    }));
     const arr = [...set];
     // check if any model has intercept
-    const hasIntercept = models.some(m => (m.varNames ?? []).includes("(Intercept)"));
+    const hasIntercept = models.some(m => (m.varNames ?? []).includes("(Intercept)"))
+      && !hiddenVars?.has("(Intercept)");
     if (hasIntercept) arr.push("(Intercept)");
     return arr;
-  }, [models]);
+  }, [models, hiddenVars]);
 
   const colW = Math.max(90, Math.floor(360 / models.length));
 
@@ -95,6 +99,12 @@ function StargazerTable({ models }) {
             return (
               <tr key={v}>
                 <td style={{ ...labelSt, color: isIntercept ? C.textMuted : C.text }}>
+                  {onHideVar && (
+                    <button onClick={() => onHideVar(v)} title={`Hide ${v} from the table and the exported table`}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: C.textMuted,
+                               fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                               padding: "0 5px 0 0", lineHeight: 1 }}>×</button>
+                  )}
                   {v.length > 24 ? v.slice(0, 23) + "…" : v}
                 </td>
                 {models.map((m, mi) => {
@@ -168,13 +178,15 @@ function StargazerTable({ models }) {
 
 // ─── COEFFICIENT STABILITY HEATMAP ───────────────────────────────────────────
 // Per variable, shows β across models + color-codes by sign change / significance.
-function StabilityHeatmap({ models }) {
+function StabilityHeatmap({ models, hiddenVars = null }) {
   const { C, T } = useTheme();
   const allVars = useMemo(() => {
     const set = new Set();
-    models.forEach(m => (m.varNames ?? []).forEach(v => { if (v !== "(Intercept)") set.add(v); }));
+    models.forEach(m => (m.varNames ?? []).forEach(v => {
+      if (v !== "(Intercept)" && !hiddenVars?.has(v)) set.add(v);
+    }));
     return [...set];
-  }, [models]);
+  }, [models, hiddenVars]);
 
   if (!allVars.length) return null;
 
@@ -323,7 +335,7 @@ function FitGrid({ models }) {
 }
 
 // ─── MULTI-MODEL EXPORT ───────────────────────────────────────────────────────
-function ExportBlock({ models, dataDictionary, pipeline = [], filename = "dataset.csv" }) {
+function ExportBlock({ models, dataDictionary, pipeline = [], filename = "dataset.csv", hiddenVars = null }) {
   const { C, T } = useTheme();
   const [lang,           setLang]           = useState("r");
   const [customLabels,   setCustomLabels]   = useState(() => models.map((m, i) => m.label ?? m.type ?? `M${i + 1}`));
@@ -333,9 +345,11 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
   // All unique variable names across pinned models (same union as buildStargazer)
   const allVarNames = useMemo(() => {
     const set = new Set();
-    models.forEach(m => (m.varNames ?? []).forEach(v => { if (v !== "(Intercept)") set.add(v); }));
+    models.forEach(m => (m.varNames ?? []).forEach(v => {
+      if (v !== "(Intercept)" && !hiddenVars?.has(v)) set.add(v);
+    }));
     return [...set];
-  }, [models]);
+  }, [models, hiddenVars]);
 
   // Sync label array when models change (pin/unpin)
   useEffect(() => {
@@ -355,14 +369,30 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
           result: m,
           yVar:   m.spec?.yVar ?? m.yVar ?? "y",
         })),
-        { showFirstStage: hasIV && showFirstStage, varLabels }
+        { showFirstStage: hasIV && showFirstStage, varLabels,
+          omitVars: hiddenVars ? [...hiddenVars] : [] }
       );
     }
-    const configs = models.map(m => ({
+    const configs = models.map(m => {
+      // Without these the exporters see only the post-expansion design matrix and
+      // emit 94 municipality_* dummies as separate regressors instead of
+      // factor(municipality). This config object is the third of the three
+      // spec->export whitelists (CodeEditor and ReportingModule are the others);
+      // a field missing here silently degrades only the comparison export.
+      const fs = deriveFactorSpec(m);
+      return {
       model: {
         type: m.type,
         yVar:       m.spec?.yVar       ?? m.yVar       ?? "y",
         xVars:      m.spec?.xVars      ?? m.xVars      ?? [],
+        factorVars:       fs.factorVars,
+        factorRefs:       fs.factorRefs,
+        xVarsRaw:         fs.xVarsRaw,
+        wVarsRaw:         fs.wVarsRaw,
+        interactionTerms: fs.interactionTerms,
+        noIntercept:      m.spec?.noIntercept ?? false,
+        feCols:           m.spec?.feCols      ?? null,
+        offsetCol:        m.spec?.offsetCol   ?? null,
         wVars:      m.spec?.wVars      ?? m.wVars      ?? [],
         zVars:      m.spec?.zVars      ?? m.zVars      ?? [],
         entityCol:  m.spec?.entityCol  ?? null,
@@ -381,8 +411,11 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
       label:         m.label         ?? m.type ?? "Model",
       subsetName:    m.subsetName    ?? null,
       subsetFilters: m.subsetFilters ?? null,
-    }));
-    const scriptOpts = { filename, pipeline };
+      };
+    });
+    // Hidden variables are dropped from the TABLE the script prints, never from
+    // the regressions — omitting a regressor would change the estimates.
+    const scriptOpts = { filename, pipeline, omitVars: hiddenVars ? [...hiddenVars] : [] };
     if (lang === "r")      return generateMultiModelRScript(configs, dataDictionary, scriptOpts);
     if (lang === "python") return generateMultiModelPythonScript(configs, dataDictionary, scriptOpts);
     if (lang === "stata")  return generateMultiModelStataScript(configs, dataDictionary, scriptOpts);
@@ -604,6 +637,93 @@ function SectionHdr({ children }) {
 export default function ModelComparison({ models, dataDictionary, pipeline = [], filename = "dataset.csv", onClose }) {
   const { C, T } = useTheme();
   const [tab, setTab] = useState("table");
+  // Hidden purely for presentation: the model stays pinned in the buffer and the
+  // variable stays in the regression — this only controls what the comparison
+  // table and its export show. Keyed by the EstimationResult uuid, not by index,
+  // so unpinning another model cannot silently hide the wrong one.
+  const [hiddenIds,  setHiddenIds]  = useState(() => new Set());
+  const [hiddenVars, setHiddenVars] = useState(() => new Set());
+
+  const mKey = (m, i) => m?.id ?? `idx-${i}`;
+  const visibleModels = useMemo(
+    () => (models ?? []).filter((m, i) => !hiddenIds.has(mKey(m, i))),
+    [models, hiddenIds]
+  );
+
+  // Map every table column back to the SOURCE variable(s) it came from, so the
+  // controls read like the regressor sidebar instead of like the design matrix.
+  // as.factor(municipality) contributes 94 columns and an interaction contributes
+  // one column per side; both should disappear on a single click.
+  //   municipality_12        -> [municipality]      (via the expansion's factorMap)
+  //   municipality_12:post   -> [municipality, post]
+  //   logdist_post           -> [logdist_post]      (a real column, not derived)
+  // A column belongs to EVERY source it mentions, so hiding either side of an
+  // interaction removes the interaction too.
+  const sourceIndex = useMemo(() => {
+    const fmap = {};
+    (models ?? []).forEach(m => Object.assign(fmap, m?.factorMap ?? {}));
+    const byCol = new Map();
+    const order = [];
+    (models ?? []).forEach(m => (m.varNames ?? []).forEach(v => {
+      if (v === "(Intercept)" || byCol.has(v)) return;
+      const parts = String(v).split(/\s*[:×·*]\s*|_x_/).filter(Boolean);
+      byCol.set(v, parts);
+    }));
+
+    // Fallback for models pinned before factorMap existed, or restored from
+    // IndexedDB by an older build: infer the factor from a shared prefix. Only
+    // prefixes that END AT an underscore are candidates and only with 3+ members,
+    // so `logdist_post` (alone) stays itself while `country_name_Brazil`,
+    // `country_name_Argentina`, `country_name_South_Africa` collapse to
+    // `country_name` — the longest qualifying prefix, never a shorter one.
+    const unmapped = new Set();
+    byCol.forEach(parts => parts.forEach(pt => { if (!fmap[pt]) unmapped.add(pt); }));
+    const prefixCount = new Map();
+    unmapped.forEach(pt => {
+      for (let i = 0; i < pt.length; i++) {
+        if (pt[i] === "_") {
+          const pre = pt.slice(0, i);
+          if (pre) prefixCount.set(pre, (prefixCount.get(pre) ?? 0) + 1);
+        }
+      }
+    });
+    const inferred = new Map();
+    unmapped.forEach(pt => {
+      let best = null;
+      for (let i = 0; i < pt.length; i++) {
+        if (pt[i] === "_") {
+          const pre = pt.slice(0, i);
+          if (pre && (prefixCount.get(pre) ?? 0) >= 3) best = pre;
+        }
+      }
+      if (best) inferred.set(pt, best);
+    });
+
+    byCol.forEach((parts, col) => {
+      const srcs = [...new Set(parts.map(pt => fmap[pt]?.factor ?? inferred.get(pt) ?? pt))];
+      byCol.set(col, srcs);
+      srcs.forEach(sv => { if (!order.includes(sv)) order.push(sv); });
+    });
+    return { byCol, order };
+  }, [models]);
+
+  const colsOfSource = (sv) =>
+    [...sourceIndex.byCol.entries()].filter(([, srcs]) => srcs.includes(sv)).map(([c]) => c);
+
+  const toggleModel = (k) => setHiddenIds(prev => {
+    const next = new Set(prev);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    return next;
+  });
+  const hideVar   = (v) => setHiddenVars(prev => new Set(prev).add(v));
+  const showAll   = ()  => { setHiddenIds(new Set()); setHiddenVars(new Set()); };
+  const toggleSource = (sv) => setHiddenVars(prev => {
+    const cols = colsOfSource(sv);
+    const next = new Set(prev);
+    const allHidden = cols.every(c => next.has(c));
+    cols.forEach(c => { if (allHidden) next.delete(c); else next.add(c); });
+    return next;
+  });
 
   if (!models?.length) return null;
 
@@ -640,17 +760,34 @@ export default function ModelComparison({ models, dataDictionary, pipeline = [],
           </div>
           <div style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>
             {models.length} model{models.length > 1 ? "s" : ""} pinned
+            {hiddenIds.size > 0 && ` · ${hiddenIds.size} hidden`}
           </div>
-          {/* Model labels */}
+          {/* Model labels — × hides from the comparison without unpinning */}
           <div style={{ display: "flex", gap: 6, flex: 1, flexWrap: "wrap" }}>
             {models.map((m, i) => {
-              const clr = getTypeColor(m.type, C);
+              const k      = mKey(m, i);
+              const hidden = hiddenIds.has(k);
+              const clr    = getTypeColor(m.type, C);
+              // Number by position in the TABLE, so the chip and the column agree.
+              const colNo  = hidden ? null : visibleModels.indexOf(m) + 1;
               return (
-                <span key={i} style={{
-                  fontSize: T.caption.fontSize, color: clr, border: `1px solid ${clr}40`,
-                  borderRadius: 2, padding: "1px 6px", fontFamily: T.code.fontFamily,
+                <span key={k} style={{
+                  fontSize: T.caption.fontSize,
+                  color: hidden ? C.textMuted : clr,
+                  border: `1px solid ${hidden ? C.border2 : clr + "40"}`,
+                  borderRadius: 2, padding: "1px 4px 1px 6px", fontFamily: T.code.fontFamily,
+                  opacity: hidden ? 0.55 : 1,
+                  textDecoration: hidden ? "line-through" : "none",
+                  display: "inline-flex", alignItems: "center", gap: 4,
                 }}>
-                  ({i+1}) {m.label ?? m.type}
+                  {colNo ? `(${colNo}) ` : ""}{m.label ?? m.type}
+                  <button onClick={() => toggleModel(k)}
+                    title={hidden ? "Show in the comparison" : "Hide from the comparison and its export (stays pinned)"}
+                    style={{ background: "none", border: "none", cursor: "pointer",
+                             color: "inherit", fontFamily: T.code.fontFamily,
+                             fontSize: T.caption.fontSize, padding: "0 1px", lineHeight: 1 }}>
+                    {hidden ? "+" : "×"}
+                  </button>
                 </span>
               );
             })}
@@ -687,38 +824,89 @@ export default function ModelComparison({ models, dataDictionary, pipeline = [],
         {/* Body */}
         <div style={{ flex: 1, overflowY: "auto", padding: "1.2rem 1.4rem" }}>
 
+          {/* Source-variable controls: one chip per regressor as picked in the
+              sidebar, not one per design-matrix column. × removes everything it
+              produced — all 94 municipality dummies, plus any interaction that
+              uses it. */}
+          {sourceIndex.order.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+                          marginBottom: "0.8rem", fontSize: T.caption.fontSize,
+                          fontFamily: T.code.fontFamily, color: C.textMuted }}>
+              <span style={{ marginRight: 2 }}>variables:</span>
+              {sourceIndex.order.map(sv => {
+                const cols   = colsOfSource(sv);
+                const hidden = cols.length > 0 && cols.every(c => hiddenVars.has(c));
+                return (
+                  <span key={sv} style={{
+                    display: "inline-flex", alignItems: "center", gap: 4,
+                    padding: "1px 4px 1px 7px", borderRadius: 2,
+                    border: `1px solid ${hidden ? C.border2 : C.teal + "55"}`,
+                    color: hidden ? C.textMuted : C.teal,
+                    opacity: hidden ? 0.55 : 1,
+                    textDecoration: hidden ? "line-through" : "none",
+                  }}>
+                    {sv}{cols.length > 1 ? ` (${cols.length})` : ""}
+                    <button onClick={() => toggleSource(sv)}
+                      title={hidden
+                        ? `Show the ${cols.length} row${cols.length === 1 ? "" : "s"} from ${sv}`
+                        : `Hide the ${cols.length} row${cols.length === 1 ? "" : "s"} derived from ${sv}`}
+                      style={{ background: "none", border: "none", cursor: "pointer",
+                               color: "inherit", fontFamily: T.code.fontFamily,
+                               fontSize: T.caption.fontSize, padding: "0 1px", lineHeight: 1 }}>
+                      {hidden ? "+" : "×"}
+                    </button>
+                  </span>
+                );
+              })}
+              {(hiddenIds.size > 0 || hiddenVars.size > 0) && (
+                <>
+                  <span style={{ marginLeft: 4 }}>
+                    hidden: {hiddenIds.size} model{hiddenIds.size === 1 ? "" : "s"} ·{" "}
+                    {hiddenVars.size} row{hiddenVars.size === 1 ? "" : "s"}
+                  </span>
+                  <button onClick={showAll}
+                    style={{ padding: "1px 7px", border: `1px solid ${C.border2}`, background: "transparent",
+                             color: C.textDim, borderRadius: 2, cursor: "pointer",
+                             fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily }}>
+                    show all
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           {tab === "table" && (
             <>
               <SectionHdr>Coefficient Table</SectionHdr>
-              <StargazerTable models={models} />
+              <StargazerTable models={visibleModels} hiddenVars={hiddenVars} onHideVar={hideVar} />
             </>
           )}
 
           {tab === "fit" && (
             <>
               <SectionHdr>Fit Statistics</SectionHdr>
-              <FitGrid models={models} />
+              <FitGrid models={visibleModels} />
             </>
           )}
 
           {tab === "heatmap" && (
             <>
               <SectionHdr>Coefficient Stability</SectionHdr>
-              <StabilityHeatmap models={models} />
+              <StabilityHeatmap models={visibleModels} hiddenVars={hiddenVars} />
             </>
           )}
 
           {tab === "ai" && (
             <>
               <SectionHdr>AI Comparative Analysis</SectionHdr>
-              <AICompareNarrative models={models} dataDictionary={dataDictionary} />
+              <AICompareNarrative models={visibleModels} dataDictionary={dataDictionary} />
             </>
           )}
 
           {tab === "export" && (
             <>
               <SectionHdr>Multi-Model Replication Script</SectionHdr>
-              <ExportBlock models={models} dataDictionary={dataDictionary} pipeline={pipeline} filename={filename} />
+              <ExportBlock models={visibleModels} dataDictionary={dataDictionary} pipeline={pipeline} filename={filename} hiddenVars={hiddenVars} />
             </>
           )}
 

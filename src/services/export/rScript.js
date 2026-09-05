@@ -394,10 +394,10 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     case "group_summarize": {
       const by   = (step.by ?? []).map(rName).join(", ");
       const aggs = (step.aggs ?? []).map(a => {
-        const fnMap = { mean: "mean", sum: "sum", count: "n",
+        const fnMap = { mean: "mean", sum: "sum", count: "n", n: "n",
                         min: "min", max: "max", sd: "sd", median: "median" };
         const fn = fnMap[a.fn] ?? a.fn;
-        return a.fn === "count"
+        return (a.fn === "count" || a.fn === "n")
           ? `    ${rName(a.nn)} = n()`
           : `    ${rName(a.nn)} = ${fn}(${rName(a.col)}, na.rm = TRUE)`;
       }).join(",\n");
@@ -894,7 +894,7 @@ const PANEL_TYPES_R = new Set(["FE", "FD", "TWFE", "LSDV", "EventStudy", "Poisso
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
 function transpileModel(model) {
   const {
-    type, yVar, xVars = [], wVars = [],
+    type, yVar, xVars: xVarsIn = [], wVars: wVarsIn = [],
     zVars = [], postVar, treatVar,
     runningVar, cutoff, bandwidth, kernel = "triangular", polyOrder = 1,
     entityCol, timeCol, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null,
@@ -906,6 +906,15 @@ function transpileModel(model) {
     seType = "classical", clusterVar = null, clusterVar2 = null,
     noIntercept = false,
   } = model;
+
+  // Prefer the PRE-EXPANSION lists everywhere, not just in the plain-formula
+  // path. buildRFormulaStr already did this, but every other branch (2SLS, GMM,
+  // LIML, DiD, RDD, panel, …) mapped fmtR over the post-expansion columns, so a
+  // factor arrived as municipality_10 + municipality_11 + … — names fvSet does
+  // not contain, hence no factor() wrapper and no reference. Shadowing here
+  // fixes every branch at once instead of at ~15 call sites.
+  const xVars = (Array.isArray(xVarsRaw) && xVarsRaw.length) ? xVarsRaw : xVarsIn;
+  const wVars = (Array.isArray(wVarsRaw) && wVarsRaw.length) ? wVarsRaw : wVarsIn;
 
   // SE the user actually selected — emitted instead of a hardcoded "HC1".
   const vc = rVcov(seType, { clusterVar, clusterVar2 });
@@ -1337,9 +1346,12 @@ function transpileModel(model) {
     }
 
     case "LIML": {
-      const endog  = wVars.map(rName).join(" + ");
+      // fmtR, not rName: a factor appearing anywhere on a formula RHS — endogenous
+      // side or instrument list — still needs factor()/relevel(), otherwise the
+      // raw column name is emitted and R treats it as numeric.
+      const endog  = wVars.map(fmtR).join(" + ");
       const exog   = xVars.map(fmtR).join(" + ") || "1";
-      const instrs = [...xVars, ...zVars].map(rName).join(" + ");
+      const instrs = [...xVars.map(fmtR), ...zVars.map(rName)].join(" + ");
       return [
         `# ── Limited Information Maximum Likelihood (LIML) ────────────────────`,
         `# Install: install.packages("ivreg")`,
@@ -1685,6 +1697,13 @@ function subsetFiltersToR(filters) {
 // dataDictionary: Record<string,string> | null
 // opts:           { filename?: string, pipeline?: Step[] }
 export function generateMultiModelRScript(configs = [], dataDictionary = null, opts = {}) {
+  // Variables hidden in the comparison are dropped from the printed table only
+  // — modelsummary's coef_omit, the same contract as stargazer's omit=. The
+  // regressors stay in every fit, so the estimates themselves are unchanged.
+  const _omitVars = (opts.omitVars ?? []).filter(Boolean);
+  const coefOmit = _omitVars.length
+    ? `  coef_omit  = "^(${_omitVars.map(v => v.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")).join("|")})$",`
+    : null;
   if (!configs.length) return "# No models provided.";
 
   const filename     = opts.filename ?? "dataset.csv";
@@ -1765,6 +1784,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
       `modelsummary::modelsummary(`,
       `  results,`,
       `  stars      = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
+      ...(coefOmit ? [coefOmit] : []),
       `  gof_omit   = "AIC|BIC|Log|F$",`,
       `  output     = "comparison_results.docx"`,
       `)`,
@@ -1789,6 +1809,7 @@ export function generateMultiModelRScript(configs = [], dataDictionary = null, o
       `modelsummary::modelsummary(`,
       `  list(${listItems}),`,
       `  stars      = c("*" = 0.1, "**" = 0.05, "***" = 0.01),`,
+      ...(coefOmit ? [coefOmit] : []),
       `  gof_omit   = "AIC|BIC|Log|F$",`,
       `  output     = "comparison_results.docx"`,
       `)`,

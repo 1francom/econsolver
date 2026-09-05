@@ -71,7 +71,7 @@ export default function PanelResults({ result, panel, xVars, wVars, yVar, panelF
           ]} />
           <Lbl color={C.textMuted}>Coefficient Table — {tab === "fe" ? "FE" : "FD"}</Lbl>
           <div style={{ marginBottom: "1.2rem" }}>
-            <CoeffTable dict={dict} rows={rows} varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.testStats ?? active.tStats} pVals={active.pVals} yVar={yName} df={active.df} />
+            <CoeffTable dict={dict} rows={rows} varNames={active.varNames || xVars} beta={active.beta} se={active.se} tStats={active.testStats ?? active.tStats} pVals={active.pVals} yVar={yName} df={active.df} factorMap={active.factorMap} />
           </div>
           <PlotSelector
             accentColor={C.blue}

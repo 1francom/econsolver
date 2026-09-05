@@ -16,6 +16,54 @@ function _validRows(rows, yCol, xCols, weightCol) {
   });
 }
 
+// Per-column attribution of listwise deletion. R prints "N observations deleted
+// due to missingness"; without naming the culprit, a user facing "only 94 valid
+// observations" out of 189 has no way to tell WHICH column cost them the rows.
+// Missing and non-numeric are counted separately because the remedy differs: a
+// text column needs a type cast, a genuinely empty one needs a filter.
+function _colLoss(rows, cols) {
+  const out = [];
+  for (const c of cols) {
+    let missing = 0, nonNumeric = 0;
+    for (const r of rows) {
+      const v = r[c];
+      if (v === null || v === undefined || v === "") missing++;
+      else if (typeof v === "number") { if (!isFinite(v)) missing++; }
+      else nonNumeric++;
+    }
+    if (missing + nonNumeric > 0) out.push({ col: c, missing, nonNumeric, lost: missing + nonNumeric });
+  }
+  return out.sort((a, b) => b.lost - a.lost);
+}
+
+// One sentence naming the worst offenders, capped so a factor expanded into
+// dozens of dummies cannot flood the message.
+function _lossSentence(rows, cols, weightCol) {
+  const losses = _colLoss(rows, cols);
+  // A weight of 0 is a finite number, so _colLoss cannot see it — but runWLS
+  // drops those rows too. Counted separately or the WLS case loses its hint.
+  const badW = weightCol
+    ? rows.filter(r => { const w = r[weightCol]; return typeof w === "number" && isFinite(w) && w <= 0; }).length
+    : 0;
+  if (!losses.length && !badW) return "";
+  const shown = losses.slice(0, 3).map(L => (
+    L.nonNumeric > L.missing
+      ? `'${L.col}' is text rather than numeric in ${L.nonNumeric} row${L.nonNumeric === 1 ? "" : "s"}`
+      : `'${L.col}' is missing in ${L.missing} row${L.missing === 1 ? "" : "s"}`
+  ));
+  const more = losses.length - shown.length;
+  const anyText = losses.some(L => L.nonNumeric > L.missing);
+  const fix = anyText
+    ? " Cast that column to numeric in Clean → Formatting."
+    : losses.length
+      ? " Drop those rows with an 'is not null' filter in Clean, or remove that regressor."
+      // Only the weight column is at fault: the values are not null, they are
+      // non-positive, so neither an is-not-null filter nor dropping a regressor applies.
+      : " WLS drops rows whose weight is not strictly positive — check the weight column, or run OLS.";
+  if (badW) shown.push(`'${weightCol}' is zero or negative in ${badW} row${badW === 1 ? "" : "s"}`);
+  return ` ${shown.join("; ")}${more > 0 ? `; and ${more} more column${more === 1 ? "" : "s"}` : ""}.${shown.length ? fix : ""}`;
+}
+
 function _isConstant(vals) {
   if (vals.length < 2) return true;
   const v0 = vals[0];
@@ -52,11 +100,14 @@ export function diagnoseFit(rows, yCol, xCols, weightCol) {
   const n = valid.length;
   const k = xCols.length + 1; // + intercept
 
+  const allCols = weightCol ? [yCol, ...xCols, weightCol] : [yCol, ...xCols];
+  const why = _lossSentence(rows, allCols, weightCol);
+
   if (n === 0) {
-    return `No rows remain after dropping missing/non-numeric values in '${yCol}'${xCols.length ? `, '${xCols.join("', '")}'` : ""}${weightCol ? `, or non-positive weights in '${weightCol}'` : ""}. Check filters and column types.`;
+    return `No usable rows remain.${why || ` Check filters and column types for '${yCol}'.`}`;
   }
   if (n < k + 2) {
-    return `Only ${n} valid observation${n === 1 ? "" : "s"} after dropping missing values — need at least ${k + 2} to estimate ${k} parameter${k === 1 ? "" : "s"}. Loosen filters or reduce regressors.`;
+    return `Only ${n} of ${rows.length} row${rows.length === 1 ? "" : "s"} are usable — need at least ${k + 2} to estimate ${k} parameter${k === 1 ? "" : "s"}.${why} Otherwise loosen filters or reduce regressors.`;
   }
 
   const yVals = valid.map(r => r[yCol]);

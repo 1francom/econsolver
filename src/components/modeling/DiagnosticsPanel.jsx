@@ -21,6 +21,7 @@ import { durbinWatson, breuschGodfrey } from "../../core/diagnostics/autocorrela
 import { jarqueBera, shapiroWilk }      from "../../core/diagnostics/normality.js";
 import { computeVIF, conditionNumber }  from "../../core/diagnostics/multicollinearity.js";
 import { hausmanTest }                  from "../../math/LinearEngine.js";
+import { qchisq } from "../../math/calcEngine.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function sevColor(C, reject, inconclusive) {
@@ -52,9 +53,16 @@ function SectionHdr({ children }) {
 }
 
 // ── Single test result card ───────────────────────────────────────────────────
-function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusive, note }) {
+// All four LM-style tests here are asymptotically χ²(df) under H₀, so the 5%
+// critical value is derived from df alone — which both the JS and the DuckDB
+// SQL diagnostics paths already report. Tests that carry their own critical
+// value (Shapiro-Wilk) pass it in explicitly via `crit`.
+function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusive, note,
+                    crit, critLabel }) {
   const { C, T } = useTheme();
   const color = sevColor(C, reject, inconclusive);
+  const critVal   = crit != null ? crit : (df != null ? qchisq(0.95, df) : null);
+  const critName  = critLabel ?? (df != null ? `χ²(${df})` : null);
   return (
     <div style={{
       padding: "0.6rem 0.85rem",
@@ -75,6 +83,11 @@ function TestCard({ name, stat, statLabel = "stat", df, pVal, reject, inconclusi
         {statLabel} = {stat != null ? stat : "—"}
         {df != null && <span style={{ color: C.textMuted }}> · df = {df}</span>}
         {pVal != null && <span style={{ color: C.textDim }}> · p = {fmtP(pVal)}</span>}
+        {critVal != null && Number.isFinite(critVal) && (
+          <span style={{ color: C.gold }}>
+            {" "}· crit {critName}<sub>0.05</sub> = {critVal.toFixed(4)}
+          </span>
+        )}
       </div>
       {note && (
         <div style={{ fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>{note}</div>
@@ -336,6 +349,7 @@ export default function DiagnosticsPanel({
                 {sw && (
                   <TestCard name="Shapiro-Wilk" stat={sw.W} statLabel="W"
                     pVal={sw.pVal} reject={sw.reject}
+                    crit={sw.crit} critLabel="W"
                     note={sw.reject ? "⚠ Residuals may not be normally distributed." : "✓ No evidence against normality."}
                   />
                 )}
@@ -385,7 +399,7 @@ export default function DiagnosticsPanel({
           {/* Footer */}
           <div style={{ padding: "0.35rem 0.85rem", fontSize: T.caption.fontSize, color: C.textMuted,
             fontFamily: T.code.fontFamily, background: C.surface2, borderTop: `1px solid ${C.border}` }}>
-            Significance at 5% · BP/White/BG: LM ~ χ² · DW: consult tables for exact bounds · SW: Royston (1992)
+            {"Critical values at 5% · BP/White/BG/JB: reject when LM > χ²(df) · SW: reject when W < crit · DW: bounds dL/dU depend on n and k — see BG above for an exact test"}
           </div>
         </div>
       )}

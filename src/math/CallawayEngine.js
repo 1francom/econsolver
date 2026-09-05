@@ -163,6 +163,12 @@ export function runCallawayCS(
   let idx = 0;
   for (const eid of units.keys()) eidIndex.set(eid, idx++);
 
+  // Cohort of each unit, ordered exactly like the influence-function arrays.
+  // aggregate() needs it because P(G=g) is estimated from this same sample.
+  // Never-treated units carry Infinity, which matches no finite cohort.
+  const unitG = new Float64Array(nUnits);
+  for (const [eid, i] of eidIndex) unitG[i] = units.get(eid);
+
   // ── 5. Enumerate cells ──────────────────────────────────────────────────────
   const cells = enumerateCells({ tlist, glist, anticipation, basePeriod });
 
@@ -254,12 +260,19 @@ export function runCallawayCS(
     const { att, inf: rawInf, warning: estWarn } = compute2x2({ deltaY, D, X, estMethod, weights });
     if (estWarn) warnings.push(`ATT(${cell.g},${cell.t}): ${estWarn}`);
 
-    // e. Map influence function from sample length → nUnits length
+    // e. Map influence function from sample length → nUnits length.
+    // compute2x2 builds the IF over this cell's OWN subsample (nSample units),
+    // but every consumer divides by nUnits, so the raw values must be scaled by
+    // nUnits/nSample first — R's compute.att_gt does the same ((n/n1)*inf).
+    // Without it a cell estimated on a smaller control set contributes too
+    // little variance to every aggregation, and the per-cell SE below (which
+    // divides by nSample) silently disagrees with the aggregated one.
+    const infScale = nUnits / nSample;
     const cellInf = new Float64Array(nUnits);
     for (let si = 0; si < nSample; si++) {
       const eid = sampleEids[si];
       const ui = eidIndex.get(eid);
-      if (ui !== undefined) cellInf[ui] = rawInf[si];
+      if (ui !== undefined) cellInf[ui] = rawInf[si] * infScale;
     }
 
     cells2x2.push({
@@ -285,6 +298,7 @@ export function runCallawayCS(
     groupProb,
     n: nUnits,
     inference,
+    unitG,
   });
 
   // ── 9. Return result contract ────────────────────────────────────────────────
@@ -295,7 +309,10 @@ export function runCallawayCS(
       t:     c.t,
       e:     c.e,
       att:   c.att,
-      se:    Math.sqrt(c.inf.reduce((s, v) => s + v * v, 0)) / c.n_sample,
+      // inf is already rescaled to the nUnits basis, so divide by nUnits.
+      // Equals the previous sqrt(sum(rawInf^2))/n_sample — same number, but now
+      // produced by the same convention the aggregations use.
+      se:    Math.sqrt(c.inf.reduce((s, v) => s + v * v, 0)) / nUnits,
       isPre: c.isPre,
       n_g:   c.n_g,
     })),

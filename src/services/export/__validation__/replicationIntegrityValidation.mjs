@@ -245,10 +245,12 @@ section("T6 · factor reference category export");
   check("Python formula string's quotes stay balanced (Treatment ref doesn't break out of it)",
     (beforeData.match(/"/g) || []).length % 2 === 0, olsLine);
 
-  // Numeric reference → Stata gets ib(#).; string reference → falls back to
-  // i.col with an explanatory NOTE, never invalid ib(word).col syntax.
+  // Numeric reference → Stata gets ib#. (no parentheses: ib(2). is a syntax
+  // error, the parenthesised form only takes first/last/freq); a string or
+  // non-integer reference → falls back to i.col, never invalid syntax.
   const stataNum = generateStataScript({ ...refCfg, model: { ...refCfg.model, factorRefs: { region: "3" } } });
-  check("Stata emits ib(#). for a numeric reference", /ib\(3\)\.region/.test(stataNum));
+  check("Stata emits ib#. for a numeric reference", /ib3\.region/.test(stataNum));
+  check("Stata never emits the parenthesised ib(#). form", !/ib\(\d/.test(stataNum));
   const stataStr = generateStataScript(refCfg); // region: "north" — not numeric
   check("Stata falls back to i.col for a string reference (no invalid ib(north).region)",
     /\bi\.region\b/.test(stataStr) && !/ib\(north\)/.test(stataStr));

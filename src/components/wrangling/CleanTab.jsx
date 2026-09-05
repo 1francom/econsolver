@@ -622,6 +622,51 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
     ? allUVals.filter(v => v.toLowerCase().includes(chipSearch.trim().toLowerCase())).slice(0, 40)
     : allUVals.slice(0, 40);
 
+  // The chip search doubles as a list entry box: typing "2014, 2015" — or a
+  // numeric range like "2014 - 2016" — resolves against the column's distinct
+  // values instead of being treated as one literal search string. Separators are
+  // , ; newline and tab. A hyphen is a RANGE, never a separator: category labels
+  // routinely contain one ("sub-saharan"), so it is only honoured when the whole
+  // column is numeric and both sides parse as numbers.
+  const numericCol = allUVals.length > 0 && allUVals.every(v => v !== "" && Number.isFinite(Number(v)));
+  const typedList = (() => {
+    const raw = chipSearch;
+    if (!raw.trim() || !/[,;\n\t]/.test(raw)) {
+      // no separator — a lone range still counts as a list request
+      const m = numericCol && raw.trim().match(/^(-?\d+(?:\.\d+)?)\s*(?:\.\.|-|–|—)\s*(-?\d+(?:\.\d+)?)$/);
+      if (!m) return null;
+    }
+    const tokens = raw.split(/[,;\n\t]+/).map(t => t.trim()).filter(Boolean);
+    if (!tokens.length) return null;
+    const matched = [];
+    const unmatched = [];
+    for (const tok of tokens) {
+      const range = numericCol && tok.match(/^(-?\d+(?:\.\d+)?)\s*(?:\.\.|-|–|—)\s*(-?\d+(?:\.\d+)?)$/);
+      if (range) {
+        const lo = Math.min(Number(range[1]), Number(range[2]));
+        const hi = Math.max(Number(range[1]), Number(range[2]));
+        const hits = allUVals.filter(v => Number(v) >= lo && Number(v) <= hi);
+        if (hits.length) matched.push(...hits); else unmatched.push(tok);
+        continue;
+      }
+      const hit = allUVals.find(v => v === tok)
+        ?? allUVals.find(v => v.toLowerCase() === tok.toLowerCase())
+        ?? (numericCol && Number.isFinite(Number(tok))
+              ? allUVals.find(v => Number(v) === Number(tok))
+              : undefined);
+      if (hit != null) matched.push(hit); else unmatched.push(tok);
+    }
+    const uniq = [...new Set(matched)];
+    return uniq.length || unmatched.length ? { matched: uniq, unmatched } : null;
+  })();
+
+  const applyTypedList = () => {
+    if (!typedList?.matched.length) return;
+    const next = [...new Set([...(cond.values || []), ...typedList.matched])];
+    onChange(idx, { values: next, value: next.join(",") });
+    setChipSearch("");
+  };
+
   const inS = {
     padding:"0.3rem 0.55rem", background:C.surface3, border:`1px solid ${C.border2}`,
     borderRadius:3, color:C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize, outline:"none",
@@ -680,9 +725,26 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
               <input
                 value={chipSearch}
                 onChange={e => setChipSearch(e.target.value)}
-                placeholder={`search ${allUVals.length} values…`}
+                onKeyDown={e => { if (e.key === "Enter" && typedList?.matched.length) { e.preventDefault(); applyTypedList(); } }}
+                placeholder={`search ${allUVals.length} values, or type 2014, 2015…`}
                 style={{ ...inS, width:"100%", marginBottom:4, boxSizing:"border-box" }}
               />
+              {typedList && (
+                <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:4 }}>
+                  {typedList.matched.length > 0 && (
+                    <button onClick={applyTypedList} style={{
+                      padding:"2px 8px", border:`1px solid ${C.gold}`, background:`${C.gold}18`,
+                      color:C.gold, borderRadius:3, cursor:"pointer",
+                      fontSize: T.caption.fontSize, fontFamily: T.code.fontFamily,
+                    }}>+ select {typedList.matched.length} (Enter)</button>
+                  )}
+                  {typedList.unmatched.length > 0 && (
+                    <span style={{ fontSize: T.caption.fontSize, color:C.red, fontFamily: T.code.fontFamily }}>
+                      not in column: {typedList.unmatched.join(", ")}
+                    </span>
+                  )}
+                </div>
+              )}
               <div style={{ display:"flex", flexWrap:"wrap", gap:3, marginBottom:4, maxHeight:120, overflowY:"auto" }}>
               {uVals.map(v => {
                 const sel = (cond.values || []).includes(v);
@@ -713,7 +775,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
             <input
               value={cond.value}
               onChange={e => {
-                const vals = e.target.value.split(",").map(x => x.trim()).filter(Boolean);
+                const vals = e.target.value.split(/[,;\n\t]+/).map(x => x.trim()).filter(Boolean);
                 onChange(idx, { value: e.target.value, values: vals });
               }}
               placeholder="val1, val2, val3  (comma-separated)"
@@ -721,7 +783,7 @@ function ConditionRow({ cond, idx, headers, info, onChange, onRemove, canRemove 
             />
           )}
           <div style={{ fontSize: T.caption.fontSize, color:C.textMuted, fontFamily: T.code.fontFamily, marginTop:2 }}>
-            {(cond.values || []).length} selected
+            {(cond.values || []).length} selected{allUVals.length > 0 ? " — click a value to toggle it" : ""}
           </div>
         </div>
       )}

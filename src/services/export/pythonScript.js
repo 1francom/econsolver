@@ -82,6 +82,7 @@ export function generatePythonScript(config = {}) {
     // otherwise, and cheaper than tracking "does this model actually use
     // Treatment()" through every branch that can reach this import block.
     lines.push("from patsy.contrasts import Treatment");
+    lines.push("from patsy import dmatrix");
   }
   if (pkgs.has("linearmodels")) {
     lines.push("from linearmodels.panel import PanelOLS, FirstDifferenceOLS, BetweenOLS");
@@ -347,8 +348,9 @@ function transpileStep(step, allDatasets = {}) {
       return `df = df.sort_values(${pyStr(step.col)}, ascending=${step.dir === "desc" ? "False" : "True"}).reset_index(drop=True)`;
     case "group_summarize": {
       const aggDict = (step.aggs ?? []).map(a => {
-        const fn = a.fn === "sd" ? "std" : a.fn === "count" ? "size" : a.fn;
-        return `${pyStr(a.nn)}: (${pyStr(a.col)}, "${fn}")`;
+        const fn = a.fn === "sd" ? "std" : (a.fn === "count" || a.fn === "n") ? "size" : a.fn;
+        const col = a.col || (step.by ?? [])[0] || "";
+        return `${pyStr(a.nn)}: (${pyStr(col)}, "${fn}")`;
       }).join(", ");
       return `df = df.groupby(${pyList(step.by ?? [])}, as_index=False).agg(**{${aggDict}})`;
     }
@@ -656,6 +658,23 @@ function transpileStep(step, allDatasets = {}) {
 // (`smf.ols("y ~ C(x, Treatment(reference=\"...\"))", ...)`), so a
 // double-quoted inner literal would close the outer string early and break
 // the generated script. Escapes any single quote in the level value itself.
+// linearmodels' array API takes column SELECTIONS, not a patsy formula, so a
+// factor cannot be written as C(col) there — and the raw dummy names do not
+// exist in the exported dataframe either (the expansion happens inside Litux).
+// When any selected column is a factor, build the design with patsy instead, so
+// levels expand with the SAME reference the app used. With no factor selected
+// the old `sm.add_constant(df[[...]])` form is emitted byte-identically.
+function pyDesign(cols, dfName, fvSet, factorRefs, { intercept = true } = {}) {
+  const list = (cols ?? []);
+  const quoted = list.map(v => `"${v}"`).join(", ");
+  if (!list.some(v => fvSet.has(v))) {
+    return intercept ? `sm.add_constant(${dfName}[[${quoted}]])` : `${dfName}[[${quoted}]]`;
+  }
+  const terms = list.map(v => pyFactorTerm(v, fvSet, factorRefs)).join(" + ");
+  const rhs = `${intercept ? "" : "0 + "}${terms || "1"}`;
+  return `dmatrix("${rhs}", ${dfName}, return_type="dataframe")`;
+}
+
 function pyFactorTerm(v, fvSet, factorRefs) {
   if (!fvSet.has(v)) return v;
   if (factorRefs[v] == null) return `C(${v})`;
@@ -686,7 +705,15 @@ function buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 }
 
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
-function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null, basePeriod = null }) {
+function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVarsIn, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null, basePeriod = null }) {
+  // Prefer the PRE-EXPANSION lists in EVERY branch, not only in the plain
+  // formula path: the other estimators mapped their factor formatter over the
+  // post-expansion columns, so `municipality` arrived as municipality_10,
+  // municipality_11, … — names the factor set does not contain, so no
+  // C()/i. wrapper and no reference. allX follows so the two never disagree.
+  const xVars = (Array.isArray(xVarsRaw) && xVarsRaw.length) ? xVarsRaw : (xVarsIn ?? []);
+  const wVars = (Array.isArray(wVarsRaw) && wVarsRaw.length) ? wVarsRaw : (wVarsIn ?? []);
+  const allX  = (Array.isArray(xVarsRaw) && xVarsRaw.length) ? [...xVars, ...wVars] : (allXIn ?? []);
   const lines = [];
   const fvSet    = new Set(factorVars);
   // Treatment(reference=) only when a custom reference was actually chosen —
@@ -697,6 +724,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
   // no UI path offers a reference for it, and partial support would be worse
   // than none, per the project's "no permissive default" convention).
   const fmtPy = v => pyFactorTerm(v, fvSet, factorRefs);
+  const design = (cols, dfName, opts) => pyDesign(cols, dfName, fvSet, factorRefs, opts);
   const xFormula = allX.map(v => `"${v}"`).join(", ");
   const pyFormStr = buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs);
 
@@ -820,7 +848,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       if (feColsFE.length <= 2) {
         lines.push(`# Fixed Effects (within estimator)`);
         lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
-        lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
+        lines.push(`exog = ${design(allX, "df_panel")}`);
         lines.push(...panelCovNote());
       lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True).fit(${panelCov()})`);
         lines.push(`print(model.summary)`);
@@ -840,7 +868,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     case "FD": {
       lines.push(`# First Differences estimator`);
       lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
-      lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
+      lines.push(`exog = ${design(allX, "df_panel")}`);
       lines.push(...panelCovNote());
       lines.push(`model = FirstDifferenceOLS(df_panel["${yVar}"], exog).fit(${panelCov()})`);
       lines.push(`print(model.summary)`);
@@ -856,14 +884,14 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         // Panel IV
         lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
         lines.push(`dependent  = df_panel["${yVar}"]`);
-        lines.push(exogX ? `exog_vars  = sm.add_constant(df_panel[[${exogX}]])` : `exog_vars  = None`);
-        lines.push(`endog_vars = df_panel[[${endog}]]`);
+        lines.push(exogX ? `exog_vars  = ${design(wVars, "df_panel")}` : `exog_vars  = None`);
+        lines.push(`endog_vars = ${design(xVars, "df_panel", { intercept: false })}`);
         lines.push(`instr_vars = df_panel[[${instr}]]`);
       } else {
         // Cross-sectional IV
         lines.push(`dependent  = df["${yVar}"]`);
-        lines.push(exogX ? `exog_vars  = sm.add_constant(df[[${exogX}]])` : `exog_vars  = None`);
-        lines.push(`endog_vars = df[[${endog}]]`);
+        lines.push(exogX ? `exog_vars  = ${design(wVars, "df")}` : `exog_vars  = None`);
+        lines.push(`endog_vars = ${design(xVars, "df", { intercept: false })}`);
         lines.push(`instr_vars = df[[${instr}]]`);
       }
       lines.push(...ivCovNote());
@@ -873,7 +901,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
     }
 
     case "DiD": {
-      const xExtra = wVars.length ? ` + ${wVars.join(" + ")}` : "";
+      const xExtra = wVars.length ? ` + ${wVars.map(fmtPy).join(" + ")}` : "";
       lines.push(`# Difference-in-Differences (2×2)`);
       lines.push(`df["did"] = df["${postVar}"] * df["${treatVar}"]`);
       lines.push(`model = smf.ols("${yVar} ~ ${postVar} + ${treatVar} + did${xExtra}", data=df).fit(${smCov()})`);
@@ -890,7 +918,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       if (feColsTWFE.length <= 2) {
         lines.push(`# Two-Way Fixed Effects DiD`);
         lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
-        lines.push(`exog = sm.add_constant(df_panel[["${treatVar}"${extraX}]])`);
+        lines.push(`exog = ${design([treatVar, ...wVars], "df_panel")}`);
         lines.push(...panelCovNote());
       lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True, time_effects=True).fit(${panelCov()})`);
         lines.push(`print(model.summary)`);
@@ -957,7 +985,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       if (feColsLSDV.length <= 2) {
         lines.push(`# Panel LSDV (numerically equivalent to within/FE)`);
         lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
-        lines.push(`exog = sm.add_constant(df_panel[[${xFormula}]])`);
+        lines.push(`exog = ${design(allX, "df_panel")}`);
         lines.push(...panelCovNote());
       lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True${timeCol ? ", time_effects=True" : ""}).fit(${panelCov()})`);
         lines.push(`print(model.summary)`);
@@ -1066,7 +1094,7 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
         lines.push(`rel_dummies = pd.get_dummies(df_panel["rel_time"], prefix="rt", drop_first=False)`);
         lines.push(`rel_dummies = rel_dummies.drop(columns=["rt_-1"], errors="ignore")  # ref = -1`);
         if (wVars.length) {
-          lines.push(`exog = sm.add_constant(pd.concat([rel_dummies, df_panel[[${extraCols}]]], axis=1))`);
+          lines.push(`exog = sm.add_constant(pd.concat([rel_dummies, ${design(wVars, "df_panel", { intercept: false })}], axis=1))`);
         } else {
           lines.push(`exog = sm.add_constant(rel_dummies)`);
         }
@@ -1168,8 +1196,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`# Two-Step Efficient GMM`);
       lines.push(`from linearmodels.iv import IVGMM`);
       lines.push(`dependent  = df["${yVar}"]`);
-      lines.push(`exog_vars  = sm.add_constant(df[[${xList || `"# add exog columns"`}]])` );
-      lines.push(`endog_vars = df[[${wList || `"# add endogenous columns"`}]]`);
+      lines.push(`exog_vars  = ${design(xVars, "df")}` );
+      lines.push(`endog_vars = ${design(wVars, "df", { intercept: false })}`);
       lines.push(`instr_vars = df[[${zList || `"# add instrument columns"`}]]`);
       lines.push(`model = IVGMM(dependent, exog_vars, endog_vars, instr_vars).fit(${ivCov()})`);
       lines.push(`print(model.summary)`);
@@ -1185,8 +1213,8 @@ function transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, time
       lines.push(`# Limited Information Maximum Likelihood (LIML)`);
       lines.push(`from linearmodels.iv import IVLIML`);
       lines.push(`dependent  = df["${yVar}"]`);
-      lines.push(`exog_vars  = sm.add_constant(df[[${xList || `"# add exog columns"`}]])`);
-      lines.push(`endog_vars = df[[${wList || `"# add endogenous columns"`}]]`);
+      lines.push(`exog_vars  = ${design(xVars, "df")}`);
+      lines.push(`endog_vars = ${design(wVars, "df", { intercept: false })}`);
       lines.push(`instr_vars = df[[${zList || `"# add instrument columns"`}]]`);
       lines.push(`model = IVLIML(dependent, exog_vars, endog_vars, instr_vars).fit(${ivCov()})`);
       lines.push(`print(model.summary)`);
@@ -1346,6 +1374,19 @@ function subsetFiltersToPython(filters, dfName = "df") {
 // configs: Array of { model: ModelConfig, label: string, subsetName?, subsetFilters? }
 // opts:    { filename?: string, pipeline?: Step[] }
 export function generateMultiModelPythonScript(configs = [], dataDictionary = null, opts = {}) {
+  // statsmodels' summary_col has no coef_omit equivalent (R's modelsummary and
+  // Stata's esttab both do), so say so rather than emit something that does not
+  // reproduce the table shown in the app.
+  const _omitVars = (opts.omitVars ?? []).filter(Boolean);
+  const omitNote = _omitVars.length
+    ? `# NOTE: ${_omitVars.length} variable(s) are hidden in the app's comparison table`
+      + `
+#       (${_omitVars.slice(0, 6).join(', ')}${_omitVars.length > 6 ? ', …' : ''}).`
+      + `
+#       summary_col has no coef_omit; drop those rows from \`table\` manually,`
+      + `
+#       or switch to the R export, which emits modelsummary(coef_omit=).`
+    : null;
   if (!configs.length) return "# No models provided.";
 
   const filename     = opts.filename ?? "dataset.csv";
@@ -1374,6 +1415,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
   lines.push("import statsmodels.formula.api as smf");
   lines.push("import statsmodels.api as sm");
   lines.push("from patsy.contrasts import Treatment");
+    lines.push("from patsy import dmatrix");
   if (needsLinear) lines.push("from linearmodels.panel import PanelOLS, FirstDifferenceOLS");
   if (needs2SLS)   lines.push("from linearmodels.iv import IV2SLS");
   lines.push("");
@@ -1418,12 +1460,13 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
             treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
             interactionTerms: ix0 = [], xVarsRaw: xr0 = null, wVarsRaw: wr0 = null,
+            factorVars: fv0 = [], factorRefs: fr0 = {},
             seType: se0 = "classical", clusterVar: cl0 = null, clusterVar2: cl20 = null, noIntercept: ni0 = false } = configs[0].model ?? {};
     const allX0 = [...xVars, ...wVars];
     const singleLines = transpileModel({ type, yVar, allX: allX0, xVars, wVars, zVars,
       entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime,
       feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null,
-      interactionTerms: ix0, xVarsRaw: xr0, wVarsRaw: wr0, seType: se0, clusterVar: cl0, clusterVar2: cl20, noIntercept: ni0 });
+      interactionTerms: ix0, xVarsRaw: xr0, wVarsRaw: wr0, factorVars: fv0, factorRefs: fr0, seType: se0, clusterVar: cl0, clusterVar2: cl20, noIntercept: ni0 });
     // Strip assignment prefix, swap df → s
     const fitCall = singleLines
       .map(l => l.replace(/\bmodel\b\s*=\s*/, "").replace(/\bdf\b/g, "s"))
@@ -1437,6 +1480,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
 
     lines.push(`# ── Results ─────────────────────────────────────────────────────────────────`);
     lines.push(`from statsmodels.iolib.summary2 import summary_col`);
+    if (omitNote) lines.push(omitNote);
     lines.push(`table = summary_col(list(results.values()), model_names=list(results.keys()), stars=True, float_format="%.4f")`);
     lines.push(`print(table)`);
     lines.push(``);
@@ -1449,12 +1493,13 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
               treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
               interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null,
+              factorVars: fvc = [], factorRefs: frc = {},
               seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null, noIntercept: niC = false } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       const fitName = `model_${i + 1}`;
       fitNames.push(fitName);
       lines.push(`# Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, factorVars: fvc, factorRefs: frc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
       modelLines.forEach(l => lines.push(l.replace(/\bmodel\b/g, fitName)));
       lines.push("");
     });
@@ -1473,6 +1518,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
       lines.push(`from statsmodels.iolib.summary2 import summary_col`);
       const smList   = smFits.map(f => f.name).join(", ");
       const smLabels = smFits.map(f => `"${f.label}"`).join(", ");
+      if (omitNote) lines.push(omitNote);
       lines.push(`print(summary_col([${smList}], model_names=[${smLabels}], stars=True, float_format="%.4f"))`);
       lines.push(`# linearmodels models`);
       lines.push(`from linearmodels.iv.model import compare as lm_compare`);
@@ -1482,6 +1528,7 @@ export function generateMultiModelPythonScript(configs = [], dataDictionary = nu
       lines.push(`from statsmodels.iolib.summary2 import summary_col`);
       const fitList   = smFits.map(f => f.name).join(", ");
       const labelList = smFits.map(f => `"${f.label}"`).join(", ");
+      if (omitNote) lines.push(omitNote);
       lines.push(`table = summary_col([${fitList}], model_names=[${labelList}], stars=True, float_format="%.4f")`);
       lines.push(`print(table)`);
     } else {
@@ -1524,6 +1571,7 @@ export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline 
   lines.push("import statsmodels.formula.api as smf");
   lines.push("import statsmodels.api as sm");
   lines.push("from patsy.contrasts import Treatment");
+    lines.push("from patsy import dmatrix");
   if (["FE","FD","2SLS","TWFE"].includes(model.type)) {
     lines.push("from linearmodels.panel import PanelOLS, FirstDifferenceOLS");
     lines.push("from linearmodels.iv import IV2SLS");
@@ -1573,9 +1621,10 @@ export function generateSubsetPythonScript({ filename = "dataset.csv", pipeline 
           entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
           treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
           interactionTerms: ixs = [], xVarsRaw: xrs = null, wVarsRaw: wrs = null,
+          factorVars: fvs = [], factorRefs: frs = {},
           seType: seS = "classical", clusterVar: clS = null, clusterVar2: cl2S = null, noIntercept: niS = false } = model;
   const allX = [...(xVars ?? []), ...(wVars ?? [])];
-  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixs, xVarsRaw: xrs, wVarsRaw: wrs, seType: seS, clusterVar: clS, clusterVar2: cl2S, noIntercept: niS });
+  const rawModelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixs, xVarsRaw: xrs, wVarsRaw: wrs, factorVars: fvs, factorRefs: frs, seType: seS, clusterVar: clS, clusterVar2: cl2S, noIntercept: niS });
 
   lines.push(`# ── Model function ───────────────────────────────────────────────────────`);
   lines.push(`def run_model(d):`);

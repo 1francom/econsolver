@@ -10,7 +10,7 @@ const arrMax = (a, fb = 1) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0])
 import { buildInfo } from "./WranglingModule.jsx";
 import { computeACF, computePACF, adfTest } from "./math/timeSeries.js";
 import { pnorm } from "./math/calcEngine.js";
-import PlotBuilder from "./components/PlotBuilder.jsx";
+import ExplorePlotTab from "./components/explore/ExplorePlotTab.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import PlotExportBar from "./components/shared/PlotExportBar.jsx";
 import { downloadPNG } from "./services/export/plotExporter.js";
@@ -1779,6 +1779,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
 
   const numC = headers.filter(h => info[h]?.isNum);
   const FN_OPTS = [
+    ["n","Row count — n()"],
     ["mean","Mean (μ)"],["median","Median"],["sum","Sum (Σ)"],
     ["count","Count (n)"],["min","Min"],["max","Max"],["sd","Std dev (σ)"],
   ];
@@ -1805,7 +1806,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
   }
 
   function addAgg(col = "", fn = "mean") {
-    const nn = col ? `${fn}_${col}` : "";
+    const nn = fn === "n" ? "n" : col ? `${fn}_${col}` : "";
     setAggs(a => [...a, { col, fn, nn }]);
   }
   function updAgg(i, patch) {
@@ -1828,7 +1829,10 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
     mean:   c => `avg(${c})`,
     median: c => `percentile_cont(0.5) WITHIN GROUP (ORDER BY ${c})`,
     sum:    c => `sum(${c})`,
+    // n() and count are the same thing: the group's row count. count(*) — never
+    // count(col), which would skip NULLs and disagree with the JS branch below.
     count:  () => `count(*)`,
+    n:      () => `count(*)`,
     min:    c => `min(${c})`,
     max:    c => `max(${c})`,
     sd:     c => `stddev_samp(${c})`,
@@ -1836,7 +1840,8 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
 
   async function doSummarize() {
     if (!byCols.length || !aggs.length) return;
-    const validAggs = aggs.filter(a => a.col && a.fn && a.nn.trim());
+    // n() is the group's row count, so it needs no column selected.
+    const validAggs = aggs.filter(a => (a.col || a.fn === "n") && a.fn && a.nn.trim());
     if (!validAggs.length) return;
     const outHeaders = [...byCols, ...validAggs.map(a => a.nn)];
 
@@ -1877,7 +1882,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
       byCols.forEach(b => { out[b] = _first[b]; });
       validAggs.forEach(({ col, fn, nn }) => {
         const vals = _rows.map(r => r[col]).filter(v => typeof v === "number" && isFinite(v));
-        if (fn === "count") { out[nn] = _rows.length; return; }
+        if (fn === "n" || fn === "count") { out[nn] = _rows.length; return; }
         if (!vals.length)   { out[nn] = null; return; }
         if (fn === "sum")   { out[nn] = vals.reduce((a,b)=>a+b,0); return; }
         if (fn === "min")   { out[nn] = Math.min(...vals); return; }
@@ -1926,7 +1931,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
     ].join("\n");
   }
 
-  const canSummarize = byCols.length > 0 && aggs.some(a => a.col && a.fn && a.nn.trim());
+  const canSummarize = byCols.length > 0 && aggs.some(a => (a.col || a.fn === "n") && a.fn && a.nn.trim());
 
   return (
     <div>
@@ -2020,9 +2025,15 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
           background:`${C.blue}10`,color:C.blue,borderRadius:2,
           cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.body.fontFamily}}>+ add row</button>
       </div>
-      {numC.length > 0 && (
-        <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:"0.8rem"}}>
+      {/* Always rendered: n() needs no numeric column, and a dataset of purely
+          categorical columns is exactly where counting rows per group matters. */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:"0.8rem"}}>
           <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.body.fontFamily,alignSelf:"center",marginRight:2}}>quick add:</span>
+          <button onClick={()=>addAgg("","n")}
+            style={{padding:"0.18rem 0.5rem",border:`1px solid ${C.gold}`,
+              background:`${C.gold}14`,color:C.gold,borderRadius:2,
+              cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}
+            title="Add n() — row count per group, no column needed">+ n()</button>
           {numC.map(h => (
             <button key={h} onClick={()=>addAgg(h,"mean")}
               style={{padding:"0.18rem 0.5rem",border:`1px solid ${C.border2}`,
@@ -2032,8 +2043,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
               onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border2;e.currentTarget.style.color=C.textDim;}}
               title={`Add mean(${h})`}>+ {h}</button>
           ))}
-        </div>
-      )}
+      </div>
       {aggs.length === 0 && (
         <div style={{padding:"0.65rem 1rem",background:C.surface,border:`1px dashed ${C.border2}`,
           borderRadius:4,fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:"1.2rem"}}>
@@ -2045,8 +2055,10 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
           <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 140px 1fr auto",
             gap:6,alignItems:"center",padding:"0.5rem 0.65rem",
             background:C.surface2,border:`1px solid ${C.border}`,borderRadius:4}}>
-            <select value={agg.col} onChange={e=>updAgg(i,{col:e.target.value})} style={{...inS,width:"100%"}}>
-              <option value="">— column —</option>
+            <select value={agg.col} onChange={e=>updAgg(i,{col:e.target.value})}
+              disabled={agg.fn === "n"}
+              style={{...inS,width:"100%",opacity:agg.fn==="n"?0.45:1,cursor:agg.fn==="n"?"not-allowed":"pointer"}}>
+              <option value="">{agg.fn === "n" ? "— no column needed —" : "— column —"}</option>
               {numC.map(h=><option key={h} value={h}>{h}</option>)}
             </select>
             <select value={agg.fn} onChange={e=>updAgg(i,{fn:e.target.value})} style={inS}>
@@ -2054,7 +2066,7 @@ function GroupSummarizeExplorer({ rows, headers, info, onSaveDataset, usingPrevi
             </select>
             <input value={agg.nn}
               onChange={e=>setAggs(a=>a.map((x,j)=>j!==i?x:{...x,nn:e.target.value}))}
-              placeholder={`${agg.fn}_${agg.col||"col"}`}
+              placeholder={agg.fn === "n" ? "n" : `${agg.fn}_${agg.col||"col"}`}
               style={{...inS,width:"100%",boxSizing:"border-box"}}/>
             <button onClick={()=>rmAgg(i)} style={{
               background:"transparent",border:`1px solid ${C.border2}`,
@@ -2633,6 +2645,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           ]},
           { heading: "Plot Builder", items: [
             "Layer-based chart editor — stack as many layers as you need on one canvas",
+            "Data source: the dataset itself, or a Goodman-Bacon decomposition of a staggered DiD — one row per 2×2 comparison, with a template for the weight-vs-estimate scatter and its weighted-sum reference line",
             "Geoms: point, line, bar, histogram, density, smooth, boxplot, errorbar, ribbon, tile, h-line, v-line",
             "Aesthetic mappings (x, y, colour), stacking and jitter, palette presets, axis and label controls",
             "facet_wrap: split into one panel per level of a column, with a column-count control",
@@ -2701,7 +2714,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
-        {tab==="plot"&&<PlotBuilder headers={headers} rows={filteredRows} pid={pid} projectPid={histPid} datasetId={pid} datasetName={filename} scriptPreamble={plotScriptPreamble} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{marginTop:"0.25rem", height:"70vh", minHeight:520}}/>}
+        {tab==="plot"&&<ExplorePlotTab headers={headers} rows={filteredRows} panel={panel} numericCols={numericCols} pid={pid} histPid={histPid} filename={filename} scriptPreamble={plotScriptPreamble} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{height:"70vh", minHeight:520}}/>}
       </div>
       <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
     </div>

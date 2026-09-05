@@ -95,8 +95,14 @@ export function shapiroWilk(resid) {
     return p < 0.5 ? -(t - num / den) : (t - num / den);
   });
 
-  // Normalize coefficients
-  const c = Math.sqrt(u.reduce((s, v) => s + v * v, 0));
+  // Normalize coefficients.
+  // `u` holds only the lower half of the normal scores, but the coefficients must
+  // be normalized by the norm of the FULL score vector. The scores are
+  // antisymmetric (m_{n+1-i} = -m_i, with a zero middle score for odd n), so
+  // ||m||^2 = 2 * sum(u^2). Normalizing by the half-sum alone inflated every
+  // a_i by sqrt(2), hence W by 2 — which the Math.min(1, ...) below then clamped
+  // to exactly 1, making this test structurally incapable of rejecting.
+  const c = Math.sqrt(2 * u.reduce((s, v) => s + v * v, 0));
   const a = u.map(v => v / c);
 
   // W statistic
@@ -111,27 +117,32 @@ export function shapiroWilk(resid) {
   const ln1w = Math.log(1 - W);
   const lnn  = Math.log(n);
 
-  // Polynomial coefficients from Royston (1992) Table 1 (n ≥ 12)
-  let mu, sigma;
-  if (n >= 12) {
-    mu    = -1.2725 + 1.0521 * lnn;
-    sigma =  1.0308 - 0.26763 * lnn;
-  } else {
-    // Small sample approximation
-    mu    = -0.0006714 * n ** 3 + 0.025054 * n ** 2 - 0.6714 * n + 0.0;
-    sigma =  0.0020833 * n ** 3 - 0.076876 * n ** 2 + 1.0 * n - 0.1;
-    mu    = Math.max(-5, Math.min(0, mu));
-    sigma = Math.max(0.1, sigma);
-  }
+  // Royston's normalizing transform for the Shapiro-Francia statistic.
+  // The constants below were previously applied to ln(n) alone, dropping the
+  // ln(ln(n)) terms. That made sigma negative for any n >= 47 (1.0308/0.26758),
+  // so the Math.max(0.001, sigma) floor took over, z exploded to ~-7000, and
+  // pVal came out 1.0000 for every sample — the test could never reject.
+  const lnln = Math.log(lnn);
+  const mu    = -1.2725 + 1.0521 * (lnln - lnn);
+  const sigma =  1.0308 - 0.26758 * (lnln + 2 / lnn);
 
-  const z    = (ln1w - mu) / Math.max(0.001, sigma);
+  const sd   = Math.max(0.001, sigma);
+  const z    = (ln1w - mu) / sd;
   const pVal = Math.max(0, Math.min(1, 1 - normCDF(z)));
+
+  // 5% critical value, inverted from the same Royston transform used for pVal:
+  // reject when p < 0.05  <=>  z > z_0.95  <=>  W < 1 - exp(mu + z_0.95 * sigma).
+  // Derived from the transform rather than tabulated so the two can never disagree.
+  const Z95  = 1.6448536269514722;
+  const critRaw = 1 - Math.exp(mu + Z95 * sd);
+  const crit = Number.isFinite(critRaw) && critRaw > 0 && critRaw < 1 ? critRaw : null;
 
   return {
     test:   "Shapiro-Wilk",
     W:      +W.toFixed(6),
     pVal:   +pVal.toFixed(4),
     reject: pVal < 0.05,
+    crit:   crit != null ? +crit.toFixed(6) : null,
     n,
     note:   "H₀: residuals are normally distributed. Royston (1992) approximation.",
   };

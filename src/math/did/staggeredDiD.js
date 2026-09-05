@@ -167,7 +167,55 @@ function chiSqP(x, k) {
  *
  * @returns {{ aggregations, inference, ptestWald }}
  */
-export function aggregate({ cells2x2, groupProb, n, inference }) {
+/**
+ * Influence function of the ESTIMATED aggregation weights, times the ATTs.
+ *
+ * Every aggregation that averages cells with P(G=g) weights estimates those
+ * shares from the same sample as the ATT(g,t)s. Treating them as known
+ * constants understates the variance. R's did::compute.aggte carries this term
+ * as `wif()`; it scales with the SPREAD of the ATTs being averaged, so it is
+ * negligible under homogeneous effects and dominant under heterogeneous ones
+ * (on the LMU PS6 fixture it is the difference between SE 0.025 and 0.623).
+ *
+ * Returns the length-n vector (wif %*% att), ready to be added to the weighted
+ * average of the cell influence functions.
+ *
+ * @param {number[]} groups cohort g of each keeper cell, length K
+ * @param {number[]} pg     P(G=g) of each keeper cell, length K
+ * @param {number[]} att    ATT of each keeper cell, length K
+ * @param {Float64Array} unitG cohort of each unit, indexed like the IF arrays
+ * @param {number} n        number of units
+ */
+function weightIFTimesAtt(groups, pg, att, unitG, n) {
+  const out = new Float64Array(n);
+  const K = groups.length;
+  if (!K) return out;
+  const sp = pg.reduce((s, v) => s + v, 0);
+  if (!(sp > 0)) return out;
+  const sp2 = sp * sp;
+  for (let i = 0; i < n; i++) {
+    const Gi = unitG[i];
+    // sum_k (1{G_i = g_k} - pg_k) — shared by every denominator term
+    let sumDev = 0;
+    for (let k = 0; k < K; k++) sumDev += (Gi === groups[k] ? 1 : 0) - pg[k];
+    let acc = 0;
+    for (let k = 0; k < K; k++) {
+      const num = ((Gi === groups[k] ? 1 : 0) - pg[k]) / sp; // estimating the numerator
+      const den = sumDev * pg[k] / sp2;                      // estimating the denominator
+      acc += (num - den) * att[k];
+    }
+    out[i] = acc;
+  }
+  return out;
+}
+
+export function aggregate({ cells2x2, groupProb, n, inference, unitG }) {
+  // unitG is load-bearing for the weight-estimation term below. A missing one
+  // would silently reproduce the pre-fix (too small) standard errors, so fail
+  // loudly rather than default it away.
+  if (!unitG || unitG.length !== n) {
+    throw new Error("aggregate(): unitG (cohort per unit, length n) is required for weight-estimation inference.");
+  }
   const { method = "bootstrap", nBoot = 999, seed = 42 } = inference ?? {};
 
   const post = cells2x2.filter(c => !c.isPre && !c.isRef);
@@ -179,10 +227,14 @@ export function aggregate({ cells2x2, groupProb, n, inference }) {
   const simpleAtt = simpleWSum > 0
     ? post.reduce((s, c, k) => s + simpleWRaw[k] * c.att, 0) / simpleWSum : NaN;
   const simpleInf = new Float64Array(n);
-  if (simpleWSum > 0) post.forEach((c, k) => {
-    const w = simpleWRaw[k] / simpleWSum;
-    for (let i = 0; i < n; i++) simpleInf[i] += w * c.inf[i];
-  });
+  if (simpleWSum > 0) {
+    post.forEach((c, k) => {
+      const w = simpleWRaw[k] / simpleWSum;
+      for (let i = 0; i < n; i++) simpleInf[i] += w * c.inf[i];
+    });
+    const wifS = weightIFTimesAtt(post.map(c => c.g), simpleWRaw, post.map(c => c.att), unitG, n);
+    for (let i = 0; i < n; i++) simpleInf[i] += wifS[i];
+  }
 
   // ── Dynamic ──────────────────────────────────────────────────────────────────
   const allE = [...new Set(cells2x2.filter(c => !c.isRef).map(c => c.e))].sort((a, b) => a - b);
@@ -191,10 +243,15 @@ export function aggregate({ cells2x2, groupProb, n, inference }) {
     const wSum = cs.reduce((s, c) => s + (groupProb.get(c.g) ?? 0), 0);
     const att = wSum > 0 ? cs.reduce((s, c) => s + (groupProb.get(c.g) ?? 0) * c.att, 0) / wSum : NaN;
     const inf = new Float64Array(n);
-    if (wSum > 0) cs.forEach(c => {
-      const w = (groupProb.get(c.g) ?? 0) / wSum;
-      for (let i = 0; i < n; i++) inf[i] += w * c.inf[i];
-    });
+    if (wSum > 0) {
+      cs.forEach(c => {
+        const w = (groupProb.get(c.g) ?? 0) / wSum;
+        for (let i = 0; i < n; i++) inf[i] += w * c.inf[i];
+      });
+      const wifE = weightIFTimesAtt(
+        cs.map(c => c.g), cs.map(c => groupProb.get(c.g) ?? 0), cs.map(c => c.att), unitG, n);
+      for (let i = 0; i < n; i++) inf[i] += wifE[i];
+    }
     return { e, att, inf };
   });
   const postByE = byE.filter(x => x.e >= 0);
@@ -214,19 +271,39 @@ export function aggregate({ cells2x2, groupProb, n, inference }) {
   const grpWSum = byG.reduce((s, x) => s + (groupProb.get(x.g) ?? 0), 0);
   const grpOverall = grpWSum > 0
     ? byG.reduce((s, x) => s + (groupProb.get(x.g) ?? 0) * x.att, 0) / grpWSum : NaN;
+  // byG itself needs no correction: within a cohort the cells share one P(G=g),
+  // so the weights reduce to a plain mean over t (R passes wif=NULL there too).
   const grpInfOverall = new Float64Array(n);
-  if (grpWSum > 0) byG.forEach(x => {
-    const w = (groupProb.get(x.g) ?? 0) / grpWSum;
-    for (let i = 0; i < n; i++) grpInfOverall[i] += w * x.inf[i];
-  });
+  if (grpWSum > 0) {
+    byG.forEach(x => {
+      const w = (groupProb.get(x.g) ?? 0) / grpWSum;
+      for (let i = 0; i < n; i++) grpInfOverall[i] += w * x.inf[i];
+    });
+    const wifG = weightIFTimesAtt(
+      byG.map(x => x.g), byG.map(x => groupProb.get(x.g) ?? 0), byG.map(x => x.att), unitG, n);
+    for (let i = 0; i < n; i++) grpInfOverall[i] += wifG[i];
+  }
 
   // ── Calendar ─────────────────────────────────────────────────────────────────
   const tList = [...new Set(post.map(c => c.t))].sort((a, b) => a - b);
   const byT = tList.map(t => {
     const cs = post.filter(c => c.t === t);
-    const att = cs.length ? cs.reduce((s, c) => s + c.att, 0) / cs.length : NaN;
+    // R weights the cohorts already treated at t by P(G=g), not equally
+    // (compute.aggte's calendar branch). The two coincide only when those
+    // cohorts happen to be the same size.
+    const wSum = cs.reduce((s, c) => s + (groupProb.get(c.g) ?? 0), 0);
+    const att = wSum > 0
+      ? cs.reduce((s, c) => s + (groupProb.get(c.g) ?? 0) * c.att, 0) / wSum : NaN;
     const inf = new Float64Array(n);
-    cs.forEach(c => { for (let i = 0; i < n; i++) inf[i] += c.inf[i] / cs.length; });
+    if (wSum > 0) {
+      cs.forEach(c => {
+        const w = (groupProb.get(c.g) ?? 0) / wSum;
+        for (let i = 0; i < n; i++) inf[i] += w * c.inf[i];
+      });
+      const wifT = weightIFTimesAtt(
+        cs.map(c => c.g), cs.map(c => groupProb.get(c.g) ?? 0), cs.map(c => c.att), unitG, n);
+      for (let i = 0; i < n; i++) inf[i] += wifT[i];
+    }
     return { t, att, inf };
   });
   const calOverall = byT.length ? byT.reduce((s, x) => s + x.att, 0) / byT.length : NaN;
