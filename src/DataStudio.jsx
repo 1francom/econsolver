@@ -214,13 +214,40 @@ function detectDelimiter(text) {
 // ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
 export async function parseFileForPrimary(file) { return parseFile(file); }
 
+// Office writes a companion "owner file" next to any workbook it has open —
+// `~$book.xlsx` — holding the editing user's name, not a workbook. It is not a
+// ZIP, so every reader rejects it, Excel included. Dragging a folder in picks
+// them up silently, and reporting "not a valid Excel file — is the file
+// corrupted?" against one reads as data loss when nothing is wrong.
+export function isOfficeLockFile(name) {
+  return /^~\$/.test(String(name ?? "").replace(/^.*[\\\/]/, ""));
+}
+
+// The .shp/.dta/.rds/.RData parsers are code-split behind dynamic import(), so a
+// browser that cannot fetch one of those chunks fails INSIDE the parse call and
+// the message surfaces as "Parse error: <file>". That blames the data for a
+// problem the data has nothing to do with — the bytes were never read. It shows
+// up in dev after the Vite server restarts (the open page still holds the old
+// module URLs) and in production behind a stale service worker or a failed
+// deploy. Say which of the two it is.
+export function describeLoadError(err, { bare = false } = {}) {
+  const msg = err?.message || String(err ?? "unknown");
+  if (/dynamically imported module|Importing a module script failed|Failed to fetch dynamically/i.test(msg)) {
+    return "Could not load the parser for this format — the app failed to fetch its own code, " +
+           "so the file itself was never read and is fine. Reload the page and try again " +
+           `(in local dev this happens when the server restarted under an open tab). [${msg}]`;
+  }
+  // `bare` drops the prefix for callers that already say the file failed.
+  return bare ? msg : "Parse error: " + msg;
+}
+
 // Multi-file entrypoint. Groups shapefile companions (.shp/.dbf/.prj/.shx/.cpg)
 // by basename so a single shapefile loaded as separate files (instead of a .zip)
 // produces one dataset with its CRS detected, just like R sf::st_read() would.
 // All other files are parsed independently — one dataset each.
 // Returns: [{ filename, parsed?, error? }]
 export async function parseFiles(fileList) {
-  const files = Array.from(fileList || []);
+  const files = Array.from(fileList || []).filter(f => !isOfficeLockFile(f?.name));
   const groups = groupShapefileFiles(files);
   const out = [];
   for (const g of groups) {
@@ -234,7 +261,7 @@ export async function parseFiles(fileList) {
       if (parsed && parsed.rows?.length) out.push({ filename: g.filename, parsed });
       else out.push({ filename: g.filename, error: "No rows parsed." });
     } catch (e) {
-      out.push({ filename: g.filename, error: e?.message || String(e) });
+      out.push({ filename: g.filename, error: describeLoadError(e, { bare: true }) });
     }
   }
   return out;
@@ -789,6 +816,14 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
   }, [dispatch, appendLog]);
 
   const handleLoadFile = useCallback(async (file) => {
+    if (isOfficeLockFile(file?.name)) {
+      setLoadErr(
+        `"${file.name}" is an Office lock file, not a workbook — Excel writes one beside ` +
+        `any file it currently has open, and it holds the editing user's name rather than data. ` +
+        `Close the workbook or load the file without the "~$" prefix.`
+      );
+      return;
+    }
     setLoading(true);
     setLoadErr("");
     try {
@@ -819,7 +854,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       }
       addParsedDataset(file.name, parsed);
     } catch (e) {
-      setLoadErr("Parse error: " + (e?.message || "unknown"));
+      setLoadErr(describeLoadError(e));
       throw e;
     } finally {
       setLoading(false);
@@ -829,8 +864,18 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
   // Multi-file path — groups shapefile siblings into single datasets, loads
   // all valid entries, and reports per-file errors without throwing.
   const handleLoadFiles = useCallback(async (fileList) => {
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
+    const all   = Array.from(fileList || []);
+    const locks = all.filter(f => isOfficeLockFile(f?.name));
+    const files = all.filter(f => !isOfficeLockFile(f?.name));
+    // Dropping a folder in picks these up silently; say they were skipped
+    // rather than either failing on them or dropping them without a word.
+    const lockNote = locks.length
+      ? ` Skipped ${locks.length} Office lock file(s) (${locks.map(f => f.name).join(", ")}) — those are not workbooks.`
+      : "";
+    if (!files.length) {
+      setLoadErr(locks.length ? lockNote.trim() : "");
+      return;
+    }
     if (files.length === 1) { await handleLoadFile(files[0]); return; }
     setLoading(true);
     setLoadErr("");
@@ -840,12 +885,12 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       const errors = results.filter(r => r.error);
       for (const r of ok) addParsedDataset(r.filename, r.parsed);
       if (errors.length) {
-        setLoadErr(`${errors.length} file(s) failed: ` + errors.map(e => `${e.filename} (${e.error})`).join("; "));
-      } else if (ok.length > 1) {
-        setLoadErr(`Loaded ${ok.length} datasets.`);
+        setLoadErr(`${errors.length} file(s) failed: ` + errors.map(e => `${e.filename} (${e.error})`).join("; ") + lockNote);
+      } else if (ok.length > 1 || lockNote) {
+        setLoadErr(`Loaded ${ok.length} dataset(s).` + lockNote);
       }
     } catch (e) {
-      setLoadErr("Parse error: " + (e?.message || "unknown"));
+      setLoadErr(describeLoadError(e));
     } finally {
       setLoading(false);
     }
