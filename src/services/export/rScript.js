@@ -726,7 +726,10 @@ function buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTe
   return parts.join(" + ") || "1";
 }
 
-// fixest `vcov=` argument for a given SE type. Mirrors the SE the user selected
+// fixest `vcov=` argument for a given SE type. Cluster-formula cases carry
+// kw:"cluster" so they emit `cluster = ~g` instead of `vcov = ~g`. fixest
+// treats the two identically — verified on a real fixture, SEs byte-identical —
+// but `cluster =` is the spelling applied work uses and reads unambiguously. Mirrors the SE the user selected
 // in Litux's Inference Options so the exported script reports the SAME standard
 // errors as the platform (was previously hardcoded to "HC1"). Returns an object
 // { arg, note, hcExact } where:
@@ -750,12 +753,12 @@ function rVcov(seType, { clusterVar, clusterVar2 } = {}) {
       note: `# NOTE: fixest's vcov="hetero" is HC1 — it has no native HC3. The feols\n# fit below is for point estimates; the exact HC3 SE come from the refit below.`,
     };
     case "clustered": return clusterVar
-      ? { arg: `~${rName(clusterVar)}`, note: null, hcExact: null }
+      ? { arg: `~${rName(clusterVar)}`, kw: "cluster", note: null, hcExact: null }
       : { arg: `"hetero"`, hcExact: null,
           note: `# WARNING: clustered SE requested but no cluster variable was set —\n# falling back to heteroskedasticity-robust (HC1) SE.` };
     case "cr2":
     case "cr3":       return clusterVar
-      ? { arg: `~${rName(clusterVar)}`, hcExact: null,
+      ? { arg: `~${rName(clusterVar)}`, kw: "cluster", hcExact: null,
           crExact: (seType || "").toUpperCase(), crCluster: clusterVar,
           note: `# NOTE: fixest has no CR2/CR3 — vcov=~cluster is CR1. The feols fit below is
 # for point estimates; the exact SE come from the clubSandwich refit.` }
@@ -763,8 +766,8 @@ function rVcov(seType, { clusterVar, clusterVar2 } = {}) {
           note: `# WARNING: ${(seType || "").toUpperCase()} SE requested but no cluster variable was set —
 # falling back to heteroskedasticity-robust (HC1) SE.` };
     case "twoway":    return (clusterVar && clusterVar2)
-      ? { arg: `~${rName(clusterVar)} + ${rName(clusterVar2)}`, note: null, hcExact: null }
-      : { arg: clusterVar ? `~${rName(clusterVar)}` : `"hetero"`, hcExact: null,
+      ? { arg: `~${rName(clusterVar)} + ${rName(clusterVar2)}`, kw: "cluster", note: null, hcExact: null }
+      : { arg: clusterVar ? `~${rName(clusterVar)}` : `"hetero"`, kw: clusterVar ? "cluster" : "vcov", hcExact: null,
           note: `# WARNING: two-way clustered SE requested but ${clusterVar ? "the second" : "no"} cluster\n# variable was set — falling back to ${clusterVar ? "one-way clustering" : "HC1"}.` };
     case "hac":       return {
       arg: `"NW"`, hcExact: null,
@@ -955,7 +958,7 @@ function transpileModel(model) {
         `# ── OLS ──────────────────────────────────────────────────────────────`,
         ...(noIntercept ? [`# Regression through the origin — no intercept estimated.`] : []),
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rExactSELines(vc, `${y} ~ ${xStr}`),
         ``,
         `# Diagnostics`,
@@ -972,7 +975,7 @@ function transpileModel(model) {
           `# ── WLS ──────────────────────────────────────────────────────────────`,
           `# WARNING: no weight column supplied; falling back to OLS`,
           ...(vc.note ? [vc.note] : []),
-          `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
+          `fit <- fixest::feols(${y} ~ ${xStr}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
           ...rExactSELines(vc, `${y} ~ ${xStr}`),
           `fixest::etable(fit)`,
         ].join("\n");
@@ -981,7 +984,7 @@ function transpileModel(model) {
         `# ── WLS (weighted least squares) ─────────────────────────────────────`,
         `# Weights: ${w}`,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rExactSELines(vc, `${y} ~ ${xStr}`, `df$${w}`),
         ``,
         `# Diagnostics`,
@@ -997,7 +1000,7 @@ function transpileModel(model) {
       return [
         `# ── Fixed Effects (within estimator) ────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
-        `fit_fe <- fixest::feols(${y} ~ ${xStr} | ${feClauseFE}, data = df, vcov = ${vc.arg})`,
+        `fit_fe <- fixest::feols(${y} ~ ${xStr} | ${feClauseFE}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rPanelHC23Lines(vc.hcExact, `${y} ~ ${xStr}`, feColsFE),
         `fit_fd <- plm::plm(${y} ~ ${xStr}, data = df,`,
         `  index = c(${rStr(entityCol)}, ${rStr(timeCol)}),`,
@@ -1035,7 +1038,7 @@ function transpileModel(model) {
       return [
         `# ── 2SLS / IV ────────────────────────────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${ctrls || "1"} | ${endog} ~ ${iv_rhs}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${ctrls || "1"} | ${endog} ~ ${iv_rhs}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         // fixest has no HC2/HC3; AER::ivreg does support sandwich::vcovHC exactly.
         ...(vc.hcExact ? [
           ``,
@@ -1060,7 +1063,7 @@ function transpileModel(model) {
         `# ── 2×2 Difference-in-Differences ───────────────────────────────────`,
         `# DiD interaction term: post × treat`,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${rhs}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${rhs}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rExactSELines(vc, `${y} ~ ${rhs}`),
         ``,
         `fixest::etable(fit)`,
@@ -1083,7 +1086,7 @@ function transpileModel(model) {
         `# ── Two-Way Fixed Effects DiD ────────────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${treat}${ctrls} | ${feClauseTWFE},`,
-        `  data = df, vcov = ${vc.arg})`,
+        `  data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rPanelHC23Lines(vc.hcExact, `${y} ~ ${treat}${ctrls}`, feColsTWFE),
         ``,
         `fixest::etable(fit)`,
@@ -1161,7 +1164,7 @@ function transpileModel(model) {
         `# ── Panel LSDV (Least Squares Dummy Variables) ───────────────────────`,
         `# LSDV is numerically equivalent to within (FE) estimation`,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${xStr} | ${feClauseLSDV}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${xStr} | ${feClauseLSDV}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rPanelHC23Lines(vc.hcExact, `${y} ~ ${xStr}`, feColsLSDV),
         ``,
         `fixest::etable(fit)`,
@@ -1245,7 +1248,7 @@ function transpileModel(model) {
         `# Estimate — ref = -1 (last pre-period)`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ i(rel_time, ref = -1)${ctrlStr} | ${feClauseES},`,
-        `  data = df, vcov = ${vc.arg})`,
+        `  data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ``,
         `fixest::iplot(fit, main = "Event Study")   # coefficient plot with CI`,
         `fixest::etable(fit)`,
@@ -1402,7 +1405,7 @@ function transpileModel(model) {
         `library(fixest)`,
         ``,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::fepois(${y} ~ ${cov} | ${feStr}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::fepois(${y} ~ ${cov} | ${feStr}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ``,
         `fixest::etable(fit)`,
         `cat("Incidence Rate Ratios:\\n")`,

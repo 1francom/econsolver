@@ -731,18 +731,39 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
 
   // statsmodels `.fit(...)` covariance argument matching the SE the user selected
   // in Litux (was hardcoded "HC3"). statsmodels supports HC1/HC2/HC3 natively.
+  // statsmodels drops incomplete rows itself, so a `groups` taken from the FULL
+  // column is longer than the fitted sample and raises
+  //   ValueError: The weights and list don't have the same length
+  // on any dataset with a single NA. The groups must be indexed by the rows the
+  // model actually used, which is only knowable from the model OBJECT — hence the
+  // build-then-fit split below, emitted ONLY for clustered cases so every other
+  // SE type keeps its original one-line form byte-for-byte.
+  const CLUSTER_MARK = "@@CLUSTER@@";
+  const TWOWAY_MARK  = "@@TWOWAY@@";
+  const fitLines = (target, ctor, frame) => {
+    const cov = smCov();
+    if (cov !== CLUSTER_MARK && cov !== TWOWAY_MARK) return [`${target} = ${ctor}.fit(${cov})`];
+    const sel = cov === TWOWAY_MARK
+      ? `[["${clusterVar}", "${clusterVar2}"]]`
+      : `"${clusterVar}"`;
+    return [
+      `_m = ${ctor}`,
+      `${target} = _m.fit(cov_type="cluster", cov_kwds={"groups": ${frame}.loc[_m.data.row_labels, ${sel}]})`,
+    ];
+  };
+
   const smCov = () => {
     switch ((seType || "classical").toLowerCase()) {
       case "classical": return `cov_type="nonrobust"`;
       case "hc1":       return `cov_type="HC1"`;
       case "hc2":       return `cov_type="HC2"`;
       case "hc3":       return `cov_type="HC3"`;
-      case "clustered": return clusterVar ? `cov_type="cluster", cov_kwds={"groups": df["${clusterVar}"]}` : `cov_type="HC1"`;
+      case "clustered": return clusterVar ? CLUSTER_MARK : `cov_type="HC1"`;
       // statsmodels has no CR2/CR3 — its "cluster" is CR1. Emitting CR1 silently
       // would misreport which estimator produced the SE, so the note below says so.
       case "cr2":
-      case "cr3":       return clusterVar ? `cov_type="cluster", cov_kwds={"groups": df["${clusterVar}"]}` : `cov_type="HC1"`;
-      case "twoway":    return (clusterVar && clusterVar2) ? `cov_type="cluster", cov_kwds={"groups": df[["${clusterVar}", "${clusterVar2}"]]}` : `cov_type="HC1"`;
+      case "cr3":       return clusterVar ? CLUSTER_MARK : `cov_type="HC1"`;
+      case "twoway":    return (clusterVar && clusterVar2) ? TWOWAY_MARK : `cov_type="HC1"`;
       // Litux's Newey-West default bandwidth is L = floor(4*(n/100)^(2/9))
       // (see core/inference/robustSE.js). maxlags was hardcoded to 1, which is
       // that formula's answer only for tiny samples — reproduce it instead.
@@ -824,7 +845,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       // patsy spells "no intercept" as a trailing `- 1`.
       const formula = `"${yVar} ~ ${pyFormStr}${noIntercept ? " - 1" : ""}"`;
       if (noIntercept) lines.push(`# Regression through the origin — no intercept estimated.`);
-      lines.push(`model = smf.ols(${formula}, data=df).fit(${smCov()})`);
+      lines.push(...fitLines("model", `smf.ols(${formula}, data=df)`, "df"));
       lines.push(`print(model.summary())`);
       break;
     }
@@ -833,10 +854,10 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       const formula = `"${yVar} ~ ${pyFormStr}"`;
       if (!weightCol) {
         lines.push(`# WARNING: no weight column supplied; falling back to OLS`);
-        lines.push(`model = smf.ols(${formula}, data=df).fit(${smCov()})`);
+        lines.push(...fitLines("model", `smf.ols(${formula}, data=df)`, "df"));
       } else {
         lines.push(`# Weighted Least Squares (weights: ${weightCol})`);
-        lines.push(`model = smf.wls(${formula}, data=df, weights=df["${weightCol}"]).fit(${smCov()})`);
+        lines.push(...fitLines("model", `smf.wls(${formula}, data=df, weights=df["${weightCol}"])`, "df"));
       }
       lines.push(`print(model.summary())`);
       break;
@@ -861,7 +882,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         const dummyTerms = feColsFE.map(c => `C(${feTerm(c, "python")})`).join(" + ");
         lines.push(`# drop the global intercept: multiple C(col) absorptions already span the`);
         lines.push(`# level space between them, so keeping a separate intercept would double-count`);
-        lines.push(`model = smf.ols("${yVar} ~ ${pyFormStr} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
+        lines.push(...fitLines("model", `smf.ols("${yVar} ~ ${pyFormStr} + ${dummyTerms} - 1", data=df)`, "df"));
         lines.push(`print(model.summary())`);
       }
       break;
@@ -906,7 +927,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       const xExtra = wVars.length ? ` + ${wVars.map(fmtPy).join(" + ")}` : "";
       lines.push(`# Difference-in-Differences (2×2)`);
       lines.push(`df["did"] = df["${postVar}"] * df["${treatVar}"]`);
-      lines.push(`model = smf.ols("${yVar} ~ ${postVar} + ${treatVar} + did${xExtra}", data=df).fit(${smCov()})`);
+      lines.push(...fitLines("model", `smf.ols("${yVar} ~ ${postVar} + ${treatVar} + did${xExtra}", data=df)`, "df"));
       lines.push(`print(model.summary())`);
       lines.push(`print(f"ATT = {model.params['did']:.4f}  SE = {model.bse['did']:.4f}  p = {model.pvalues['did']:.4f}")`);
       break;
@@ -931,7 +952,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         lines.push(...pyFEInteractionSetup(feColsTWFE));
         const dummyTerms = feColsTWFE.map(c => `C(${feTerm(c, "python")})`).join(" + ");
         const extraTerms = wVars.length ? ` + ${wVars.join(" + ")}` : "";
-        lines.push(`model = smf.ols("${yVar} ~ ${treatVar}${extraTerms} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
+        lines.push(...fitLines("model", `smf.ols("${yVar} ~ ${treatVar}${extraTerms} + ${dummyTerms} - 1", data=df)`, "df"));
         lines.push(`print(model.summary())`);
       }
       break;
@@ -963,7 +984,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       } else {
         lines.push(`    df_rdd["_w"] = 1.0`);
       }
-      lines.push(`    model = smf.wls("${yVar} ~ above + run_c + above:run_c${extraCols}", data=df_rdd, weights=df_rdd["_w"]).fit(${smCov()})`);
+      lines.push(...fitLines("model", `smf.wls("${yVar} ~ above + run_c + above:run_c${extraCols}", data=df_rdd, weights=df_rdd["_w"])`, "df_rdd").map(l => `    ${l}`));
       lines.push(`    print(model.summary())`);
       lines.push(`    print(f"LATE = {model.params['above']:.4f}  SE = {model.bse['above']:.4f}  p = {model.pvalues['above']:.4f}")`);
       break;
@@ -1004,7 +1025,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         const dummyTerms = feColsLSDV.map(c => `C(${c})`).join(" + ");
         lines.push(`# drop the global intercept: multiple C(col) absorptions already span the`);
         lines.push(`# level space between them, so keeping a separate intercept would double-count`);
-        lines.push(`model = smf.ols("${yVar} ~ ${pyFormStr} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
+        lines.push(...fitLines("model", `smf.ols("${yVar} ~ ${pyFormStr} + ${dummyTerms} - 1", data=df)`, "df"));
         lines.push(`print(model.summary())`);
         lines.push(``);
         lines.push(`# Recover entity fixed effects (LSDV alpha_i) — explicit dummy coefficients for "${entityCol}"`);
@@ -1046,11 +1067,11 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         lines.push(`    df_bw["_w"] = 1.0`);
       }
       lines.push(`    # First stage: Z -> D`);
-      lines.push(`    fs = smf.wls("${dVar} ~ _Z + _run_c + _Z:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(${smCov()})`);
+      lines.push(...fitLines("fs", `smf.wls("${dVar} ~ _Z + _run_c + _Z:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"])`, "df_bw").map(l => `    ${l}`));
       lines.push(`    print(f"First-stage F-stat: {fs.fvalue:.2f}  (p={fs.f_pvalue:.4f})")`);
       lines.push(`    # Second stage: use D_hat as instrument`);
       lines.push(`    df_bw["_D_hat"] = fs.fittedvalues`);
-      lines.push(`    ss = smf.wls("${yVar} ~ _D_hat + _run_c + _D_hat:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"]).fit(${smCov()})`);
+      lines.push(...fitLines("ss", `smf.wls("${yVar} ~ _D_hat + _run_c + _D_hat:_run_c${extraCols}", data=df_bw, weights=df_bw["_w"])`, "df_bw").map(l => `    ${l}`));
       lines.push(`    print(ss.summary())`);
       lines.push(`    print(f"LATE = {ss.params['_D_hat']:.4f}  SE = {ss.bse['_D_hat']:.4f}  p = {ss.pvalues['_D_hat']:.4f}")`);
       break;
@@ -1077,7 +1098,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         lines.push(`df_rdd["_w"] = 1.0`);
       }
       lines.push(`df_rdd["_above"] = (df_rdd["_signed_dist"] >= 0).astype(int)`);
-      lines.push(`model = smf.wls("${yVar} ~ _above + _signed_dist + _above:_signed_dist${extraCols}", data=df_rdd, weights=df_rdd["_w"]).fit(${smCov()})`);
+      lines.push(...fitLines("model", `smf.wls("${yVar} ~ _above + _signed_dist + _above:_signed_dist${extraCols}", data=df_rdd, weights=df_rdd["_w"])`, "df_rdd"));
       lines.push(`print(model.summary())`);
       lines.push(`print(f"LATE at boundary = {model.params['_above']:.4f}  SE = {model.bse['_above']:.4f}  p = {model.pvalues['_above']:.4f}")`);
       break;
@@ -1117,7 +1138,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         const extraTerms = wVars.length ? ` + ${wVars.join(" + ")}` : "";
         lines.push(`# drop the global intercept: multiple C(col) absorptions already span the`);
         lines.push(`# level space between them, so keeping a separate intercept would double-count`);
-        lines.push(`model = smf.ols(f"${yVar} ~ {rt_terms}${extraTerms} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
+        lines.push(...fitLines("model", `smf.ols(f"${yVar} ~ {rt_terms}${extraTerms} + ${dummyTerms} - 1", data=df)`, "df"));
         lines.push(`print(model.summary())`);
       }
       break;
@@ -1229,8 +1250,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
     case "Poisson": {
       const formula = `"${yVar} ~ ${pyFormStr}"`;
       lines.push(`# Poisson regression (count GLM, log link)`);
-      lines.push(`model = smf.glm(${formula},`);
-      lines.push(`    data=df, family=sm.families.Poisson()).fit(${smCov()})`);
+      lines.push(...fitLines("model", `smf.glm(${formula}, data=df, family=sm.families.Poisson())`, "df"));
       lines.push(`print(model.summary())`);
       lines.push(`# Incidence Rate Ratios (exp(beta))`);
       lines.push(`print("IRR:")`);
@@ -1255,8 +1275,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       lines.push(`except ImportError:`);
       lines.push(`    # Option 2 — statsmodels GLM with FE dummies (slow for large N)`);
       lines.push(`    import statsmodels.formula.api as smf`);
-      lines.push(`    model = smf.glm("${yVar} ~ ${[...xVars, ...fes.map(f => `C(${f})`)].join(" + ") || "1"}",`);
-      lines.push(`        data=df, family=sm.families.Poisson()).fit(${smCov()})`);
+      lines.push(...fitLines("model", `smf.glm("${yVar} ~ ${[...xVars, ...fes.map(f => `C(${f})`)].join(" + ") || "1"}", data=df, family=sm.families.Poisson())`, "df").map(l => `    ${l}`));
       lines.push(`    print(model.summary())`);
       lines.push(`    import numpy as np`);
       lines.push(`    print("IRR:", np.exp(model.params))`);
