@@ -9,6 +9,7 @@
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
 import { opInfix } from "../../pipeline/predicate.js";
+import { feTerm } from "./feInteractionTerm.js";
 import { toStata, jsExprToStata, stataRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildStataLoadLine } from "./loadLine.js";
 
@@ -916,7 +917,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         lines.push(`* NOTE: clusters on the first FE column (entityCol) by convention, matching the`);
         lines.push(`* existing TWFE reghdfe export — does not yet thread the model's actual seType/`);
         lines.push(`* clusterVar selection through this fallback path.`);
-        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsFE.join(" ")})${pOptHdfe}`);
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsFE.map(c => feTerm(c, "stata")).join(" ")})${pOptHdfe}`);
         lines.push(`estimates store m_fe`);
       }
       break;
@@ -963,7 +964,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
       lines.push(`* Two-Way Fixed Effects DiD`);
       lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`reghdfe ${yVar} ${treatVar}${extra}, absorb(${feColsTWFE.join(" ")})${pOptHdfe}`);
+      lines.push(`reghdfe ${yVar} ${treatVar}${extra}, absorb(${feColsTWFE.map(c => feTerm(c, "stata")).join(" ")})${pOptHdfe}`);
       lines.push(`* If reghdfe not installed: ssc install reghdfe`);
       lines.push(`estimates store m_twfe`);
       break;

@@ -283,6 +283,8 @@ function wrapFE(eng, spec) {
   return {
     ...base("FE", spec),
     fixef:     eng.fixef ?? null,   // recovered FE levels, for ExtractPanel
+    // Regressors the FE absorbed, dropped from the fit (Stata's "(omitted)").
+    absorbedRegressors: eng.absorbedRegressors ?? [],
     varNames:  eng.varNames ?? [],
     beta:      clean(eng.beta),
     se:        clean(eng.se),

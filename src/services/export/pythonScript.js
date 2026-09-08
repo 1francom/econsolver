@@ -10,6 +10,7 @@
 //     postVar, treatVar, runningVar, cutoff, bandwidth, kernel }
 
 import { opInfix } from "../../pipeline/predicate.js";
+import { feTerm, pyFEInteractionSetup } from "./feInteractionTerm.js";
 import { toPython, jsExprToPython, pyRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildPyLoadLine } from "./loadLine.js";
 
@@ -856,7 +857,8 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);
         lines.push(`# For a 3rd+ FE dimension, absorb via one-hot dummies through statsmodels instead:`);
         lines.push(`import statsmodels.formula.api as smf`);
-        const dummyTerms = feColsFE.map(c => `C(${c})`).join(" + ");
+        lines.push(...pyFEInteractionSetup(feColsFE));
+        const dummyTerms = feColsFE.map(c => `C(${feTerm(c, "python")})`).join(" + ");
         lines.push(`# drop the global intercept: multiple C(col) absorptions already span the`);
         lines.push(`# level space between them, so keeping a separate intercept would double-count`);
         lines.push(`model = smf.ols("${yVar} ~ ${pyFormStr} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
@@ -926,7 +928,8 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);
         lines.push(`# For a 3rd+ FE dimension, absorb via one-hot dummies through statsmodels instead:`);
         lines.push(`import statsmodels.formula.api as smf`);
-        const dummyTerms = feColsTWFE.map(c => `C(${c})`).join(" + ");
+        lines.push(...pyFEInteractionSetup(feColsTWFE));
+        const dummyTerms = feColsTWFE.map(c => `C(${feTerm(c, "python")})`).join(" + ");
         const extraTerms = wVars.length ? ` + ${wVars.join(" + ")}` : "";
         lines.push(`model = smf.ols("${yVar} ~ ${treatVar}${extraTerms} + ${dummyTerms} - 1", data=df).fit(${smCov()})`);
         lines.push(`print(model.summary())`);

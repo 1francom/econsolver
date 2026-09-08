@@ -34,6 +34,7 @@
 //   }
 
 import { opInfix } from "../../pipeline/predicate.js";
+import { feTerm } from "./feInteractionTerm.js";
 import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 import { stepLabel } from "../../pipeline/registry.js";
 import { toR, jsExprToR, rRightLoad } from "../../pipeline/stepTranslators.js";
@@ -992,7 +993,7 @@ function transpileModel(model) {
       // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity-only.
       // Fallback preserves the pre-existing entity-only default byte-for-byte.
       const feColsFE = feCols?.length ? feCols : [entityCol].filter(Boolean);
-      const feClauseFE = feColsFE.map(rName).join(" + ");
+      const feClauseFE = feColsFE.map(c => feTerm(c, "r", rName)).join(" + ");
       return [
         `# ── Fixed Effects (within estimator) ────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
@@ -1077,7 +1078,7 @@ function transpileModel(model) {
       // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
       // Fallback preserves the pre-existing entity+time default byte-for-byte.
       const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
-      const feClauseTWFE = feColsTWFE.map(rName).join(" + ");
+      const feClauseTWFE = feColsTWFE.map(c => feTerm(c, "r", rName)).join(" + ");
       return [
         `# ── Two-Way Fixed Effects DiD ────────────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
