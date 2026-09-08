@@ -100,16 +100,19 @@ function parseCSV(text, delimiter = ",") {
 
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
 // Excel parser — uses the installed xlsx npm package (bundled by Vite).
-async function parseExcel(file) {
-  const buf = await file.arrayBuffer();
-  const wb  = XLSX.read(buf, { type: "array", cellDates: true });
-  const sheetName = wb.SheetNames[0];
-  const ws  = wb.Sheets[sheetName];
-  if (!ws) throw new Error("Excel file has no sheets.");
-  const data = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
-  if (!data.length) throw new Error("Excel sheet is empty — no rows found.");
+//
+// A workbook is a COLLECTION of sheets, so this returns every one of them, the
+// same shape parseRData uses for an R workspace: { tables, skipped }. It used to
+// read wb.SheetNames[0] and drop the rest without a word, which silently handed
+// back whichever sheet happened to sit in the first tab — a legend, a per-year
+// slice — while the real table sat further along. Nothing in the UI hinted that
+// more existed, so the dataset looked complete: right column names, plausible
+// rows, wrong sheet.
+//
+// Returns: { tables: [{ name, headers, rows }], skipped: [{ name, reason }] }
+const EXCEL_NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
 
-  const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
+function excelRows(data) {
   const headers = Object.keys(data[0]);
   const rows = data.map(r => {
     const row = {};
@@ -118,13 +121,45 @@ async function parseExcel(file) {
       if (v === null || v === undefined) { row[h] = null; return; }
       if (typeof v === "number") { row[h] = v; return; }
       const t = String(v).trim();
-      if (!t || NA_PAT.test(t)) { row[h] = null; return; }
+      if (!t || EXCEL_NA_PAT.test(t)) { row[h] = null; return; }
       const n = Number(t.replace(/,(?=\d{3})/g, ""));
       row[h] = isNaN(n) ? t : n;
     });
     return row;
   });
-  return { headers, rows, _sheetName: sheetName };
+  return { headers, rows };
+}
+
+async function parseExcel(file) {
+  const buf = await file.arrayBuffer();
+  const wb  = XLSX.read(buf, { type: "array", cellDates: true });
+  if (!wb.SheetNames?.length) throw new Error("Excel file has no sheets.");
+
+  const tables = [];
+  const skipped = [];
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    if (!ws) { skipped.push({ name, reason: "sheet missing from workbook" }); continue; }
+    let data;
+    try {
+      data = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
+    } catch (e) {
+      skipped.push({ name, reason: e?.message || "could not be read" });
+      continue;
+    }
+    // Empty and header-only sheets are extremely common in real workbooks
+    // (blank tabs, notes). Report them rather than failing the whole file.
+    if (!data.length) { skipped.push({ name, reason: "no rows" }); continue; }
+    const { headers, rows } = excelRows(data);
+    if (!headers.length) { skipped.push({ name, reason: "no columns" }); continue; }
+    tables.push({ name, headers, rows });
+  }
+
+  if (!tables.length) {
+    const detail = skipped.map(s => `${s.name} (${s.reason})`).join(", ");
+    throw new Error(`No readable sheet in this workbook${detail ? ` — ${detail}` : ""}.`);
+  }
+  return { tables, skipped };
 }
 
 // ─── JSON PARSER ──────────────────────────────────────────────────────────────
@@ -253,7 +288,7 @@ export async function parseFiles(fileList) {
   for (const g of groups) {
     try {
       const parsed = await g.parse();
-      // .RData workspaces expand into one entry per data.frame they contain.
+      // .RData workspaces and multi-sheet workbooks expand into one entry each.
       if (parsed?._multi?.length) {
         for (const m of parsed._multi) out.push({ filename: m.filename, parsed: m.parsed });
         continue;
@@ -444,8 +479,26 @@ async function parseFile(file) {
     return withLoadOpts(parseCSV(text, "\t"), { format: "tsv", delimiter: "\t", encoding: "utf-8" });
   }
   if (["xlsx", "xls"].includes(ext)) {
-    const parsed = await parseExcel(file);
-    return withLoadOpts(parsed, { format: "excel", sheetName: parsed?._sheetName ?? null });
+    // Like .RData, a workbook can hold several tables, so it can yield MORE THAN
+    // ONE dataset. Each sheet keeps its own `sheetName` in loadOpts so exports
+    // emit read_excel(path, sheet = "agg") rather than defaulting to the first.
+    const { tables, skipped } = await parseExcel(file);
+    const multi = tables.map(t => withLoadOpts(
+      { headers: t.headers, rows: t.rows },
+      { format: "excel", sheetName: t.name, sourceFile: file.name },
+    ));
+    // A single-sheet workbook behaves exactly as before — no envelope, no
+    // renaming — so the common case is untouched.
+    if (multi.length === 1) return multi[0];
+    // toDfVar() strips the last dot-suffix, so the composite name must NOT carry
+    // ".xlsx": "fracht.xlsx - agg" would reduce to df_fracht for every sheet.
+    const base = file.name.replace(/\.[^.]+$/, "");
+    return {
+      _multi: multi.map((p, i) => ({ filename: `${base}_${tables[i].name}`, parsed: p })),
+      _skipped: skipped,
+      _multiLabel: "sheets",
+      headers: multi[0].headers, rows: multi[0].rows,
+    };
   }
   if (ext === "json") {
     return withLoadOpts(await parseJSON(file), { format: "json", encoding: "utf-8" });
@@ -831,14 +884,20 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       if (!parsed || !parsed.rows.length) {
         throw new Error("Could not parse file — no rows found. Check the file format.");
       }
-      // .RData workspace holding several data.frames → one dataset per object,
-      // named after the R object rather than the file.
+      // A workspace (.RData) or a workbook (.xlsx) holding several tables → one
+      // dataset per object/sheet, named for it rather than for the file alone.
       if (parsed._multi?.length) {
         for (const m of parsed._multi) addParsedDataset(m.filename, m.parsed);
         const skipped = parsed._skipped ?? [];
+        // Excel says "sheets", an R workspace says "data.frames" — the envelope
+        // carries its own word so this message does not lie about either.
+        const unit = parsed._multiLabel ?? "data.frames";
         setLoadErr(
-          `Loaded ${parsed._multi.length} data.frames from ${file.name}.` +
-          (skipped.length ? ` Skipped ${skipped.length}: ${skipped.map(s => s.name).join(", ")}.` : "")
+          `Loaded ${parsed._multi.length} ${unit} from ${file.name}: ` +
+          parsed._multi.map(m => m.filename).join(", ") + "." +
+          (skipped.length
+            ? ` Skipped ${skipped.length}: ${skipped.map(s => `${s.name} (${s.reason})`).join(", ")}.`
+            : "")
         );
         return;
       }

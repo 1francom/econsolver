@@ -648,33 +648,35 @@ function findNearCollinearPair(rows, cols) {
   return best && Math.abs(best.r) > 0.995 ? best : null;
 }
 
-// A regressor with (near) zero variance WITHIN every FE group is exactly
-// collinear with that FE block's dummies once absorbed (its between-group
-// variation is fully soaked up by the FE, leaving nothing to identify a
-// coefficient from). This is the classic real-world LSDV singularity cause —
-// e.g. a variable that's constant per (state, industry) cell but the model
-// tries to absorb state×industry — and is NOT a pairwise correlation with any
-// single dummy, so findNearCollinearPair alone won't catch it.
+// A regressor is absorbed by the fixed effects iff it lies in the SPAN of the FE
+// dummies — equivalently, iff the within-projection leaves nothing of it. Test it
+// with the same projection the estimator uses (demeanByFE), not by asking whether
+// the regressor is constant inside the JOINT FE cell.
+//
+// The joint-cell test this replaces was a false-positive machine: with several FE
+// dimensions the joint key is far finer than any one of them, so almost any
+// regressor looks invariant inside it. Being constant within the joint cell does
+// NOT imply lying in the span of the ADDITIVE dummies, which is what actually makes
+// the design singular. On the PISA fixture it fingered `female:ggi` — which fixest
+// estimates at 78.87 (SE 28.31), perfectly identified — while the genuinely absorbed
+// regressor was `female`, which fixest reports with SE 1.5e6. Measured ratios of
+// post-projection to original variance there: female 6.3e-24, female:ggi 4.2e-03.
 function findInvariantRegressor(rows, xCols, feCols) {
-  const groups = new Map();
-  for (const r of rows) {
-    const key = feCols.map(c => r[c]).join("\x02");
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
-  }
+  if (!rows.length || !xCols.length || !feCols.length) return null;
+  let dm;
+  try { dm = demeanByFE(rows, feCols, xCols); } catch { return null; }
+  const ss = (arr, key) => {
+    let sum = 0;
+    for (const r of arr) sum += r[key];
+    const m = sum / arr.length;
+    let acc = 0;
+    for (const r of arr) acc += (r[key] - m) ** 2;
+    return acc;
+  };
   for (const xc of xCols) {
-    const vals = rows.map(r => r[xc]);
-    const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
-    const totalSS = vals.reduce((s, v) => s + (v - mean) ** 2, 0);
-    if (totalSS < 1e-12) continue; // constant overall — a different (also real) problem
-    let withinSS = 0;
-    for (const g of groups.values()) {
-      if (g.length < 2) continue;
-      const gv = g.map(r => r[xc]);
-      const gm = gv.reduce((s, v) => s + v, 0) / gv.length;
-      withinSS += gv.reduce((s, v) => s + (v - gm) ** 2, 0);
-    }
-    if (withinSS / totalSS < 1e-6) return xc;
+    const ss0 = ss(rows, xc);
+    if (ss0 < 1e-12) continue;                       // constant overall — a different (also real) problem
+    if (ss(dm.demeaned, `__dm_${xc}`) / ss0 < 1e-12) return xc;
   }
   return null;
 }
@@ -747,8 +749,19 @@ export function runLSDVMulti(rows, yCol, xCols, feCols, seOpts = {}, feRefs = {}
     const invariantX = findInvariantRegressor(valid, xCols, feCols);
     const culprit = invariantX ? null : findNearCollinearPair(augRows, allXCols);
     let msg = "LSDV OLS failed — singular matrix (possible perfect multicollinearity).";
+    if (!invariantX && !culprit) {
+      // No regressor is absorbed and no pair is near-collinear, so the rank
+      // deficiency is in the DUMMY BLOCKS themselves — overlapping FE dimensions
+      // (one nesting or partially spanning another) make the explicit-dummy design
+      // singular no matter what the regressors are. LSDV is the explicit-dummy
+      // method by definition, so it cannot estimate this; the within/projection
+      // estimator absorbs redundant FE levels and can, which is what fixest's
+      // feols() does. Reproduced on the PISA fixture with a single innocuous
+      // regressor and no interactions: COBN_M_iso + CNT×female alone is enough.
+      msg += ` No single regressor is absorbed by the fixed effects, so the redundancy is in the FE set itself — ${feCols.join(", ")} overlap (one of them nests or partly spans another), which makes the explicit-dummy design singular regardless of the regressors. Switch to the FE estimator, which absorbs the fixed effects by projection instead of building dummies and handles this, or drop whichever FE dimension is implied by another.`;
+    }
     if (invariantX) {
-      msg += ` Regressor "${invariantX}" has essentially no variation WITHIN each ${feCols.join("×")} group — once that FE is absorbed, there's nothing left to identify its coefficient from. Check whether "${invariantX}" actually varies across observations that share the same ${feCols.join(", ")} combination in your data.`;
+      msg += ` Regressor "${invariantX}" is fully absorbed by the fixed effects ${feCols.join(", ")}: projecting them out leaves nothing of it, so there is no variation left to identify its coefficient from. Drop it from the regressors — it is already captured by the FE. (R's feols does not error here; it returns a meaningless estimate with an enormous standard error, which means the same thing.)`;
     } else if (culprit) {
       msg += ` "${culprit.a}" and "${culprit.b}" are near-perfectly correlated (r=${culprit.r.toFixed(4)}) — likely one is fully redundant given the other. Check whether "${culprit.a}" varies independently of "${culprit.b}" in your data.`;
     }

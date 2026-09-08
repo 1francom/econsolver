@@ -583,17 +583,44 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
 
           <div style={{ padding: "0.55rem 0.85rem", borderBottom: `1px solid ${C.border}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
-              <span style={{
-                fontSize: T.caption.fontSize,
-                padding: "2px 7px",
-                border: `1px solid ${syncColor()}80`,
-                borderRadius: 3,
-                color: syncColor(),
-                textTransform: "uppercase",
-                letterSpacing: "0.12em",
-              }}>
-                {syncLabel()}
-              </span>
+              {/* The sync key is held in memory only (E2EE — it is never persisted),
+                  so it is GONE after a reload and the panel correctly shows "locked".
+                  The unlock modal below has always existed, but nothing ever called
+                  setUnlockOpen(true): the auto-prompt was removed in favour of
+                  "unlock manually via the sync panel" and that manual entry point was
+                  never added. From inside a project the only escape was to unpublish
+                  and republish. The badge is that entry point. */}
+              {syncLabel() === "locked" ? (
+                <button
+                  onClick={() => { setSyncError(""); setUnlockOpen(true); }}
+                  title="Your encryption key is not kept between sessions. Enter your passphrase or recovery key to sync again — you do not need to republish."
+                  style={{
+                    fontSize: T.caption.fontSize,
+                    padding: "2px 7px",
+                    background: "transparent",
+                    border: `1px solid ${C.gold}80`,
+                    borderRadius: 3,
+                    color: C.gold,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.12em",
+                    cursor: "pointer",
+                    fontFamily: T.code.fontFamily,
+                  }}>
+                  {"locked — unlock"}
+                </button>
+              ) : (
+                <span style={{
+                  fontSize: T.caption.fontSize,
+                  padding: "2px 7px",
+                  border: `1px solid ${syncColor()}80`,
+                  borderRadius: 3,
+                  color: syncColor(),
+                  textTransform: "uppercase",
+                  letterSpacing: "0.12em",
+                }}>
+                  {syncLabel()}
+                </span>
+              )}
               {!syncMeta.published ? (
                 <button
                   onClick={() => setPublishOpen(true)}
@@ -1027,6 +1054,15 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
               <input type="file" accept="application/json,.json,.txt" onChange={readRecoveryFile} style={{ color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }} />
               {unlockRecovery && <span style={{ fontSize: T.caption.fontSize, color: C.teal }}>recovery key loaded</span>}
             </div>
+            {/* lockSession() THROWS on a wrong passphrase, so runSyncAction stores the
+                reason in syncError — but that is rendered in the panel BEHIND this
+                modal, where it cannot be seen. Without this line a wrong passphrase
+                just appears to do nothing. */}
+            {syncError && (
+              <div style={{ marginTop: 10, fontSize: T.caption.fontSize, color: C.red, fontFamily: T.code.fontFamily }}>
+                {syncError}
+              </div>
+            )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button onClick={() => setUnlockOpen(false)} style={{ padding: "0.4rem 0.75rem", background: "transparent", border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>
                 Later

@@ -83,15 +83,19 @@ function FreeNumberInput({value, onCommit, min, max, style}){
 // button lets the user pin the CURRENT view (plot config or descriptive stat,
 // with its exact arguments) as an `explore_stat` event on the execution
 // timeline, making it part of the replication script.
-function PinBtn({ onClick, title = "Pin this view to the replication timeline" }) {
+function PinBtn({ onClick, title = "Pin this view to the replication timeline", disabled = false, disabledTitle }) {
   const { C, T } = useTheme();
   const [done, setDone] = useState(false);
+  // `done` must be gated on the click actually pinning — otherwise a disabled
+  // button still flashes "Pinned" and reports a success that never happened.
   return (
     <button
-      onClick={() => { onClick?.(); setDone(true); setTimeout(() => setDone(false), 1800); }}
-      title={title}
-      style={{ padding: "0.2rem 0.55rem", borderRadius: 3, cursor: "pointer", flexShrink: 0,
+      disabled={disabled}
+      onClick={() => { if (disabled) return; onClick?.(); setDone(true); setTimeout(() => setDone(false), 1800); }}
+      title={disabled ? (disabledTitle ?? title) : title}
+      style={{ padding: "0.2rem 0.55rem", borderRadius: 3, cursor: disabled ? "not-allowed" : "pointer", flexShrink: 0,
                fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, transition: "all 0.12s",
+               opacity: disabled ? 0.45 : 1,
                border: `1px solid ${done ? C.teal : C.border2}`,
                background: done ? `${C.teal}15` : "transparent",
                color: done ? C.teal : C.textDim }}>
@@ -116,6 +120,61 @@ function pearson(xs,ys){
   let sxy=0,sx=0,sy=0;
   for(let i=0;i<n;i++){sxy+=(xs[i]-mx)*(ys[i]-my);sx+=(xs[i]-mx)**2;sy+=(ys[i]-my)**2;}
   return(sx&&sy)?sxy/Math.sqrt(sx*sy):0;
+}
+
+// Pearson over two aligned numeric arrays, skipping any index where either side
+// is missing — R's use = "pairwise.complete.obs", which is what the correlation
+// pin's export emits. NaN counts as missing, which the old path did not do: it
+// tested only `typeof v === "number"`, so a NaN survived the filter, made the
+// sums NaN, and `(sx && sy)` then fell through to the `0` branch. Any pair whose
+// columns held a single NaN was therefore reported as EXACTLY ZERO correlation —
+// not a visible break, a silent wrong answer that looks like a real result.
+// Measured on a fixture: old 0, new 0.040972 over the complete pairs.
+function pearsonPaired(a, b) {
+  const n = a.length;
+  let m = 0, sx = 0, sy = 0;
+  for (let i = 0; i < n; i++) {
+    const x = a[i], y = b[i];
+    if (x === x && y === y) { sx += x; sy += y; m++; }   // x === x is a fast isNaN
+  }
+  if (m < 2) return 0;
+  const mx = sx / m, my = sy / m;
+  let sxy = 0, vx = 0, vy = 0;
+  for (let i = 0; i < n; i++) {
+    const x = a[i], y = b[i];
+    if (x === x && y === y) { const dx = x - mx, dy = y - my; sxy += dx * dy; vx += dx * dx; vy += dy * dy; }
+  }
+  return (vx && vy) ? sxy / Math.sqrt(vx * vy) : 0;
+}
+
+// Full k x k correlation matrix.
+//
+// The old inline version ran `rows.filter(...).map(...).map(...)` per PAIR — three
+// array allocations of length n for each of the k^2 cells — unmemoised, inside
+// render. At 122 numeric columns and 11.5k rows that is ~171M row visits on every
+// keystroke, which is what froze the tab. This extracts each column ONCE into a
+// Float64Array, fills only the upper triangle and mirrors it.
+function corrMatrix(rows, cols) {
+  const k = cols.length, n = rows.length;
+  const data = cols.map(c => {
+    const a = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const v = rows[i]?.[c];
+      a[i] = (typeof v === "number" && isFinite(v)) ? v : NaN;
+    }
+    return a;
+  });
+  const mat = [];
+  for (let i = 0; i < k; i++) {
+    const row = new Array(k);
+    for (let j = 0; j < k; j++) {
+      if (j < i)       row[j] = mat[j][i];              // symmetric — already computed
+      else if (j === i) row[j] = 1;
+      else              row[j] = pearsonPaired(data[i], data[j]);
+    }
+    mat.push(row);
+  }
+  return mat;
 }
 
 // Aggregate rows into time-series points — SHARED by TimeSeriesTab and the pin
@@ -461,51 +520,140 @@ async function fetchCorrMatrixSQL(duckTable, numH) {
   }));
 }
 
-function CorrHeatmap({headers,rows,info,duckTable}){
+// Above this many numeric columns the matrix is neither readable nor cheap, so
+// nothing is computed until the user picks columns. Below it, behaviour is
+// unchanged: every numeric column, selected automatically.
+const CORR_AUTO_MAX   = 15;
+// Even hand-picked, past this the labels collide and the cells are a few px wide.
+const CORR_RENDER_MAX = 60;
+
+function CorrHeatmap({headers,rows,info,duckTable,selectable=false,onColsChange}){
   const{C,T}=useTheme();
   const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+  const numHKey=numH.join("|");
+  const autoAll=!selectable||numH.length<=CORR_AUTO_MAX;
+
+  const [sel,setSel]=useState(()=>autoAll?numH:[]);
+  const [query,setQuery]=useState("");
+  // Re-seed when the dataset (or the Explore filter) changes the numeric set.
+  useEffect(()=>{setSel(autoAll?numH:[]);setQuery("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[numHKey,autoAll]);
+
+  const selKey=sel.join("|");
+  // The pin and its R/Python/Stata export read `cols`, so the parent needs the
+  // CHOSEN columns, not every numeric one — otherwise the exported cor() call
+  // would not match the matrix on screen.
+  useEffect(()=>{onColsChange?.(sel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[selKey]);
+
   const [sqlMat, setSqlMat] = useState(null);
   const [corrLoading, setCorrLoading] = useState(false);
   const [corrError, setCorrError] = useState(null);
-  const numHKey = numH.join("|");
+  const tooMany=sel.length>CORR_RENDER_MAX;
   useEffect(() => {
     setSqlMat(null); setCorrError(null);
-    if (!duckTable || numH.length < 2) return;
+    if (!duckTable || sel.length < 2 || tooMany) return;
     setCorrLoading(true);
-    fetchCorrMatrixSQL(duckTable, numH)
+    fetchCorrMatrixSQL(duckTable, sel)
       .then(m => setSqlMat(m))
       .catch(e => { console.error("[CorrHeatmap] SQL correlation failed:", e); setCorrError(e?.message || "correlation query failed"); })
       .finally(() => setCorrLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duckTable, numHKey]);
+  }, [duckTable, selKey, tooMany]);
+
+  // Memoised — this used to recompute on every single render.
+  const jsMat = useMemo(
+    () => (sel.length < 2 || tooMany) ? null : corrMatrix(rows, sel),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, selKey, tooMany]
+  );
+
+  const shown=query.trim()
+    ? numH.filter(h=>h.toLowerCase().includes(query.trim().toLowerCase()))
+    : numH;
+  const toggle=h=>setSel(prev=>prev.includes(h)?prev.filter(x=>x!==h):[...prev,h]);
+
+  const btn={padding:"3px 9px",fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+    background:"none",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textDim,cursor:"pointer"};
+
+  const picker=selectable&&(
+    <div style={{marginBottom:"0.8rem"}}>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
+        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search variables…"
+          style={{flex:"1 1 200px",maxWidth:280,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+            background:C.surface2,color:C.text,border:`1px solid ${C.border}`,borderRadius:3,padding:"4px 7px"}}/>
+        <button style={btn} onClick={()=>setSel(prev=>[...new Set([...prev,...shown])])}>
+          {`Add shown (${shown.length})`}
+        </button>
+        <button style={btn} onClick={()=>setSel(prev=>prev.filter(h=>!shown.includes(h)))}>Remove shown</button>
+        <button style={btn} onClick={()=>setSel([])}>Clear</button>
+        <span style={{fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>
+          <span style={{color:tooMany?C.red:C.gold}}>{sel.length}</span>{` of ${numH.length} selected`}
+        </span>
+      </div>
+      <div style={{maxHeight:150,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:3,
+        padding:"5px 7px",display:"flex",flexWrap:"wrap",gap:"3px 10px"}}>
+        {shown.length===0&&<span style={{fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.body.fontFamily}}>No variable matches that search.</span>}
+        {shown.map(h=>(
+          <label key={h} title={h} style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",
+            fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+            color:sel.includes(h)?C.teal:C.textDim,width:"calc(25% - 10px)",minWidth:130,
+            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            <input type="checkbox" checked={sel.includes(h)} onChange={()=>toggle(h)} style={{accentColor:C.teal,flexShrink:0}}/>
+            {h}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+
+  const note=msg=>(
+    <div style={{fontSize:T.code.fontSize,color:C.textMuted,fontFamily:T.body.fontFamily,padding:"1rem 0"}}>{msg}</div>
+  );
+
   if(numH.length<2)return<div style={{fontSize: T.code.fontSize,color:C.textMuted,fontFamily: T.body.fontFamily}}>Need ≥2 numeric columns.</div>;
-  const mat = sqlMat ?? numH.map(h1=>numH.map(h2=>{
-    const pairs=rows.filter(r=>typeof r[h1]==="number"&&typeof r[h2]==="number");
-    return pearson(pairs.map(r=>r[h1]),pairs.map(r=>r[h2]));
-  }));
-  const cellSz=Math.min(44,Math.floor(380/numH.length));
+
+  let body=null;
+  if(tooMany){
+    body=note(`${sel.length} variables selected — too many to draw legibly. Narrow it to ${CORR_RENDER_MAX} or fewer.`);
+  }else if(sel.length<2){
+    body=note(numH.length>CORR_AUTO_MAX
+      ? `This dataset has ${numH.length} numeric variables — too many to correlate all at once, and unreadable if drawn. Pick the ones you care about above (search, then tick).`
+      : "Select at least two variables.");
+  }
+
+  const mat = sqlMat ?? jsMat;
+  const cols=sel;
+  const cellSz=Math.min(44,Math.floor(380/Math.max(cols.length,1)));
   const lblH=60;
-  const W=lblH+numH.length*cellSz,H_total=lblH+numH.length*cellSz;
+  const W=lblH+cols.length*cellSz,H_total=lblH+cols.length*cellSz;
   const corToColor=v=>{
+    if(!isFinite(v))return C.surface3;
     const abs=Math.abs(v);
     if(v>0)return`rgba(110,200,180,${abs*0.9})`;
     return`rgba(196,112,112,${abs*0.9})`;
   };
   return(
     <div style={{overflowX:"auto"}}>
+      {picker}
+      {body}
+      {!body&&!mat&&note("Computing…")}
+      {!body&&mat&&(<>
       {duckTable && corrLoading && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.body.fontFamily}}>⏳ computing correlations over the full table…</div>}
       {corrError && <div style={{marginBottom:8,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.body.fontFamily}}>⚠ {corrError} — showing values from the loaded rows instead.</div>}
       <svg viewBox={`0 0 ${W+8} ${H_total+8}`} style={{width:"100%",maxWidth:W+8,display:"block",fontFamily: T.code.fontFamily}}>
-        {numH.map((h,i)=>(
+        {cols.map((h,i)=>(
           <text key={h} x={lblH+i*cellSz+cellSz/2} y={lblH-4} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={T.data.fontFamily} textAnchor="middle" transform={`rotate(-35,${lblH+i*cellSz+cellSz/2},${lblH-4})`}>{h.slice(0,8)}</text>
         ))}
-        {numH.map((h,i)=>(
+        {cols.map((h,i)=>(
           <text key={h} x={lblH-4} y={lblH+i*cellSz+cellSz/2+3} fill={C.textDim} fontSize={Math.max(6,Math.min(9,cellSz/4))} fontFamily={T.data.fontFamily} textAnchor="end">{h.slice(0,8)}</text>
         ))}
         {mat.map((row,ri)=>row.map((v,ci)=>(
           <g key={`${ri}-${ci}`}>
             <rect x={lblH+ci*cellSz} y={lblH+ri*cellSz} width={cellSz-1} height={cellSz-1} fill={corToColor(v)} rx={2}/>
-            {cellSz>28&&<text x={lblH+ci*cellSz+cellSz/2} y={lblH+ri*cellSz+cellSz/2+4} fill={C.text} fontSize={Math.max(6,Math.min(9,cellSz/5))} fontFamily={T.data.fontFamily} textAnchor="middle" opacity={0.9}>{v.toFixed(2)}</text>}
+            {cellSz>28&&<text x={lblH+ci*cellSz+cellSz/2} y={lblH+ri*cellSz+cellSz/2+4} fill={C.text} fontSize={Math.max(6,Math.min(9,cellSz/5))} fontFamily={T.data.fontFamily} textAnchor="middle" opacity={0.9}>{isFinite(v)?v.toFixed(2):"—"}</text>}
           </g>
         )))}
       </svg>
@@ -514,6 +662,7 @@ function CorrHeatmap({headers,rows,info,duckTable}){
         <div style={{flex:1,height:6,borderRadius:3,background:`linear-gradient(to right,${C.red},${C.surface3},${C.teal})`}}/>
         <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.body.fontFamily}}>positive (teal) →</span>
       </div>
+      </>)}
     </div>
   );
 }
@@ -2404,6 +2553,10 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     [headers, info]
   );
   const corrRef = useRef(null);
+  // Owned here, not in CorrHeatmap, because the pin button below lives in this
+  // scope and its export emits cor(df[, cols]) — it must name the columns the
+  // user actually picked, or the script would not reproduce what is on screen.
+  const [corrCols, setCorrCols] = useState([]);
 
   // Plot Builder gets the exact full `rows` array — no SQL sampling here. Aggregating
   // geoms (histogram/density/line/bar/smooth) collapse to a small, fixed-size result
@@ -2640,7 +2793,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             "ACF / PACF correlograms for autocorrelation diagnosis",
           ]},
           { heading: "Correlation", items: [
-            "Pearson correlation heatmap across all numeric variables",
+            "Pearson correlation heatmap — up to 15 numeric variables are selected automatically; past that, search and tick the ones you want (the pin and its exported cor() follow your selection)",
             "Red = negative · Teal = positive",
           ]},
           { heading: "Plot Builder", items: [
@@ -2699,15 +2852,17 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         {tab==="corr"&&(
           <div>
             <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4,display:"flex",alignItems:"center",gap:10}}>
-              <span style={{flex:1}}>Pearson correlation between all numeric variables. Red = negative, Teal = positive.</span>
-              <PinBtn onClick={()=>{
-                const cols=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
-                pinExplore({kind:"correlation",method:"pearson",cols},`Correlation matrix (pearson) over ${cols.length} numeric vars`);
+              <span style={{flex:1}}>Pearson correlation between the selected numeric variables. Red = negative, Teal = positive.</span>
+              <PinBtn disabled={corrCols.length<2}
+                disabledTitle="Select at least two variables to pin this matrix"
+                onClick={()=>{
+                pinExplore({kind:"correlation",method:"pearson",cols:corrCols},`Correlation matrix (pearson) over ${corrCols.length} numeric vars`);
               }}/>
             </div>
             <div ref={corrRef} style={{border:`1px solid ${C.border}`,borderRadius:4,overflow:"hidden"}}>
               <div style={{padding:"0.5rem"}}>
-                <CorrHeatmap headers={headers} rows={filteredRows} info={info} duckTable={filterConds.length ? null : duckTable}/>
+                <CorrHeatmap headers={headers} rows={filteredRows} info={info} duckTable={filterConds.length ? null : duckTable}
+                  selectable onColsChange={setCorrCols}/>
               </div>
               <PlotExportBar getEl={() => corrRef.current} filename="correlation_heatmap" />
             </div>

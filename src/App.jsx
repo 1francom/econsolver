@@ -1405,7 +1405,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
           { heading: "Loading files", items: [
             "Drag & drop onto the drop zone, or click to browse — several files at once is fine, each becomes its own dataset",
             "CSV / TSV — delimiter is auto-detected; semicolon and tab files load without any setting",
-            "Excel (.xlsx / .xls) — the FIRST sheet is read; to use another one, save it as its own file or its own workbook",
+            "Excel (.xlsx / .xls) — every sheet becomes its own dataset, named <file>_<sheet>; a single-sheet workbook loads as one dataset under the file name",
             "Stata (.dta) — value labels and Stata dates are converted on read",
             "R (.rds) — a single data.frame, tibble or named list",
             "R (.RData / .rda) — a whole workspace: every data.frame inside becomes a separate dataset, named after the R object",
