@@ -986,7 +986,10 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Normalize categories: merge near-identical string variants (numeric variants like \"comuna 1\" vs \"comuna 2\" are never merged)",
             "Winsorize, trim outliers, or just flag them as a new column",
             "Type cast, string cleaning, and regex extraction from text columns",
-            "Distinct values: inspect every level of a column from its header menu, after the pipeline has run",
+            "Every column card has a ⋯ menu: Rename, Filter, Change type, View values, Drop duplicates, Drop",
+            "Drop duplicates removes repeated rows, like dplyr's distinct(). It opens seeded with the column you clicked; add more columns if a duplicate is defined by several of them, or clear them all to require the whole row to match. Keep first / Keep last decides which copy survives — Keep last depends on the current row order, so sort first if that matters",
+            "View values is the other one: it inspects every level of a column without changing anything",
+            "Past ~25 columns the column grid starts collapsed and gets a search box, and opens into a fixed-height scroll area — so a 130-column dataset and a 1000-column one take the same space on screen. The column pickers get the same search",
           ]},
           { heading: "Workbench — features", items: [
             "Log (log1p — safe for zeros), square, standardize (z-score)",

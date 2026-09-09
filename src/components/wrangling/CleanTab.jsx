@@ -2,7 +2,7 @@
 // NormalizePanel, StandardizeDialog, Auditor, ColCard,
 // FilterBuilder (ConditionRow, FilterPreview), FillNaSection, CleanTab.
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useTheme, Lbl, Tabs, Btn, Badge, NA, Spin } from "./shared.jsx";
+import { useTheme, Lbl, Tabs, Btn, Badge, NA, Spin, useColumnSearch, COLUMN_SEARCH_MIN } from "./shared.jsx";
 import { fuzzyGroups, buildInitialMap, audit, aiAuditScan, callAI } from "./utils.js";
 import { computeColStats } from "../../services/data/duckdb.js";
 import { OPERATORS, menuLabel, opArity, evalPredicate, describePredicate } from "../../pipeline/predicate.js";
@@ -508,7 +508,10 @@ function ColCard({h, info, sug, castType, selected, onSel, onAct}){
         style={{position:"absolute",top:"100%",right:0,zIndex:99,background:C.surface2,
           border:`1px solid ${C.border}`,borderRadius:4,boxShadow:"0 6px 24px #000b",
           minWidth:140,overflow:"hidden"}}>
-        {[["rename","Rename"],["filter","Filter"],["cast","Change type"],["distinct","Distinct values"],["drop","Drop"]].map(([a,l])=>(
+        {/* "View values" only inspects; "Drop duplicates" adds a `distinct` STEP.
+            Both used to be called some form of "distinct", which is exactly why
+            nobody could remember which one changed the data. */}
+        {[["rename","Rename"],["filter","Filter"],["cast","Change type"],["distinct","View values"],["dedup","Drop duplicates"],["drop","Drop"]].map(([a,l])=>(
           <button key={a} onClick={()=>{onAct(h,a);setMo(false);}}
             style={{width:"100%",padding:"0.45rem 0.8rem",background:"transparent",border:"none",
               color:a==="drop"?C.red:C.textDim,cursor:"pointer",fontFamily: T.code.fontFamily,fontSize: T.code.fontSize,textAlign:"left"}}>{l}</button>
@@ -1209,6 +1212,10 @@ function WinsorizeSection({ headers, info, rows, onAdd, duckdbTableName }) {
 // ─── FILL MISSING SECTION ─────────────────────────────────────────────────────
 // Collapsible panel in CleanTab for all fill strategies including grouped imputation.
 function FillNaSection({ headers, info, rows, onAdd }) {
+  // Search over the columns this picker actually offers (those with NAs), not
+  // over every header — filtering on a name the list will not render is a dead end.
+  const naHeaders = headers.filter(h => rows.some(r => r[h] === null || r[h] === undefined));
+  const { shown: shownNa, search: naSearch } = useColumnSearch(naHeaders, { placeholder: "Search columns with NAs…" });
   const { C, T } = useTheme();
   const [open,    setOpen]    = useState(false);
   const [col,     setCol]     = useState("");
@@ -1292,11 +1299,11 @@ function FillNaSection({ headers, info, rows, onAdd }) {
 
           {/* Column selector — show NA count per column */}
           <Lbl color={C.yellow}>Column</Lbl>
+          {naSearch}
           <div style={{ display:"flex", flexWrap:"wrap", gap:4, marginBottom:"1rem",
             maxHeight:120, overflowY:"auto" }}>
-            {headers.map(h => {
+            {shownNa.map(h => {
               const na = rows.filter(r => r[h] === null || r[h] === undefined).length;
-              if (na === 0) return null;
               return (
                 <button key={h} onClick={() => setCol(h)} style={{
                   padding:"0.25rem 0.6rem",
@@ -1404,19 +1411,30 @@ function FillNaSection({ headers, info, rows, onAdd }) {
   );
 }
 
-function DistinctSection({ headers, onAdd, C }) {
+function DistinctSection({ headers, onAdd, C, seed, onClose }) {
   const { T } = useTheme();
-  const [subset, setSubset] = useState([]);
+  const [subset, setSubset] = useState(seed ? [seed] : []);
   const [keep, setKeep] = useState("first");
   const toggle = h => setSubset(s => s.includes(h) ? s.filter(x=>x!==h) : [...s, h]);
+  // Already-picked columns stay visible whatever the search says — otherwise
+  // typing would hide your own selection and there would be no way to unpick it.
+  const { shown, search } = useColumnSearch(headers);
+  const visible = [...new Set([...subset, ...shown])];
   return (
     <div style={{marginBottom:"1.2rem"}}>
-      <Lbl color={C.teal}>Distinct - drop duplicate rows</Lbl>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <Lbl color={C.teal}>Distinct - drop duplicate rows</Lbl>
+        <span style={{flex:1}}/>
+        {onClose && <button onClick={onClose} style={{padding:"1px 8px",background:"none",
+          border:`1px solid ${C.border2}`,borderRadius:3,color:C.textDim,cursor:"pointer",
+          fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize}}>close</button>}
+      </div>
       <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:6}}>
         Select columns to dedup on (none = entire row).
       </div>
-      <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
-        {headers.map(h=>(
+      {search}
+      <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8,maxHeight:150,overflowY:"auto"}}>
+        {visible.map(h=>(
           <button key={h} onClick={()=>toggle(h)}
             style={{padding:"0.2rem 0.5rem",border:`1px solid ${subset.includes(h)?C.teal:C.border2}`,
               background:subset.includes(h)?`${C.teal}18`:"transparent",color:subset.includes(h)?C.teal:C.textDim,
@@ -1440,6 +1458,20 @@ function DistinctSection({ headers, onAdd, C }) {
 
 // ─── CLEANING TAB ─────────────────────────────────────────────────────────────
 function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd,onViewDistinct}){
+  // The column grid is one card per column. At 122 columns it is a wall that
+  // pushes every other control off screen, so it gets a filter above the
+  // COLUMN_SEARCH_MIN threshold and is left untouched below it.
+  const { shown: shownCols, search: colSearch, q: colQ } = useColumnSearch(headers);
+  // null = closed; a column name = open, seeded with that column.
+  const [dedupSeed, setDedupSeed] = useState(null);
+  // One card per column is fine at 12 and a full-screen wall at 122. Above the
+  // search threshold the grid starts COLLAPSED and, once open, lives in a fixed-
+  // height scroll region — so the page costs the same whether the dataset has 130
+  // columns or 1000. Capping the NUMBER of cards was the other option and is worse:
+  // it hides columns without saying which, and search only helps if you already
+  // know the name, so browsing a wide dataset becomes impossible.
+  const gridBig = headers.length > COLUMN_SEARCH_MIN;
+  const [gridOpen, setGridOpen] = useState(!gridBig);
   const { C, T } = useTheme();
   const [sel,setSel]=useState(null),[act,setAct]=useState(null);
   const [rv,setRv]=useState("");
@@ -1530,10 +1562,24 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd,onViewDistinct}){
         <StandardizeDialog col={normTarget.col} clusters={normTarget.clusters} rawVals={normTarget.rawVals}
           rows={rows} onConfirm={handleNormConfirm} onCancel={()=>setNormTarget(null)}/>
       )}
-      <DistinctSection headers={headers} onAdd={onAdd} C={C}/>
+      {dedupSeed !== null && (
+        <DistinctSection headers={headers} C={C} seed={dedupSeed}
+          onAdd={step=>{onAdd(step);setDedupSeed(null);}}
+          onClose={()=>setDedupSeed(null)}/>
+      )}
       {/* Standalone filter button */}
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:"0.9rem"}}>
-        <Lbl mb={0}>Columns <span style={{color:C.textMuted}}>({headers.length})</span></Lbl>
+        {gridBig ? (
+          <button onClick={()=>setGridOpen(o=>!o)}
+            style={{padding:"0.28rem 0.7rem",border:`1px solid ${gridOpen?C.teal:C.border2}`,
+              background:gridOpen?`${C.teal}12`:"transparent",color:gridOpen?C.teal:C.textDim,
+              borderRadius:3,cursor:"pointer",fontSize:T.caption.fontSize,fontFamily:T.code.fontFamily,
+              transition:"all 0.12s"}}>
+            {`Columns (${headers.length})${gridOpen?" ▾":" ▸"}`}
+          </button>
+        ) : (
+          <Lbl mb={0}>Columns <span style={{color:C.textMuted}}>({headers.length})</span></Lbl>
+        )}
         <button
           onClick={()=>{setSel(null);setAct(null);setShowFilter(f=>!f);}}
           style={{
@@ -1558,17 +1604,29 @@ function CleanTab({rows,headers,info,rawData,pipeline=[],onAdd,onViewDistinct}){
       <div style={{marginBottom:"1.2rem"}}>
         <SortRowsSection headers={headers} onAdd={onAdd}/>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6,marginBottom:"0.75rem"}}>
-        {headers.map(h=><ColCard key={h} h={h} info={info} sug={sug} castType={castTypes[h]} selected={sel===h}
+      {gridOpen && colSearch}
+      {gridOpen && colQ && shownCols.length === 0 && (
+        <div style={{fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.body.fontFamily,marginBottom:"0.75rem"}}>
+          No column matches that search.
+        </div>
+      )}
+      {/* Conditionally RENDERED, not display:none — a hidden grid still mounts one
+          ColCard per column, which is the cost this collapse exists to avoid. */}
+      {gridOpen && (
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6,marginBottom:"0.75rem",
+        ...(gridBig ? {maxHeight:340,overflowY:"auto",paddingRight:4} : {})}}>
+        {shownCols.map(h=><ColCard key={h} h={h} info={info} sug={sug} castType={castTypes[h]} selected={sel===h}
           onSel={h=>{setSel(h);setAct(null);setARes(null);setASt("idle");}}
           onAct={(h,a)=>{
             // "distinct" opens the floating panel instead of an inline action
             // form, so it must NOT go through setAct — that would render an
             // empty action panel below the grid.
             if(a==="distinct"){onViewDistinct?.(h);return;}
+            if(a==="dedup"){setDedupSeed(h);return;}
             setSel(h);setAct(a);
           }}/>)}
       </div>
+      )}
       {/* Issue panel — shown when a column with issues is selected, before the action panel */}
       {sel && !act && sug.some(s=>s.col===sel) && (
         <ColIssuePanel col={sel} issues={sug.filter(s=>s.col===sel)}/>
