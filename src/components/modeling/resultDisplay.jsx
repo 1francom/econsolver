@@ -451,7 +451,13 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                   const tag   = v.match(/\(([^)]*)\)\s*$/);
                   const isATT = tag != null && /\bATT\b/i.test(tag[1]);
                   const core  = v.replace(/\s*\([^)]*\)\s*$/, "").trim();
-                  const parts = core.split(/\s*[×·*]\s*|_x_| x /i).map(s => s.trim()).filter(Boolean);
+                  // `:` is how expandInteractions actually names its product columns
+                  // (`${c1}:${c2}` in helpers.js) — it was missing from this list, so a
+                  // real Litux interaction never split, `isInteraction` stayed false, and
+                  // every one of them fell through to the generic "a one-unit increase in
+                  // female:ggi" reading. The other separators cover synthetic display
+                  // labels like "Post × Treated (ATT)".
+                  const parts = core.split(/\s*[×·*:]\s*|_x_| x /i).map(s => s.trim()).filter(Boolean);
                   const isInteraction = parts.length >= 2;
 
                   if (isInteraction || isATT) {
@@ -501,19 +507,29 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                       const slopeWhen1 = typeof cBeta === "number" ? (cBeta + b) : null;
                       return (
                         <>
-                          Continuous × dummy interaction (<span style={{ color: C.text }}>{dummyName}</span> is binary).
-                          When <span style={{ color: C.text }}>{dummyName}</span> = 1, the marginal effect of{" "}
-                          <span style={{ color: C.text }}>{contName}</span> on <span style={{ color: C.text }}>{yVar}</span> shifts by{" "}
-                          <span style={{ color: b >= 0 ? C.green : C.red }}>{b >= 0 ? "+" : ""}{b.toFixed(4)}</span>
+                          The additional change in <span style={{ color: C.text }}>{yVar}</span> from a
+                          one-unit increase in <span style={{ color: C.text }}>{contName}</span> is{" "}
+                          <span style={{ color: b >= 0 ? C.green : C.red }}>{b >= 0 ? "+" : ""}{b.toFixed(4)}</span>{" "}
+                          when <span style={{ color: C.text }}>{dummyName}</span> = 1, compared with{" "}
+                          <span style={{ color: C.text }}>{dummyName}</span> = 0
                           {slopeWhen1 != null
-                            ? <> (slope becomes <span style={{ color: C.text }}>{slopeWhen1.toFixed(4)}</span>)</>
+                            ? <> — so the slope of <span style={{ color: C.text }}>{contName}</span> goes from{" "}
+                                <span style={{ color: C.text }}>{cBeta.toFixed(4)}</span> to{" "}
+                                <span style={{ color: C.text }}>{slopeWhen1.toFixed(4)}</span></>
                             : null}.{" "}
-                          Equivalently, the effect of <span style={{ color: C.text }}>{dummyName}</span> (0→1) on{" "}
-                          <span style={{ color: C.text }}>{yVar}</span> equals{" "}
+                          Read the other way round, the effect of{" "}
+                          <span style={{ color: C.text }}>{dummyName}</span> (0→1) on{" "}
+                          <span style={{ color: C.text }}>{yVar}</span> is{" "}
                           <span style={{ color: C.text }}>
                             {typeof dBeta === "number" ? dBeta.toFixed(4) : `β(${dummyName})`} {b >= 0 ? "+" : "−"} {Math.abs(b).toFixed(4)}·{contName}
                           </span>
                           {" "}— it depends on the level of <span style={{ color: C.text }}>{contName}</span>, ceteris paribus.{" "}
+                          {typeof dBeta !== "number" && (
+                            <span style={{ color: C.textMuted }}>
+                              ({dummyName} has no coefficient of its own here — it is absorbed by the fixed effects,
+                              so only this conditional slope is identified.)
+                            </span>
+                          )}
                         </>
                       );
                     }
