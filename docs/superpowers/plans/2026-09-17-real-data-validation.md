@@ -71,8 +71,17 @@ ours to publish in a public repo.
      dump block that writes its estimates to JSON (like the Stata sweep's).
 4. `runScripts` — Rscript / StataSE (`/e`) / python, paths rewritten to
    `validation/`; capture exit status, errors and dumps.
-5. `reference` — run the ORIGINAL script once (setwd patched, `saveRDS`/JSON
-   dump hooks appended after each model object) → `results/reference.json`.
+5. `reference` — **DONE (`tools/validation/runReference.mjs`, 2026-09-17)**: the
+   original script is `source()`d unedited from a wrapper, then every fitted
+   object left in the global environment is extracted by class (lm / glm /
+   fixest / lm_robust / iv_robust / ivreg / rdrobust / did MP + AGGTE / bacon /
+   synth) → `validation/results/<unit>.reference.json`. Two overrides live on
+   the SEARCH PATH, not in globalenv, because scripts open with
+   `rm(list = ls())`: `setwd` (each script sets its author's own directory) and
+   `install.packages` (PS5/PS6 install from inside the script, which would
+   change the versions under test). A class the extractor does not know is
+   REPORTED in `unknown`, never silently skipped. First run: PS2 13, PS3 12,
+   PS4 13, PS5 17, PS6 7, LM6 5 models.
    Matching reference objects to Litux models is by an explicit per-unit map
    (`validation/<unit>/map.json`: Litux model label → reference object name),
    written once by hand.
@@ -85,8 +94,10 @@ ours to publish in a public repo.
 
 ## Order
 
-1. Export-project feature (small) + harness skeleton on **PS5 / Tutorial 5**
-   (already built in the app) — proves the pipeline end to end.
+1. **DONE** — *Export project* (`services/export/projectExport.js`, button in
+   the Dataset Manager) and the reference runner. **Next: Franco exports each
+   validation project to `validation/<unit>/project.litux.json`**, then the
+   Litux-side harness (steps 1-4) runs on PS5 first.
 2. PS3, PS6, LM6 (estimator-heavy, data ready).
 3. PS4 (widest wrangling surface), PS2 (needs AJR data).
 4. Fix what breaks, unit by unit; each fix gets a pinned node check like
@@ -105,6 +116,10 @@ ours to publish in a public repo.
 
 ## Open questions for Franco
 
-- `PS2_Ex2_AJR.csv` location.
-- Reference script for "Labor market Tutorial 6" (the B6 course script?).
-- Approve the package installs above.
+- "Labor market Tutorial 6" is mapped to `Replication Scripts/Tutorial_6_labor_market_min_wage.R`
+  (a B6 course script, not a Litux export) — confirm.
+- ~~Package installs~~ — done 2026-09-17. R: the 24 above plus ggpubr/DRDID;
+  `rdd` is archived on CRAN (installed 0.57 from the archive) and `did` needs a
+  DRDID newer than CRAN's, so did 2.1.2 is installed instead. Stata: rdrobust,
+  rddensity, csdid, drdid, ppmlhdfe, synth, eventstudyinteract, avar, coefplot,
+  lpdensity, and synth_runner from its GitHub repo.
