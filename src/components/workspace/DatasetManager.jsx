@@ -22,6 +22,7 @@ import {
 import { createShare, listMyShares, revokeShare } from "../../services/sync/shareEngine.js";
 import { getSyncMeta, listProjects, loadProjectPipelines } from "../../services/Persistence/indexedDB.js";
 import { generateWorkspaceScript } from "../../pipeline/exporter.js";
+import { buildProjectExport, projectExportFilename } from "../../services/export/projectExport.js";
 
 
 // ─── CASCADE HELPERS ──────────────────────────────────────────────────────────
@@ -210,12 +211,37 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
   const [shareCanEdit, setShareCanEdit] = useState(false);
   // ── Workspace replication export (Phase 9.5) ──────────────────────────────────
   const [wsExportBusy, setWsExportBusy] = useState("");
+  const [projExportBusy, setProjExportBusy] = useState(false);
+  const [projExportErr,  setProjExportErr]  = useState("");
 
   // Build the multi-dataset script via the topo-sort exporter and download it.
   // Each dataset's local pipeline + filename come from the per-project IDB record
   // (loadProjectPipelines), keyed by dataset id. globalPipeline carries the
   // cross-dataset G-steps. Join/append local steps are skipped inside the
   // exporter (gStepId filter) so they emit once, from the global section.
+  // The project as a recipe: datasets (filename + load options), pipelines,
+  // pinned model specs, plots, maps and Explore pins. No rows — re-open it
+  // against the same source files and everything reproduces.
+  async function exportProject() {
+    if (projExportBusy) return;
+    setProjExportBusy(true);
+    setProjExportErr("");
+    try {
+      const payload = await buildProjectExport(pid);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const a    = document.createElement("a");
+      a.href     = URL.createObjectURL(blob);
+      a.download = projectExportFilename(payload);
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      console.warn("[DatasetManager] project export failed:", e?.message);
+      setProjExportErr(e?.message ?? "Export failed.");
+    } finally {
+      setProjExportBusy(false);
+    }
+  }
+
   async function exportWorkspace(language) {
     if (wsExportBusy) return;
     setWsExportBusy(language);
@@ -989,6 +1015,35 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Project export — the whole project as a recipe (no rows) */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "0.4rem 0.85rem", borderTop: `1px solid ${C.border}`,
+            }}>
+              <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.04em", flex: 1 }}>
+                Export project
+              </span>
+              <button
+                onClick={exportProject}
+                disabled={projExportBusy}
+                title="Datasets, pipelines, pinned models, plots and pins as one .litux.json — a recipe, not the data"
+                style={{
+                  padding: "2px 8px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  border: `1px solid ${projExportErr ? C.red : projExportBusy ? C.teal : C.border2}`, borderRadius: 2,
+                  background: projExportBusy ? `${C.teal}1a` : "transparent",
+                  color: projExportErr ? C.red : projExportBusy ? C.teal : C.textDim,
+                  cursor: projExportBusy ? "default" : "pointer",
+                }}
+              >
+                {projExportBusy ? "…" : projExportErr ? "failed" : "JSON"}
+              </button>
+            </div>
+            {projExportErr && (
+              <div style={{ padding: "0 0.85rem 0.4rem", fontSize: T.caption.fontSize, color: C.red, fontFamily: T.body.fontFamily }}>
+                {projExportErr}
               </div>
             )}
 

@@ -1428,6 +1428,7 @@ function DataTab({ filename, studioRef, cleanedData, availableDatasets = [], act
             "Each tab remembers its own active dataset — Clean and Model can work on different ones at the same time",
             "Rename with the ✎ button: the new name is what replication scripts use as df_<name>",
             "The original filename is kept regardless, so the generated load call still points at the real file",
+            "Export project writes the whole project as one .litux.json — datasets, pipelines, pinned models, plots and pins. It is a recipe, not the data: keep it beside your source files as a backup of the work itself",
           ]},
           { heading: "Views", items: [
             "Overview: shape, missing-value count, numeric column count, memory estimate, and per-column metadata",
