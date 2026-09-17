@@ -694,6 +694,11 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
 
   // Expose slim dataset list to parent (for Modeling Lab dataset picker)
   useEffect(() => {
+    // Not before hydration: the pre-hydration empty list reached App, which
+    // persisted `datasetCount: 0` on the project; that read-modify-write raced
+    // the real count written a moment later, and projects with 5 datasets were
+    // listed as "0 datasets".
+    if (!hydratedRef.current) return;
     onDatasetsChange?.(datasets.map(d => ({
       id:       d.id,
       filename: d.filename,

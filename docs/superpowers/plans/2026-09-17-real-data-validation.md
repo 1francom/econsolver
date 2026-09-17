@@ -4,7 +4,10 @@
 (1) match the original reference script's numbers, and (2) be reproduced by
 EVERY script Litux emits — the full workspace/replication script AND each
 section's partial script — in R, Stata and Python. Criterion: mutual agreement
-(Litux = R = Stata = Python = reference), with documented, measured gaps only.
+(Litux = R = Stata = Python = reference) wherever the software allows it. Some
+gaps are inherent to a package or language (different small-sample
+conventions, optimiser tolerances, an estimator with no native implementation);
+those are measured and documented as known gaps, never silently tolerated.
 
 Replaces the simulated-data R benchmark suites deleted on 2026-09-17.
 
@@ -12,14 +15,15 @@ Replaces the simulated-data R benchmark suites deleted on 2026-09-17.
 
 | Unit | Reference script | Data | Litux project | Main content |
 |---|---|---|---|---|
-| PS1 | `PS1_sol_code (1).R` | simulated inside the script (seed 789) — export the frame to CSV once | ? | `lm_robust`, `iv_robust`, `linearHypothesis` |
-| PS2 | `PS2_sol_code.R` | `PS2_Ex1_Fulton_data.csv` (+ `PS2_Ex2_AJR.csv`, **missing**) | ? | OLS/2SLS with HC SE, F-tests, date parsing, plots |
-| PS3 | `PS3_sol_code.R` | `hansen_data.csv` | ? | RDD (`rdrobust`, `rdplot`), McCrary, `feols` cluster |
-| PS4 | `PS4_sol_code.R` | `PS4_education_data.csv` | ? | multi-way FE (AKM), connected components, joins, reshape, `countrycode`, tile/facet plots |
-| PS5 | `PS5_code_solutions (1).R` | `PS5_dinas2019_data.RData` | **Waldinger Validation Tutorial 5** (built) | subsets, OLS/2SLS/DiD through the origin, event study |
-| PS6 | `PS6_Ex2_staggered (2).R` (+ `_simulation.R`) | `PS6_Staggered_DiD.csv`, `PS6_Complete.csv` | ? | TWFE, Goodman-Bacon, Callaway-Sant'Anna |
-| PS7 | `PS7_solution (1).R` | `Basque_synth.csv` (`Synth::basque`) | ? | Synthetic control, `feols` |
-| BA | `BA check/*.R` (5 scripts) | `C:/Franco/Univ/Bachelorarbeit/BA Code/` | BA Elies | spatial joins/buffers/distances, Poisson FE (`fepois`) event study, summary stats, plots |
+| PS2 | `PS2_sol_code.R` | `PS2_Ex1_Fulton_data.csv` (+ `PS2_Ex2_AJR.csv`, **missing**) | Waldinger Validation tutorial 2 | OLS/2SLS with HC SE, F-tests, date parsing, plots |
+| PS3 | `PS3_sol_code.R` | `hansen_data.csv` | Waldinger Validation tutorial 3 | RDD (`rdrobust`, `rdplot`), McCrary, `feols` cluster |
+| PS4 | `PS4_sol_code.R` | `PS4_education_data.csv` | Waldinger Validation tutorial 4 | multi-way FE (AKM), connected components, joins, reshape, `countrycode`, tile/facet plots |
+| PS5 | `PS5_code_solutions (1).R` | `PS5_dinas2019_data.RData` | Waldinger Validation Tutorial 5 | subsets, OLS/2SLS/DiD through the origin |
+| PS6 | `PS6_Ex2_staggered (2).R` (+ `_simulation.R`) | `PS6_Staggered_DiD.csv`, `PS6_Complete.csv` | Tutprial 6 Validation | TWFE, Goodman-Bacon, Callaway-Sant'Anna |
+| LM6 | *(to confirm)* | `dubelesterreich_empdata_contig_minwage.dta` | Labor market Tutorial 6 | multi-way FE incl. `period^pair_id`, state-clustered SE |
+
+Out of scope: PS1 and PS7 (no Litux project yet), the BA thesis and "Effect of
+low-skill inmigration" (Franco, 2026-09-17).
 
 Notebooks (`PS2–PS6_notebook.Rmd`) use `wooldridge` data and stay out of scope
 until the bundled-teaching-datasets item lands.
@@ -78,11 +82,9 @@ as a local backup. Contains recipes and dataset metadata only, never rows.
 
 1. Export-project feature (small) + harness skeleton on **PS5 / Tutorial 5**
    (already built in the app) — proves the pipeline end to end.
-2. PS3, PS6, PS7 (estimator-heavy, data ready).
-3. PS4 (widest wrangling surface), PS2 (needs AJR data), PS1 (export its
-   simulated frame).
-4. BA thesis (largest; spatial + Poisson FE).
-5. Fix what breaks, unit by unit; each fix gets a pinned node check like
+2. PS3, PS6, LM6 (estimator-heavy, data ready).
+3. PS4 (widest wrangling surface), PS2 (needs AJR data).
+4. Fix what breaks, unit by unit; each fix gets a pinned node check like
    `stataEstimatorExportValidation.mjs`.
 
 ## Environment
@@ -98,6 +100,6 @@ as a local backup. Contains recipes and dataset metadata only, never rows.
 
 ## Open questions for Franco
 
-- Project names for PS1–PS4, PS6, PS7 (built yet?).
 - `PS2_Ex2_AJR.csv` location.
+- Reference script for "Labor market Tutorial 6" (the B6 course script?).
 - Approve the package installs above.
