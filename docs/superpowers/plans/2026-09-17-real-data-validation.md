@@ -15,12 +15,12 @@ Replaces the simulated-data R benchmark suites deleted on 2026-09-17.
 
 | Unit | Reference script | Data | Litux project | Main content |
 |---|---|---|---|---|
-| PS2 | `PS2_sol_code.R` | `PS2_Ex1_Fulton_data.csv` (+ `PS2_Ex2_AJR.csv`, **missing**) | Waldinger Validation tutorial 2 | OLS/2SLS with HC SE, F-tests, date parsing, plots |
+| PS2 | `PS2_sol_code.R` | `PS2_Ex1_Fulton_data.csv` + `PS2_Ex2_AJR.csv` | Waldinger Validation tutorial 2 | OLS/2SLS with HC SE, F-tests, date parsing, plots |
 | PS3 | `PS3_sol_code.R` | `hansen_data.csv` | Waldinger Validation tutorial 3 | RDD (`rdrobust`, `rdplot`), McCrary, `feols` cluster |
 | PS4 | `PS4_sol_code.R` | `PS4_education_data.csv` | Waldinger Validation tutorial 4 | multi-way FE (AKM), connected components, joins, reshape, `countrycode`, tile/facet plots |
 | PS5 | `PS5_code_solutions (1).R` | `PS5_dinas2019_data.RData` | Waldinger Validation Tutorial 5 | subsets, OLS/2SLS/DiD through the origin |
 | PS6 | `PS6_Ex2_staggered (2).R` (+ `_simulation.R`) | `PS6_Staggered_DiD.csv`, `PS6_Complete.csv` | Tutprial 6 Validation | TWFE, Goodman-Bacon, Callaway-Sant'Anna |
-| LM6 | *(to confirm)* | `dubelesterreich_empdata_contig_minwage.dta` | Labor market Tutorial 6 | multi-way FE incl. `period^pair_id`, state-clustered SE |
+| LM6 | `Replication Scripts/Tutorial_6_labor_market_min_wage.R` | `dubelesterreich_empdata_contig_minwage.dta` | Labor market Tutorial 6 | multi-way FE incl. `period^pair_id`, state-clustered SE |
 
 Out of scope: PS1 and PS7 (no Litux project yet), the BA thesis and "Effect of
 low-skill inmigration" (Franco, 2026-09-17).
@@ -39,11 +39,11 @@ harness recomputes exactly what the app shows (`runPipeline` +
 same specs (the exporters are pure JS too). This is the mechanism of
 `stataEstimatorSweep.mjs`, applied to real projects.
 
-**Needed from the app — one new feature:** *Export project* → a single plain
-`.litux.json` with everything above (the cloud-sync manifest builder already
-assembles exactly this set, minus encryption). Franco exports each validation
-project once into `validation/<unit>/project.litux.json`. Also useful to users
-as a local backup. Contains recipes and dataset metadata only, never rows.
+**Built 2026-09-17 — *Export project*** (`services/export/projectExport.js`,
+button in the Dataset Manager): one plain `.litux.json` with everything above.
+Franco exports each validation project once into
+`validation/<unit>/project.litux.json`. Also a local backup for users; it holds
+recipes and dataset metadata only, never rows.
 
 ## Harness — `tools/validation/`
 
@@ -105,12 +105,14 @@ ours to publish in a public repo.
 
 ## Environment
 
-- R 4.4.1 by full path. Missing packages for the reference scripts:
-  estimatr modelsummary huxtable rdd rddensity stargazer plotly countrycode
-  did tidyverse hrbrthemes SCtools rvest viridis ggthemes sf writexl readxl
-  units readr knitr wooldridge plm gplots haven — install needs Franco's OK.
-- Stata 19.5 (`/e`, `MSYS2_ARG_CONV_EXCL`); ssc: rdrobust, csdid, drdid,
-  ppmlhdfe, synth pending approval.
+- R 4.4.1 by full path; every package the reference scripts need is installed
+  (2026-09-17). Two are not plain CRAN installs: **`rdd` is archived** (0.57 from
+  the CRAN archive) and **`did` needs DRDID >= 1.3.0, which CRAN does not have**
+  — did 2.1.2 is installed against DRDID 1.2.3 instead. Note the version if a
+  CS comparison ever disagrees.
+- Stata 19.5 (`/e`, `MSYS2_ARG_CONV_EXCL`): rdrobust, rddensity, csdid, drdid,
+  ppmlhdfe, synth, eventstudyinteract, avar, coefplot, lpdensity installed from
+  ssc; synth_runner from its GitHub repo (not on ssc).
 - Python: pandas 2.3.3, statsmodels 0.14.6, linearmodels 7.0, geopandas present;
   pyfixest missing (only needed if the Python exporter emits it).
 
