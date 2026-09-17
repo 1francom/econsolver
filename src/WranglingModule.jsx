@@ -307,7 +307,18 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
   const info        = useMemo(() => buildInfo(headers, rows),                    [headers, rows]);
   const panelReport = useMemo(() => panel ? validatePanel(rows, panel.entityCol, panel.timeCol) : null, [rows, panel]);
-  const qualityReport = useMemo(() => buildDataQualityReport(headers, rows, info, panelReport), [headers, rows, info, panelReport]);
+  // Computed after the module has painted, not during render: on wide data
+  // (11.5k rows × 122 cols) it was the single biggest cost of opening a project
+  // — the old correlation scan alone took 9 s. It also recomputes after every
+  // pipeline step, which should never delay the step's result appearing.
+  const [qualityReport, setQualityReport] = useState(null);
+  useEffect(() => {
+    setQualityReport(null);
+    const id = setTimeout(() => {
+      setQualityReport(buildDataQualityReport(headers, rows, info, panelReport));
+    }, 50);
+    return () => clearTimeout(id);
+  }, [headers, rows, info, panelReport]);
 
   // ── Persist on every change (debounced 400ms to avoid thrashing IDB) ────────
   const saveTimer    = useRef(null);
@@ -1033,7 +1044,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           ["workbench", "⧉ Workbench"],
           ["structure", "⊞ Panel Structure"],
           ["dictionary","◈ Dictionary"],
-          ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
+          ["quality",   `◈ Quality${!qualityReport ? " …" : qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
         ]} active={tab} set={setTab}/>
 
         {/* ── AI command bar (NL → validated pipeline steps) ── */}

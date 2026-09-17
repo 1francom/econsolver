@@ -68,18 +68,17 @@ function maxSev(...sevs) {
 // of the dataset, pattern is likely systematic (truncation, merge artifact).
 function missingPattern(col, rows) {
   const n = rows.length;
-  const nullIdx = rows
-    .map((r, i) => (r[col] === null || r[col] === undefined ? i : -1))
-    .filter(i => i >= 0);
-
-  if (!nullIdx.length) return { count: 0, pct: 0, isSystematic: false };
-
-  const pct = nullIdx.length / n;
   const boundary = Math.max(1, Math.floor(n * 0.1));
-  const inBoundary = nullIdx.filter(i => i < boundary || i >= n - boundary).length;
-  const isSystematic = inBoundary / nullIdx.length > 0.6;
-
-  return { count: nullIdx.length, pct, isSystematic };
+  let count = 0, inBoundary = 0;
+  for (let i = 0; i < n; i++) {
+    const v = rows[i][col];
+    if (v === null || v === undefined) {
+      count++;
+      if (i < boundary || i >= n - boundary) inBoundary++;
+    }
+  }
+  if (!count) return { count: 0, pct: 0, isSystematic: false };
+  return { count, pct: count / n, isSystematic: inBoundary / count > 0.6 };
 }
 
 // ─── OUTLIER REPORT ───────────────────────────────────────────────────────────
@@ -88,37 +87,39 @@ function missingPattern(col, rows) {
 function outlierReport(col, rows, stats) {
   if (!stats.isNum || stats.mean == null) return null;
 
-  const nums = rows
-    .map(r => r[col])
-    .filter(v => typeof v === "number" && isFinite(v));
-
-  if (nums.length < 4) return null;
-
-  // IQR method
+  // One pass, no intermediate arrays (this ran on every Clean mount for every
+  // numeric column). Counts and the skewness sum keep row order, so the result
+  // is the same as the map/filter/reduce version.
+  const n = rows.length;
+  const buf = new Float64Array(n);
   const iqrLo = stats.q1 - 1.5 * stats.iqr;
   const iqrHi = stats.q3 + 1.5 * stats.iqr;
-  const iqrOut = nums.filter(v => v < iqrLo || v > iqrHi);
-
-  // Z-score method (|z| > 3)
-  const zOut = stats.std > 0
-    ? nums.filter(v => Math.abs((v - stats.mean) / stats.std) > 3)
-    : [];
+  const zOn = stats.std > 0;
+  let k = 0, iqrCount = 0, zCount = 0, skewSum = 0;
+  for (let i = 0; i < n; i++) {
+    const v = rows[i][col];
+    if (typeof v !== "number" || !isFinite(v)) continue;
+    buf[k++] = v;
+    if (v < iqrLo || v > iqrHi) iqrCount++;             // IQR method
+    if (zOn) {
+      const z = (v - stats.mean) / stats.std;
+      if (Math.abs(z) > 3) zCount++;                     // z-score method (|z| > 3)
+      skewSum += z ** 3;                                 // moment-based skewness
+    }
+  }
+  if (k < 4) return null;
 
   // Extreme values (top/bottom 3)
-  const sorted = [...nums].sort((a, b) => a - b);
-  const extremeLow  = sorted.slice(0, 3);
-  const extremeHigh = sorted.slice(-3).reverse();
-
-  // Skewness (moment-based)
-  const skew = stats.std > 0
-    ? nums.reduce((s, v) => s + ((v - stats.mean) / stats.std) ** 3, 0) / nums.length
-    : 0;
+  const sorted = buf.subarray(0, k).sort();
+  const extremeLow  = Array.from(sorted.subarray(0, 3));
+  const extremeHigh = Array.from(sorted.subarray(k - 3)).reverse();
+  const skew = zOn ? skewSum / k : 0;
 
   return {
-    iqrCount:    iqrOut.length,
-    iqrPct:      iqrOut.length / nums.length,
-    zCount:      zOut.length,
-    zPct:        zOut.length / nums.length,
+    iqrCount,
+    iqrPct:      iqrCount / k,
+    zCount,
+    zPct:        zCount / k,
     extremeLow,
     extremeHigh,
     skewness:    skew,
@@ -166,33 +167,44 @@ function isNearConstant(stats) {
 // Returns pairs with |r| > threshold. O(n·k²) — k = numeric columns.
 function highCorrelationPairs(headers, rows, info, threshold = 0.85) {
   const numCols = headers.filter(h => info[h]?.isNum && info[h]?.std > 0);
+  const n = rows.length;
+  // Each column is extracted ONCE, centred on its mean, with NaN marking a
+  // missing/non-finite value. The old version walked every row object for every
+  // PAIR — ~80M property reads on 11.5k rows × 117 numeric columns, 9 s on
+  // every Clean mount. Same sums in the same row order, so r is unchanged.
+  const cols = numCols.map(h => {
+    const m = info[h].mean;
+    const v = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = rows[i][h];
+      v[i] = (typeof x === "number" && isFinite(x)) ? x - m : NaN;
+    }
+    return v;
+  });
   const pairs = [];
 
   for (let i = 0; i < numCols.length; i++) {
+    const A = cols[i];
     for (let j = i + 1; j < numCols.length; j++) {
-      const a = numCols[i], b = numCols[j];
-      const sa = info[a], sb = info[b];
-
-      // Pearson r
-      let sumAB = 0, sumA2 = 0, sumB2 = 0, n = 0;
-      rows.forEach(r => {
-        const va = r[a], vb = r[b];
-        if (typeof va !== "number" || typeof vb !== "number") return;
-        if (!isFinite(va) || !isFinite(vb)) return;
-        const da = va - sa.mean, db = vb - sb.mean;
+      const B = cols[j];
+      // Pearson r over pairwise-complete rows, centred on the column means
+      let sumAB = 0, sumA2 = 0, sumB2 = 0, cnt = 0;
+      for (let r = 0; r < n; r++) {
+        const da = A[r], db = B[r];
+        if (da !== da || db !== db) continue;   // NaN check
         sumAB += da * db;
         sumA2 += da * da;
         sumB2 += db * db;
-        n++;
-      });
+        cnt++;
+      }
 
-      if (n < 3) continue;
+      if (cnt < 3) continue;
       const denom = Math.sqrt(sumA2 * sumB2);
       if (denom === 0) continue;
-      const r = sumAB / denom;
+      const rr = sumAB / denom;
 
-      if (Math.abs(r) >= threshold) {
-        pairs.push({ a, b, r: parseFloat(r.toFixed(4)) });
+      if (Math.abs(rr) >= threshold) {
+        pairs.push({ a: numCols[i], b: numCols[j], r: parseFloat(rr.toFixed(4)) });
       }
     }
   }

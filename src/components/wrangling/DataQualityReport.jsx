@@ -531,7 +531,7 @@ export default function DataQualityReport({ report, rows = [], onApplyStep, onEx
 
   if (!report) return (
     <div style={{ padding: "2rem", textAlign: "center", color: C.textMuted, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize }}>
-      Run quality scan to see results.
+      ⏳ Scanning data quality…
     </div>
   );
 

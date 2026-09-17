@@ -39,11 +39,8 @@ function genId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// ─── CSV PARSER ───────────────────────────────────────────────────────────────
-// Handles: RFC 4180 quoting, embedded commas/newlines, CRLF/LF, type inference.
-// Detects and handles TSV automatically.
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
-// Excel parser — uses the installed xlsx npm package (bundled by Vite).
+// Excel parser — parseExcelBuffer (services/data/parsers/tabular.js), run in the parse worker.
 //
 // A workbook is a COLLECTION of sheets, so this returns every one of them, the
 // same shape parseRData uses for an R workspace: { tables, skipped }. It used to
@@ -124,9 +121,6 @@ async function parseJSON(file) {
   return { headers, rows };
 }
 
-// ─── DELIMITER DETECTION ─────────────────────────────────────────────────────
-// Samples up to 5 non-empty lines and picks the most frequent candidate delimiter.
-// Handles comma, semicolon, tab, pipe — covers sep=",", sep=";", sep="\t", sep="|".
 // ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
 export async function parseFileForPrimary(file) { return parseFile(file); }
 
@@ -543,7 +537,15 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         if (registry.length) {
           const loaded = await Promise.all(registry.map(async m => {
             let restoreFailed = false;
-            if (m.opfsCacheKey) {
+            // IndexedDB first: when it already holds every row (anything under
+            // its 100 MB cap is stored whole), the OPFS/DuckDB restore is pure
+            // cost — it initialises DuckDB-Wasm, a multi-second download and
+            // compile, on every page load. A dataset that went through DuckDB at
+            // import time but fits in IndexedDB opens from there directly.
+            const idbRaw = await loadRawData(m.id);
+            const idbComplete = !!idbRaw?.rows?.length && Number(m.rowCount) > 0
+              && idbRaw.rows.length >= Number(m.rowCount);
+            if (m.opfsCacheKey && !idbComplete) {
               try {
                 const { restoreCachedParquet } = await import("./services/data/duckdb.js");
                 const restored = await restoreCachedParquet(m.opfsCacheKey, `project_${m.id}`);
@@ -560,7 +562,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
                   `Run window.__validation.fase9.listCache() to see what is actually in OPFS.`
                 );
               }
-            } else if (m.rowCount > PREVIEW_ROWS) {
+            } else if (!idbComplete && m.rowCount > PREVIEW_ROWS) {
               // A DuckDB-backed dataset whose durable key is gone: it can never be
               // restored, so say so instead of silently serving the preview.
               restoreFailed = true;
@@ -569,7 +571,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
                 `cannot restore the full table. Re-import the file.`
               );
             }
-            const raw = await loadRawData(m.id);
+            const raw = idbRaw;
             if (!raw || !raw.rows?.length) return null;
             // saveRawData() only ever persists a 500-row preview for DuckDB-backed
             // datasets (see indexedDB.js — it never writes `_duckdb`). If the registry
