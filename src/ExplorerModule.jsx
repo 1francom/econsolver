@@ -750,8 +750,11 @@ function SummaryTable({rows,headers,info,panel,onPin}){
 
   const thS={padding:"0.35rem 0.6rem",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,color:C.textMuted,fontWeight:400,letterSpacing:"0.1em",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,background:C.surface2,textAlign:"right",whiteSpace:"nowrap"};
   const tdS={padding:"0.32rem 0.6rem",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,color:C.text,borderBottom:`1px solid ${C.border}`,textAlign:"right",whiteSpace:"nowrap"};
-  const chipBtn=(active,color,onClick,label)=>(
-    <button onClick={onClick} style={{padding:"0.22rem 0.6rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{label}</button>
+  // `key` is a parameter because this helper CREATES the element — a key set at
+  // the .map() call site would land on the call, not on the button, which is
+  // why React warned about SummaryTable's children.
+  const chipBtn=(active,color,onClick,label,key)=>(
+    <button key={key} onClick={onClick} style={{padding:"0.22rem 0.6rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{label}</button>
   );
 
   const previewRows=view==="head"?rows.slice(0,viewN):view==="tail"?rows.slice(-viewN):[];
@@ -766,7 +769,7 @@ function SummaryTable({rows,headers,info,panel,onPin}){
           <Lbl mb={0}>Group by</Lbl>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
             {chipBtn(!groupBy,C.gold,()=>setGroupBy(""),"None")}
-            {catH.map(h=>chipBtn(groupBy===h,C.gold,()=>setGroupBy(h),h))}
+            {catH.map(h=>chipBtn(groupBy===h,C.gold,()=>setGroupBy(h),h,h))}
           </div>
         </div>
         <div style={{width:1,height:20,background:C.border,flexShrink:0}}/>
@@ -774,7 +777,7 @@ function SummaryTable({rows,headers,info,panel,onPin}){
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <Lbl mb={0}>View</Lbl>
           <div style={{display:"flex",gap:4,alignItems:"center"}}>
-            {[["stats","Stats"],["head","head(n)"],["tail","tail(n)"]].map(([k,l])=>chipBtn(view===k,C.teal,()=>setView(k),l))}
+            {[["stats","Stats"],["head","head(n)"],["tail","tail(n)"]].map(([k,l])=>chipBtn(view===k,C.teal,()=>setView(k),l,k))}
             {view!=="stats"&&<input type="number" min={1} max={500} value={viewN} onChange={e=>setViewN(Math.max(1,parseInt(e.target.value)||6))}
               style={{width:44,padding:"0.2rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,outline:"none"}}/>}
           </div>

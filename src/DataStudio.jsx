@@ -24,7 +24,7 @@ import { useTheme } from "./ThemeContext.jsx";
 import WranglingModule from "./WranglingModule.jsx";
 import { saveRawData, loadRawData, deleteRawData, saveDatasetRegistry, loadDatasetRegistry, saveProject } from "./services/Persistence/indexedDB.js";
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
-import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
+import { useSessionDispatch, registerDataset, updateDatasetMeta } from "./services/session/sessionState.jsx";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { deleteCacheEntry } from "./services/data/parquetCache.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
@@ -975,10 +975,29 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     // ensureRowIds: assign __ri so cell editing (patch step) works for
     // simulated / API-loaded / derived datasets, not just file uploads
     const rawData = ensureRowIds({ rows, headers });
-    // Durably persist to IndexedDB (100MB cap) so large derived datasets — e.g.
-    // spatial Aggregate-to-Grid / Spatial Join outputs carrying WKT geometry —
-    // survive a reload even when they exceed the sessionStorage size budget.
-    saveRawData(id, rawData);
+    // Persist to IndexedDB so large derived datasets — e.g. spatial
+    // Aggregate-to-Grid / Spatial Join outputs carrying WKT geometry — survive a
+    // reload even when they exceed the sessionStorage size budget.
+    //
+    // BUT that store has a 100 MB hard cap and `saveRawData` declines silently
+    // above it, returning { stored: false }. This call used to DISCARD that
+    // result, and a derived dataset has no second persistence path: an
+    // `opfsCacheKey` only exists for tables that came through DuckDB from a
+    // file, so a join output has none. Net effect was silent data loss — a
+    // 109.8 MB `joined_data` simply vanished on F5, and the reload warning told
+    // the user to "re-import the file" for something that never had one.
+    // Flag it on the rawData instead, the same way `_duckdbRestoreFailed`
+    // travels to the UI, so the user is told BEFORE they lose the work.
+    // The flag lives on the session REGISTRY, not on rawData: DatasetManager —
+    // which lists every dataset and is reachable from any tab — reads the
+    // registry, and "this dataset is not persisted" is dataset metadata. One
+    // home, so the two cannot disagree. `saveRawData` never rejects; it always
+    // resolves { stored, byteSize }, including on a genuine IDB error (with
+    // byteSize 0), which is also correctly "not persisted".
+    saveRawData(id, rawData).then(({ stored, byteSize }) => {
+      if (stored || !dispatch) return;
+      updateDatasetMeta(dispatch, id, { notPersisted: true, persistBytes: byteSize });
+    });
     const entry = {
       id,
       filename: name,

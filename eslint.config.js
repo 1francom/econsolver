@@ -4,6 +4,11 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
+const SHADOWABLE_BROWSER_GLOBALS = new Set([
+  'model', 'status', 'name', 'origin', 'event', 'length',
+  'top', 'frames', 'external', 'screen', 'closed', 'opener',
+])
+
 export default defineConfig([
   // `dist` = build output. `_parked` dirs hold defined-but-never-rendered
   // orphan components (see CLAUDE.md) — intentionally dead, so their stale
@@ -18,7 +23,17 @@ export default defineConfig([
     ],
     languageOptions: {
       ecmaVersion: 2020,
-      globals: globals.browser,
+      // `globals.browser` includes legacy window properties whose names are
+      // exactly what a developer reaches for as a local: `model`, `status`,
+      // `name`, `origin`, `event`, `length`, `top`, `frames`, `external`.
+      // A typo on any of them resolves to the global and `no-undef` stays
+      // silent — which is how `model.factorMap` shipped in CodeEditor.jsx and
+      // crashed the panel on Estimate, with build AND lint:undef green.
+      // Removing them restores the guard for the names this codebase actually
+      // uses as variables. Nothing in src/ reads them as globals (measured).
+      globals: Object.fromEntries(
+        Object.entries(globals.browser).filter(([k]) => !SHADOWABLE_BROWSER_GLOBALS.has(k))
+      ),
       parserOptions: {
         ecmaVersion: 'latest',
         ecmaFeatures: { jsx: true },

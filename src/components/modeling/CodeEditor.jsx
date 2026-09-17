@@ -54,6 +54,10 @@ function buildScript(tab, result, allDatasets = {}) {
       kernel:     spec.kernel     ?? "triangular",
       factorVars:        spec.factorVars        ?? [],
       factorRefs:        spec.factorRefs        ?? {},
+      // `model` is the config KEY here, not a variable — this file's binding is
+      // `result`. And a panel result arrives as the {type, fe, fd} wrapper, so
+      // factorMap needs the same nesting fallback `spec` above uses.
+      factorMap: result.factorMap ?? result.fe?.factorMap ?? result.fd?.factorMap ?? null,
       interactionTerms:  spec.interactionTerms  ?? [],
       xVarsRaw:          spec.xVarsRaw          ?? null,
       wVarsRaw:          spec.wVarsRaw          ?? null,

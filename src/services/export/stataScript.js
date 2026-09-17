@@ -10,7 +10,9 @@
 
 import { opInfix } from "../../pipeline/predicate.js";
 import { feTerm } from "./feInteractionTerm.js";
+import { factorLevelsFromMap, needsEncode, encodedName, encodedRefCode, stataEncodeLines } from "./stataFactors.js";
 import { toStata, jsExprToStata, stataRightLoad } from "../../pipeline/stepTranslators.js";
+import { UNMATCHED_BY_HOW, stataMasterVarlist, stataSuffixHomonyms, stataDropMergeMarker } from "./stataJoin.js";
 import { buildStataLoadLine } from "./loadLine.js";
 
 export function generateStataScript(config = {}) {
@@ -90,7 +92,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null }));
+  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, factorMap: model.factorMap ?? null, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -500,25 +502,23 @@ function transpileStep(step, allDatasets = {}) {
           `erase "__right_keys_tmp.dta"`,
         ].filter(Boolean).join("\n");
       }
-      const keep = {
-        left: "keep(master match)",
-        inner: "keep(match)",
-        right: "keep(match using)",
-        full: "keep(master match using)",
-      }[how] ?? "keep(master match)";
+      // joinby, not merge. Measured against dplyr and Litux on three fixtures
+      // (master repeats / using repeats / both repeat): joinby returns
+      // 200/200/60 exactly like both, while `merge 1:m` cannot express the
+      // regime it is not in — and the exporter has no way to know which regime
+      // the data is in. See stataJoin.js for the full measurements.
+      const unmatched = UNMATCHED_BY_HOW[how] ?? "master";
       return [
-        `* ${how} join: load right dataset, merge on ${sameKey}`,
+        `* ${how} join: load right dataset, join on ${sameKey}`,
+        ...stataMasterVarlist(),
         `preserve`,
         `  ${stataRightLoad(step.rightId, allDatasets)}`,
         lk === rk ? null : `  rename ${rk} ${lk}  /* align key names */`,
+        ...stataSuffixHomonyms([lk], sfx),
         `  save "__right_tmp.dta", replace`,
         `restore`,
-        `* NOTE: 1:m assumes the key is unique in THIS dataset (the master). If both`,
-        `* sides repeat the key, Stata's merge cannot express it — use joinby instead:`,
-        `*   joinby ${lk} using "__right_tmp.dta", unmatched(master)`,
-        `* joinby has no suffixes() option, so homonym columns resolve differently`,
-        `* there than in the R/Python scripts. UNVERIFIED against a real Stata run.`,
-        `merge 1:m ${lk} using "__right_tmp.dta", ${keep} nogen suffixes("" "${sfx}")`,
+        `joinby ${lk} using "__right_tmp.dta", unmatched(${unmatched})`,
+        ...stataDropMergeMarker(),
         `erase "__right_tmp.dta"`,
       ].filter(Boolean).join("\n");
     }
@@ -528,12 +528,14 @@ function transpileStep(step, allDatasets = {}) {
       const sfx = step.suffix   ?? "_r";
       return [
         `* Attach lookup columns: m:1 errors if the right key is not unique — same contract as Litux`,
+        ...stataMasterVarlist(),
         `preserve`,
         `  ${stataRightLoad(step.rightId, allDatasets)}`,
         lk === rk ? null : `  rename ${rk} ${lk}  /* align key names */`,
+        ...stataSuffixHomonyms([lk], sfx),
         `  save "__lookup_tmp.dta", replace`,
         `restore`,
-        `merge m:1 ${lk} using "__lookup_tmp.dta", keep(master match) nogen suffixes("" "${sfx}")`,
+        `merge m:1 ${lk} using "__lookup_tmp.dta", keep(master match) nogen`,
         `erase "__lookup_tmp.dta"`,
       ].filter(Boolean).join("\n");
     }
@@ -552,12 +554,14 @@ function transpileStep(step, allDatasets = {}) {
       return [
         `* bind_cols: align by row order`,
         `gen long __row_order = _n`,
+        ...stataMasterVarlist(),
         `preserve`,
         `  ${stataRightLoad(step.rightId, allDatasets)}`,
         `  gen long __row_order = _n`,
+        ...stataSuffixHomonyms(["__row_order"], step.suffix ?? "_r"),
         `  save "__bind_cols_tmp.dta", replace`,
         `restore`,
-        `merge 1:1 __row_order using "__bind_cols_tmp.dta", keep(match) nogen suffixes("" "${step.suffix ?? "_r"}")`,
+        `merge 1:1 __row_order using "__bind_cols_tmp.dta", keep(match) nogen`,
         `drop __row_order`,
         `erase "__bind_cols_tmp.dta"`,
       ].join("\n");
@@ -682,10 +686,10 @@ function transpileStep(step, allDatasets = {}) {
 // ─── STATA VARLIST BUILDER ────────────────────────────────────────────────────
 // Builds Stata varlist RHS. Factor vars use i. prefix; interactions use ## (*) or # (:).
 // Continuous vars inside interactions get the c. prefix (required by Stata).
-function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs = {}, opts = {}) {
+function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs = {}, opts = {}, factorLevels = {}) {
   const { noIntercept = false } = opts;
-  const fmtBase  = v => stFactorTerm(v, fvSet, factorRefs);
-  const fmtInInt = v => fvSet.has(v) ? stFactorTerm(v, fvSet, factorRefs) : `c.${v}`;
+  const fmtBase  = v => stFactorTerm(v, fvSet, factorRefs, factorLevels);
+  const fmtInInt = v => fvSet.has(v) ? stFactorTerm(v, fvSet, factorRefs, factorLevels) : `c.${v}`;
   const rawX = xVarsRaw ?? xVars ?? [];
   const rawW = wVarsRaw ?? wVars ?? [];
   const mainVars = [...rawX, ...rawW];
@@ -723,32 +727,38 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 // ppmlhdfe) — these accept vce(cluster) but not vce(hc2)/vce(hc3) or a HAC option.
 const PANEL_TYPES = new Set(["FE", "FD", "TWFE", "LSDV", "EventStudy", "PoissonFE"]);
 
-// One factor variable's Stata term — i.col by default, or ib(#).col when a
-// custom reference was chosen AND that reference is a numeric literal.
-// Stata's factor-variable operators (i./ib./c.) require a NUMERIC variable
-// and ib#. takes the reference's literal VALUE, not a level name — so a
-// string level (e.g. "COD", "north") genuinely cannot be expressed this way
-// without an `encode` step assigning it a numeric code first. That's a
-// separate, larger gap (this exporter has no column-type info to decide
-// when `encode` is needed at all — see the pre-existing i.col-on-a-string-
-// column issue this feature's spec found but did not fix). Scope here:
-// numeric factor columns (the common case — Year, a numeric group id) get
-// full ib(#). support; a string reference falls back to i.col (identical to
-// pre-2026-08-16 behavior) with a comment explaining why, rather than
-// emitting Stata syntax that would error.
-function stFactorTerm(v, fvSet, factorRefs) {
+// One factor variable's Stata term.
+//
+// Stata's factor-variable operators (i./ib./c.) require a NUMERIC variable, so
+// a string factor gets an `encode` line emitted before the model and the term
+// points at the encoded column — see services/export/stataFactors.js, which
+// owns that decision and carries the measurements behind it. Before 2026-09-12
+// this emitted a bare `i.region` for a string column, which errors with r(109)
+// and killed the whole do-file on the estimation line.
+//
+// `ib#.` takes the base level pressed straight against ib — `ib2.municipality`.
+// Measured against StataNow 19.5: the parenthesised `ib(2).municipality` is
+// ALSO valid and gives an identical fit (the comment here used to claim it was
+// a syntax error, which is wrong — the unparenthesised form is simply the one
+// emitted). Stata factor variables admit only NON-NEGATIVE INTEGER levels, so a
+// negative or fractional reference has no ib#. form and falls back to i.; a
+// fractional COLUMN cannot be used at all (r(452)) and is encoded instead.
+function stFactorTerm(v, fvSet, factorRefs, factorLevels = {}) {
   if (!fvSet.has(v)) return v;
-  const ref = factorRefs[v];
-  // `ib#.` takes the base level pressed straight against ib — `ib2.municipality`.
-  // The parenthesised form is reserved for the keywords ib(first)./ib(last)./
-  // ib(freq)., so `ib(2).` is a syntax error. Stata factor variables also admit
-  // only NON-NEGATIVE INTEGER levels, so a negative or fractional reference has
-  // no ib#. form at all and falls back to i. like a string one does.
+  const ref    = factorRefs[v];
+  const levels = factorLevels[v];
+  if (levels && needsEncode(levels)) {
+    const col  = encodedName(v);
+    const code = encodedRefCode(ref, levels);
+    // A custom reference IS expressible once the levels are known: encode's
+    // codes are the 1-based positions in that sorted list.
+    return code != null ? `ib${code}.${col}` : `i.${col}`;
+  }
   if (ref != null && /^\d+$/.test(String(ref))) return `ib${ref}.${v}`;
   return `i.${v}`;
 }
 
-function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVarsIn, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null }) {
+function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVarsIn, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, factorMap = null, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null }) {
   // Prefer the PRE-EXPANSION lists in EVERY branch, not only in the plain
   // formula path: the other estimators mapped their factor formatter over the
   // post-expansion columns, so `municipality` arrived as municipality_10,
@@ -759,19 +769,43 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
   const allX  = (Array.isArray(xVarsRaw) && xVarsRaw.length) ? [...xVars, ...wVars] : (allXIn ?? []);
   const lines = [];
   const fvSet = new Set(factorVars);
-  const fmtS  = v => stFactorTerm(v, fvSet, factorRefs);
+  const factorLevels = factorLevelsFromMap(factorMap);
+  const fmtS  = v => stFactorTerm(v, fvSet, factorRefs, factorLevels);
   const { list: xList, ibnVar } = buildStataVarlist(
     xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs,
-    { noIntercept: noIntercept && type === "OLS" });
-  // A string-level reference couldn't be expressed as ib(#). — surfaced once,
-  // near the estimation command, rather than silently reverting to i.col.
+    { noIntercept: noIntercept && type === "OLS" }, factorLevels);
+  // String/non-integer factors become encoded columns BEFORE the estimation
+  // command — without this the do-file dies on that line with r(109).
+  const encLines = stataEncodeLines(factorVars, factorLevels);
+  if (encLines.length) { lines.push(...encLines, ``); }
+
+  // A string reference is now expressible: `encodedRefCode` turns it into the
+  // 1-based code encode assigns. It only stays unexpressible when the levels
+  // are unknown (a model pinned before factorMap existed, or restored from a
+  // snapshot that predates it), so the NOTE is about MISSING LEVELS now, not
+  // about string references as such.
   const unexpressibleRefs = Object.entries(factorRefs)
-    .filter(([col, ref]) => fvSet.has(col) && ref != null && !/^-?\d+(\.\d+)?$/.test(String(ref)))
+    .filter(([col, ref]) =>
+      fvSet.has(col) && ref != null &&
+      !/^-?\d+(\.\d+)?$/.test(String(ref)) &&
+      encodedRefCode(ref, factorLevels[col]) == null)
     .map(([col, ref]) => `${col} (ref "${ref}")`);
   if (unexpressibleRefs.length) {
-    lines.push(`* NOTE: Stata's ib(#). needs a NUMERIC reference value — ${unexpressibleRefs.join(", ")} `
-      + `has a string reference and falls back to i.col (default reference). `
-      + `To set it, run e.g. "encode ${unexpressibleRefs[0].split(" ")[0]}, generate(...)" first and reference the numeric code.`);
+    lines.push(`* NOTE: Stata's ib(#). needs a NUMERIC reference value and this model`);
+    lines.push(`* carries no level list for ${unexpressibleRefs.join(", ")}, so the term falls`);
+    lines.push(`* back to the default base. Re-run the model to record the levels, or run`);
+    lines.push(`* "encode ${unexpressibleRefs[0].split(" ")[0]}, generate(...)" and reference the code with ib#.`);
+  }
+  // Where a custom string reference WAS resolved, say which code it became —
+  // the mapping is invisible in the do-file otherwise, and `label list` is how
+  // a reader checks it.
+  const encodedRefs = Object.entries(factorRefs)
+    .filter(([col, ref]) => fvSet.has(col) && ref != null &&
+      needsEncode(factorLevels[col] ?? []) && encodedRefCode(ref, factorLevels[col]) != null)
+    .map(([col, ref]) => `${encodedName(col)} code ${encodedRefCode(ref, factorLevels[col])} = "${ref}"`);
+  if (encodedRefs.length) {
+    lines.push(`* Reference categories after encode: ${encodedRefs.join("; ")}.`);
+    lines.push(`* Verify with: label list`);
   }
 
   // Stata SE option matching the user's selection (was hardcoded ", robust").
@@ -906,14 +940,22 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity-only.
       // Fallback preserves the pre-existing entity-only default byte-for-byte.
       const feColsFE = feCols?.length ? feCols : [entityCol].filter(Boolean);
-      if (feColsFE.length <= 2) {
+      // `xtreg, fe` absorbs exactly ONE dimension — the panel id from xtset.
+      // This used to be `<= 2`, so a two-dimension FE model exported a one-way
+      // model that RAN CLEANLY and returned a different coefficient. Measured
+      // on a 20x10 panel with a second dimension varying within the entity:
+      // Litux/fixest/reghdfe all give x = 2.598920041772, the emitted do-file
+      // gave 2.842960069813 — and matched `feols(y ~ x + z | a)` exactly,
+      // which is the proof it had silently dropped the second dimension.
+      if (feColsFE.length <= 1) {
         lines.push(`* Fixed Effects (within)`);
         lines.push(`xtset ${entityCol} ${timeCol}`);
         lines.push(`xtreg ${yVar} ${xList}, fe${pOpt}`);
         lines.push(`estimates store m_fe`);
       } else {
         lines.push(`* Fixed Effects (within) — N-way absorption via reghdfe`);
-        lines.push(`* ssc install reghdfe  // if not installed — required for 3+-way FE absorption`);
+        lines.push(`* ssc install reghdfe  // if not installed — required for 2+-way FE absorption`);
+        lines.push(`* (xtreg, fe absorbs only the xtset panel id, so it cannot do this)`);
         lines.push(`* NOTE: clusters on the first FE column (entityCol) by convention, matching the`);
         lines.push(`* existing TWFE reghdfe export — does not yet thread the model's actual seType/`);
         lines.push(`* clusterVar selection through this fallback path.`);
@@ -1005,7 +1047,15 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity(+time).
       // Fallback preserves the pre-existing entity(+time) default byte-for-byte.
       const feColsLSDV = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
-      if (feColsLSDV.length <= 2) {
+      // Same one-dimension limit as the FE branch: `xtreg, fe` and `areg,
+      // absorb()` each absorb exactly one dimension, so the old `<= 2` exported
+      // a one-way model for a two-way LSDV. Measured: runLSDVMulti(["a","b"])
+      // gives x = 2.598920041772 and the emitted do-file gave 2.842960069813.
+      // Safe against the "time FE off" case because estimationDispatch always
+      // stamps feCols on the LSDV spec — [entity] with time FE off, [entity,
+      // time] with it on — so the length here is the model's real dimension
+      // count and the [entityCol, timeCol] default above never fires.
+      if (feColsLSDV.length <= 1) {
         lines.push(`* Panel LSDV — recover entity fixed effects explicitly`);
         lines.push(`xtset ${entityCol} ${timeCol}`);
         lines.push(`* Within (FE) — numerically equivalent to LSDV`);
@@ -1024,7 +1074,13 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         lines.push(`* ssc install reghdfe  // if not installed — required for 3+-way FE absorption`);
         lines.push(`* Single call: savefe (var=newname) syntax both stores estimates and materializes`);
         lines.push(`* alpha_i per FE dimension — no need to run reghdfe twice`);
-        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.map(c => `${c}=fe_${c}`).join(" ")})${pOptHdfe}`);
+        // reghdfe's savefe spelling is absorb(NEWVAR=fevar) — the new column
+        // first. This emitted `absorb(a=fe_a)`, i.e. "create `a` from `fe_a`",
+        // which fails with r(110) "variable a already defined". The branch was
+        // unreachable behind the old `<= 2` threshold, so fixing that threshold
+        // is what exposed it. Verified: absorb(fe_a=a fe_b=b) returns rc=0,
+        // x = 2.59892004177165115 (Litux's value) and creates fe_a / fe_b.
+        lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsLSDV.map(c => `fe_${c}=${c}`).join(" ")})${pOptHdfe}`);
         lines.push(`estimates store m_lsdv`);
         lines.push(``);
         lines.push(`* Recover alpha_i per FE dimension`);
@@ -1368,7 +1424,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
             entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
             treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
             interactionTerms: ixm = [], xVarsRaw: xrm = null, wVarsRaw: wrm = null,
-            factorVars: fvm = [], factorRefs: frm = {},
+            factorVars: fvm = [], factorRefs: frm = {}, factorMap: fmm = null,
             seType: seM = "classical", clusterVar: clM = null, clusterVar2: cl2M = null, noIntercept: niM = false } = configs[0].model ?? {};
     const allX = [...xVars, ...wVars];
 
@@ -1379,7 +1435,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       lines.push(`preserve`);
       if (filterExpr) lines.push(`  keep if ${filterExpr}`);
       else            lines.push(`  * Full sample — no filter`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm, factorVars: fvm, factorRefs: frm, seType: seM, clusterVar: clM, clusterVar2: cl2M, noIntercept: niM });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm, factorVars: fvm, factorRefs: frm, factorMap: fmm, seType: seM, clusterVar: clM, clusterVar2: cl2M, noIntercept: niM });
       let hasStore = false;
       modelLines.forEach(l => {
         const ov = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
@@ -1412,11 +1468,11 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
               entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel,
               treatedUnit, treatTime, feCols, cohortCol, periodCol, controlMode, refPeriod,
               interactionTerms: ixc = [], xVarsRaw: xrc = null, wVarsRaw: wrc = null,
-              factorVars: fvc = [], factorRefs: frc = {},
+              factorVars: fvc = [], factorRefs: frc = {}, factorMap: fmc = null,
               seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null, noIntercept: niC = false } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, factorVars: fvc, factorRefs: frc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
+      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, factorVars: fvc, factorRefs: frc, factorMap: fmc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
       let hasStore = false;
       modelLines.forEach(l => {
         const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);

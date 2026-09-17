@@ -10,6 +10,8 @@
 
 import { toDfVar } from "./exporter.js";
 import { predicateToR, predicateToPython, predicateToStata, filterStepToNode } from "./predicateExport.js";
+// stataJoin.js imports nothing, so this does not close a cycle with stataScript.js.
+import { UNMATCHED_BY_HOW, stataMasterVarlist, stataSuffixHomonyms } from "../services/export/stataJoin.js";
 
 // A `where` clause carrying a compound predicate TREE (what the Data Viewer's
 // stacked filters emit) is compiled by the shared exporters. Without this the
@@ -1274,20 +1276,25 @@ export function toStata(step, df = "df", allDatasets = {}) {
       return [
         `* Join dataset: "${rightName}"`,
         `* Save current data first`,
+        // Captured BEFORE preserve: the macro survives preserve/restore, the
+        // data does not, and the homonym rename below needs the master's names.
+        ...stataMasterVarlist(),
         `preserve`,
         `${stataRightLoad(step.rightId, allDatasets)}`,
-        `rename ${stVar(step.rightKey)} ${stVar(step.leftKey)}`,
+        stVar(step.rightKey) === stVar(step.leftKey)
+          ? null
+          : `rename ${stVar(step.rightKey)} ${stVar(step.leftKey)}`,
+        ...stataSuffixHomonyms([stVar(step.leftKey)], step.suffix ?? "_r"),
         `save _right_tmp.dta, replace`,
         `restore`,
-        `* 1:m — a key with several matches on the right produces several rows.`,
-        `* NOTE: this assumes the key is unique in the master. If BOTH sides repeat`,
-        `* it, Stata's merge cannot express the join — use joinby instead:`,
-        `*   joinby ${stVar(step.leftKey)} using _right_tmp.dta, unmatched(master)`,
-        `* UNVERIFIED against a real Stata run.`,
-        `merge 1:m ${stVar(step.leftKey)} using _right_tmp.dta`,
-        step.how === "inner" ? `keep if _merge == 3` : `drop if _merge == 2`,
-        `drop _merge`,
-      ].join("\n");
+        // joinby, not `merge 1:m`: verified on StataNow 19.5 that joinby matches
+        // dplyr's and Litux's row counts in every cardinality regime (200/200/60
+        // on master-repeats / using-repeats / both-repeat), while `merge 1:m`
+        // errors with r(459) as soon as the master key repeats. See
+        // services/export/stataJoin.js, the single owner of this decision.
+        `joinby ${stVar(step.leftKey)} using _right_tmp.dta, unmatched(${UNMATCHED_BY_HOW[step.how] ?? "master"})`,
+        `capture drop _merge`,
+      ].filter(Boolean).join("\n");
     }
 
     case "lookup": {
@@ -1419,7 +1426,8 @@ export function toStata(step, df = "df", allDatasets = {}) {
         `  gen long __row_order = _n`,
         `  save "__bind_cols_tmp.dta", replace`,
         `restore`,
-        `merge 1:1 __row_order using "__bind_cols_tmp.dta", keep(match) nogen suffixes("" "${step.suffix ?? "_r"}")`,
+        // No suffixes() — Stata's merge has no such option (r(198)).
+        `merge 1:1 __row_order using "__bind_cols_tmp.dta", keep(match) nogen`,
         `drop __row_order`,
         `erase "__bind_cols_tmp.dta"`,
       ].join("\n");

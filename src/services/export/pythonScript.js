@@ -844,7 +844,27 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       }
       // patsy spells "no intercept" as a trailing `- 1`.
       const formula = `"${yVar} ~ ${pyFormStr}${noIntercept ? " - 1" : ""}"`;
-      if (noIntercept) lines.push(`# Regression through the origin — no intercept estimated.`);
+      if (noIntercept) {
+        lines.push(`# Regression through the origin — no intercept estimated.`);
+        // Measured 2026-09-12 on statsmodels 0.14.6 / patsy 1.0.2: coefficients
+        // and SEs match Litux, R and Stata to ~1e-15, but m.rsquared does NOT
+        // when a factor is coded with all of its levels (which is exactly what
+        // `0 +`/`- 1` does to the FIRST factor). Those dummies sum to 1 in every
+        // row, so statsmodels detects an implicit constant (k_constant = 1) and
+        // switches to the CENTERED R², while R's summary.lm and Stata's
+        // `regress, noconstant` both report the UNCENTERED one. On the reference
+        // fixture that is 0.8293 here against 0.9500 everywhere else — same fit,
+        // different convention, and nothing in the summary says so.
+        if ((factorVars ?? []).length) {
+          lines.push(`# NOTE: statsmodels reports a CENTERED R-squared here. Coding the first`);
+          lines.push(`#       factor with every level puts an implicit constant in the design`);
+          lines.push(`#       (m.model.k_constant == 1), so .rsquared is NOT the uncentered R2`);
+          lines.push(`#       that Litux, R's summary.lm and Stata's "regress, noconstant" show.`);
+          lines.push(`#       For the comparable number:`);
+          lines.push(`#         import numpy as np`);
+          lines.push(`#         r2_uncentered = 1 - model.ssr / np.sum(df["${yVar}"]**2)`);
+        }
+      }
       lines.push(...fitLines("model", `smf.ols(${formula}, data=df)`, "df"));
       lines.push(`print(model.summary())`);
       break;
@@ -867,12 +887,27 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity-only.
       // Fallback preserves the pre-existing entity-only default byte-for-byte.
       const feColsFE = feCols?.length ? feCols : [entityCol].filter(Boolean);
+      // PanelOLS absorbs the two INDEX levels, so a second FE dimension is only
+      // absorbed if it is in the index AND time_effects is on. This used to be
+      // `<= 2` while indexing on entityCol/timeCol with entity_effects alone,
+      // so a two-dimension FE model silently dropped the second one and, like
+      // the Stata branch, ran cleanly with a different coefficient: 2.842960069813
+      // against the 2.598920041772 that Litux, fixest and reghdfe agree on.
+      // Verified fix: set_index on the two FE columns + both effects reproduces
+      // 2.598920041772, cross-checked against statsmodels C(a)+C(b).
       if (feColsFE.length <= 2) {
+        const idx = feColsFE.length === 2 ? feColsFE : [entityCol, timeCol];
         lines.push(`# Fixed Effects (within estimator)`);
-        lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
+        lines.push(`df_panel = df.set_index([${idx.map(c => `"${c}"`).join(", ")}])`);
         lines.push(`exog = ${design(allX, "df_panel")}`);
         lines.push(...panelCovNote());
-      lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, entity_effects=True).fit(${panelCov()})`);
+        // Both index levels are real FE dimensions when the model declares two,
+        // so time_effects must be on; with one dimension it must NOT be, or the
+        // export would absorb a dimension the model never asked for.
+        const eff = feColsFE.length === 2
+          ? `entity_effects=True, time_effects=True`
+          : `entity_effects=True`;
+        lines.push(`model = PanelOLS(df_panel["${yVar}"], exog, ${eff}).fit(${panelCov()})`);
         lines.push(`print(model.summary)`);
       } else {
         lines.push(`# linearmodels.PanelOLS only supports entity + time effects natively.`);

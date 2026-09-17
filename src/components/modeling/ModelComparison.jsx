@@ -387,6 +387,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
         xVars:      m.spec?.xVars      ?? m.xVars      ?? [],
         factorVars:       fs.factorVars,
         factorRefs:       fs.factorRefs,
+        factorMap:        m.factorMap ?? null,
         xVarsRaw:         fs.xVarsRaw,
         wVarsRaw:         fs.wVarsRaw,
         interactionTerms: fs.interactionTerms,

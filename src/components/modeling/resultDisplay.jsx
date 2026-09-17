@@ -12,6 +12,7 @@ import { generatePythonScript } from "../../services/export/pythonScript.js";
 import { generateStataScript }  from "../../services/export/stataScript.js";
 import { downloadReplicationBundle } from "../../services/export/replicationBundle.js";
 import { isLogVarName } from "../../core/validation/logVarDetection.js";
+import { buildCoefGroups, visibleCoefNames } from "./coefGroups.js";
 import { stripGroundRect } from "../../services/export/plotExporter.js";
 
 export function Lbl({ children, color }) {
@@ -136,12 +137,37 @@ export function RegressionEquation({ varNames, beta, yVar }) {
 }
 
 // ─── FOREST PLOT ─────────────────────────────────────────────────────────────
-export function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename = "coefficient_plot.svg" }) {
+export function ForestPlot({
+  varNames, beta, se, pVals, svgId = "forest-plot",
+  filename = "coefficient_plot.svg", factorVars = [],
+  // Optional controlled mode: a caller that ALSO renders a table or a LaTeX
+  // export from the same result passes these so the figure and the table cannot
+  // disagree about which levels are shown. Uncontrolled (internal state) when
+  // omitted, which is what the per-estimator panels use.
+  expanded: expandedProp = null, onExpandedChange = null,
+}) {
   const { C, T } = useTheme();
+  // Nuisance factor levels (93 municipality dummies) are collapsed by default —
+  // see coefGroups.js. `expanded` holds the bases the user opened.
+  const { groups, levelOf } = useMemo(
+    () => buildCoefGroups(varNames, factorVars),
+    [varNames, factorVars],
+  );
+  const [expandedLocal, setExpandedLocal] = useState(() => new Set());
+  const controlled = expandedProp != null;
+  const expanded = controlled ? expandedProp : expandedLocal;
+  const setExpanded = controlled
+    ? (fn => onExpandedChange?.(fn(expandedProp)))
+    : setExpandedLocal;
+  const shownNames = useMemo(
+    () => new Set(visibleCoefNames(varNames, levelOf, expanded)),
+    [varNames, levelOf, expanded],
+  );
+
   const items = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
-    .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s));
-  if (!items.length) return null;
+    .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s) && shownNames.has(d.v));
+  if (!items.length && !groups.length) return null;
 
   const rowH = 34, PAD = { l: 148, r: 76, t: 22, b: 26 }, W = 600;
   const iW = W - PAD.l - PAD.r;
@@ -185,9 +211,44 @@ export function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", f
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
         >↓ SVG</button>
       </div>
-      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
+      {groups.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
+                      padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}` }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
+            Factor levels:
+          </span>
+          {groups.map(g => {
+            const on = expanded.has(g.base);
+            return (
+              <button key={g.base}
+                onClick={() => setExpanded(prev => {
+                  const next = new Set(prev);
+                  if (next.has(g.base)) next.delete(g.base); else next.add(g.base);
+                  return next;
+                })}
+                title={on ? `Collapse the ${g.levels.length} levels of ${g.base}`
+                          : `Show all ${g.levels.length} levels of ${g.base}`}
+                style={{ padding: "2px 9px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  background: on ? `${C.teal}22` : "none",
+                  border: `1px solid ${on ? C.teal : C.border2}`, borderRadius: 3,
+                  color: on ? C.teal : C.textDim, cursor: "pointer" }}>
+                {`${on ? "▾" : "▸"} ${g.base} · ${g.levels.length}`}
+              </button>
+            );
+          })}
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.body.fontFamily }}>
+            {"— collapsed by default; they are parameters, not findings."}
+          </span>
+        </div>
+      )}
+      {/* The viewBox grows with the row count, so a maxHeight here would scale
+          the WHOLE drawing down to fit (aspect ratio is preserved) — 93 rows
+          became an illegible sliver. Let the SVG take its natural height and
+          scroll the container instead, as PlotBuilder's facets already do. */}
+      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", overflowY: "auto",
+                    maxHeight: "60vh", display: "flex", justifyContent: "center" }}>
         <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-          style={{ width: "100%", maxWidth: 700, minWidth: 360, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
+          style={{ width: "100%", maxWidth: 700, minWidth: 360, height: "auto", flexShrink: 0, display: "block", fontFamily: T.code.fontFamily }}>
           <rect width={W} height={H} fill={C.bg} />
           {items.map((_, i) => (
             <rect key={i} x={PAD.l} y={PAD.t + i * rowH} width={iW} height={rowH}

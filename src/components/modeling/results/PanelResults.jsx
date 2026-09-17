@@ -104,7 +104,7 @@ export default function PanelResults({ result, panel, xVars, wVars, yVar, panelF
               { id: "yhat",   label: "Y vs Ŷ",
                 node: <YFittedPlot resid={active.resid} Yhat={active.Yhat} yLabel={yName} svgIdSuffix={`-${tab}`} /> },
               { id: "forest", label: "Coefficient plot",
-                node: <ForestPlot varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} svgId={`forest-${tab}`} filename={`${tab}_coefficients.svg`} /> },
+                node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} svgId={`forest-${tab}`} filename={`${tab}_coefficients.svg`} /> },
               { id: "resid",  label: "Residuals vs Fitted",
                 node: <ResidualVsFitted resid={active.resid} Yhat={active.Yhat} svgIdSuffix={`-${tab}-rv`} /> },
               { id: "qq",     label: "Q-Q",

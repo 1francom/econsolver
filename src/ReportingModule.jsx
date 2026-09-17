@@ -29,6 +29,8 @@ import { loadProjectPipelines } from "./services/Persistence/indexedDB.js";
 import { generateRScript }     from "./services/export/rScript.js";
 import { generatePythonScript } from "./services/export/pythonScript.js";
 import { generateStataScript } from "./services/export/stataScript.js";
+import { ForestPlot } from "./components/modeling/resultDisplay.jsx";
+import { buildCoefGroups, hiddenCoefNames } from "./components/modeling/coefGroups.js";
 import { buildStargazer }      from "./services/export/latexTable.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
@@ -133,134 +135,9 @@ function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color }) {
   );
 }
 
-// ─── 1. COEFFICIENT FOREST PLOT ───────────────────────────────────────────────
-// Teal diamond = significant (p < 0.05), grey = not significant.
-// Each row: label | CI whisker + point | β value
-function ForestPlot({ varNames, beta, se, pVals }) {
-  const { C, T } = useTheme();
-  const items = useMemo(() =>
-    varNames
-      .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
-      .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s)),
-  [varNames, beta, se, pVals]);
-
-  if (!items.length) return (
-    <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, padding: "1rem" }}>
-      No coefficients to plot (intercept-only or empty result).
-    </div>
-  );
-
-  // Dynamic sizing
-  const rowH    = 34;
-  const PAD     = { l: 148, r: 72, t: 20, b: 24 };
-  const W       = 620;
-  const iW      = W - PAD.l - PAD.r;
-  const H       = items.length * rowH + PAD.t + PAD.b;
-
-  // Scale: include all CI endpoints + zero
-  const lo = Math.min(0, ...items.map(d => d.b - 1.96 * d.s));
-  const hi = Math.max(0, ...items.map(d => d.b + 1.96 * d.s));
-  const range = hi - lo || 1;
-  const sx  = v => PAD.l + ((v - lo) / range) * iW;
-  const zero = sx(0);
-
-  // Nice axis ticks: 5 evenly spaced
-  const ticks = Array.from({ length: 5 }, (_, i) => lo + (range * i) / 4);
-
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`}
-           style={{ width: "100%", maxWidth: 700, minWidth: 400, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
-        {/* Background */}
-        <rect width={W} height={H} fill={C.bg} />
-
-        {/* Alternating row bands */}
-        {items.map((_, i) => (
-          <rect key={i}
-            x={PAD.l} y={PAD.t + i * rowH}
-            width={iW} height={rowH}
-            fill={i % 2 === 0 ? C.surface : C.surface2}
-            opacity={0.6} />
-        ))}
-
-        {/* Tick grid lines */}
-        {ticks.map((t, i) => (
-          <line key={i}
-            x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={H - PAD.b}
-            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" />
-        ))}
-
-        {/* Zero reference line */}
-        {zero >= PAD.l && zero <= PAD.l + iW && (
-          <line x1={zero} x2={zero} y1={PAD.t} y2={H - PAD.b}
-                stroke={C.border2} strokeWidth={1.5} />
-        )}
-
-        {/* Rows */}
-        {items.map((d, i) => {
-          const cy   = PAD.t + i * rowH + rowH / 2;
-          const cx   = sx(d.b);
-          const ciLo = Math.max(PAD.l, sx(d.b - 1.96 * d.s));
-          const ciHi = Math.min(PAD.l + iW, sx(d.b + 1.96 * d.s));
-          const sig  = d.p < 0.05;
-          const dotC = sig ? C.teal : C.textMuted;
-          const lblC = sig ? C.text : C.textDim;
-          const capLen = 5;
-
-          return (
-            <g key={d.v}>
-              {/* CI whisker */}
-              <line x1={ciLo} x2={ciHi} y1={cy} y2={cy}
-                    stroke={dotC} strokeWidth={sig ? 1.5 : 1} opacity={sig ? 0.8 : 0.45} />
-              {/* CI caps */}
-              <line x1={sx(d.b - 1.96 * d.s)} x2={sx(d.b - 1.96 * d.s)}
-                    y1={cy - capLen} y2={cy + capLen}
-                    stroke={dotC} strokeWidth={1} opacity={0.6} />
-              <line x1={sx(d.b + 1.96 * d.s)} x2={sx(d.b + 1.96 * d.s)}
-                    y1={cy - capLen} y2={cy + capLen}
-                    stroke={dotC} strokeWidth={1} opacity={0.6} />
-              {/* Point — filled diamond if sig, hollow if not */}
-              <rect x={cx - 5} y={cy - 5} width={10} height={10}
-                    fill={sig ? dotC : "transparent"}
-                    stroke={dotC} strokeWidth={sig ? 0 : 1.5}
-                    opacity={sig ? 0.9 : 0.55}
-                    transform={`rotate(45,${cx},${cy})`} />
-              {/* Variable label */}
-              <text x={PAD.l - 10} y={cy + 4} textAnchor="end"
-                    fill={lblC} fontSize={T.caption.fontSize}>
-                {d.v.length > 18 ? d.v.slice(0, 17) + "…" : d.v}
-              </text>
-              {/* β value + stars */}
-              <text x={PAD.l + iW + 8} y={cy + 4} textAnchor="start"
-                    fill={dotC} fontSize={9.5} fontFamily={T.data.fontFamily}>
-                {isFinite(d.b) && d.b > 0 ? "+" : ""}{safeNum(d.b, 3)}{stars(d.p)}
-              </text>
-              {/* p-value hint */}
-              <text x={PAD.l + iW + 8} y={cy + 15} textAnchor="start"
-                    fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
-                p={!isFinite(d.p) ? "N/A" : d.p < 0.001 ? "<.001" : safeNum(d.p, 3)}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* X axis */}
-        <line x1={PAD.l} x2={PAD.l + iW} y1={H - PAD.b} y2={H - PAD.b}
-              stroke={C.border2} strokeWidth={1} />
-        {ticks.map((t, i) => (
-          <text key={i} x={sx(t)} y={H - PAD.b + 12}
-                textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>
-            {t === 0 ? "0" : safeNum(t, 2)}
-          </text>
-        ))}
-        <text x={PAD.l + iW / 2} y={H - 3}
-              textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>
-          Coefficient estimate with 95% CI  ·  ◆ p&lt;0.05  ◇ n.s.
-        </text>
-      </svg>
-    </div>
-  );
-}
+// The forest plot is the SHARED component in components/modeling/resultDisplay.jsx.
+// This module used to carry a byte-for-byte copy of it, so the row-count scaling
+// bug (and its fix) existed in two places at once.
 
 // ─── 2. LATEX EXPORT ──────────────────────────────────────────────────────────
 // buildStargazer is imported from services/export/latexTable.js (shared with ModelComparison).
@@ -712,14 +589,32 @@ function FitBar({ result }) {
 }
 
 // ─── SIGNIFICANT COEFFICIENTS CALLOUT ────────────────────────────────────────
+// How many chips are worth reading at a glance. Past this the callout stops
+// being a callout — a 93-level factor drowned the two terms that were estimated.
+const SIG_CHIP_MAX = 12;
+
 function SigCallout({ result }) {
   const { C, T } = useTheme();
   const { varNames, beta, se, pVals } = result;
-  const sig = varNames
+  const [showAll, setShowAll] = useState(false);
+  // Factor levels are parameters, not findings — same rule as the forest plot.
+  const { levelOf } = useMemo(
+    () => buildCoefGroups(varNames, result.spec?.factorVars ?? []),
+    [varNames, result.spec?.factorVars],
+  );
+  const allSig = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
     .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s) && d.p < 0.05);
+  const levelSig = allSig.filter(d => levelOf.has(d.v));
+  // Rank what is left by |t|, so the strongest result is the first chip rather
+  // than whichever column happened to sit first in the design matrix.
+  const ranked = allSig
+    .filter(d => !levelOf.has(d.v))
+    .sort((a, b) => Math.abs(b.b / b.s) - Math.abs(a.b / a.s));
+  const sig = showAll ? [...ranked, ...levelSig] : ranked.slice(0, SIG_CHIP_MAX);
+  const hiddenN = allSig.length - sig.length;
 
-  if (!sig.length) return (
+  if (!allSig.length) return (
     <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
                   padding: "0.65rem 1rem", border: `1px solid ${C.border}`,
                   borderRadius: 4, marginBottom: "1.2rem" }}>
@@ -745,6 +640,17 @@ function SigCallout({ result }) {
           </div>
         </div>
       ))}
+      {(hiddenN > 0 || showAll) && (
+        <button
+          onClick={() => setShowAll(v => !v)}
+          style={{ padding: "0.45rem 0.85rem", background: "none",
+            border: `1px dashed ${C.border2}`, borderRadius: 4, cursor: "pointer",
+            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim }}>
+          {showAll
+            ? "▾ show fewer"
+            : `▸ ${hiddenN} more significant${levelSig.length ? ` (${levelSig.length} factor levels)` : ""}`}
+        </button>
+      )}
     </div>
   );
 }
@@ -888,6 +794,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         kernel:     spec.kernel     ?? "triangular",
         factorVars:       spec.factorVars       ?? [],
         factorRefs:       spec.factorRefs       ?? {},
+        factorMap:        model.factorMap        ?? null,
         interactionTerms: spec.interactionTerms ?? [],
         xVarsRaw:         spec.xVarsRaw          ?? null,
         wVarsRaw:         spec.wVarsRaw          ?? null,
@@ -1498,6 +1405,14 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
 export default function ReportingModule({ result: propResult, cleanedData, availableDatasets = [], pinnedModels = [], pid = null, onClose }) {
   const { C, T } = useTheme();
   const [tab, setTab] = useState("forest");
+  // Which factor groups the forest plot has open. Owned HERE, not inside the
+  // plot, because the "Copy LaTeX" button beside it must omit the same rows —
+  // a figure and a table in one tab disagreeing about the model is the
+  // export-drift failure this codebase keeps hitting.
+  // `forestOmit` itself has to sit AFTER `result` is declared: `result` is a
+  // const below, so reading it up here is a temporal-dead-zone ReferenceError,
+  // not an undefined — it crashed the whole module.
+  const [forestExpanded, setForestExpanded] = useState(() => new Set());
 
   // Which model the report currently displays — defaults to the model that
   // was active when this tab opened, but the user can switch to any pinned
@@ -1506,6 +1421,15 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
   const rawResult = (selectedId && pinnedModels.find(m => m.id === selectedId)) || propResult;
 
   const result = useMemo(() => normaliseResult(rawResult), [rawResult]);
+
+  // Rows the forest plot is collapsing, so "Copy LaTeX" omits the same ones.
+  // `result` can be null before a model is pinned, so everything here tolerates
+  // an absent varNames rather than assuming the shape.
+  const forestOmit = useMemo(() => {
+    const names = result?.varNames ?? [];
+    const { levelOf } = buildCoefGroups(names, result?.spec?.factorVars ?? []);
+    return hiddenCoefNames(names, levelOf, forestExpanded);
+  }, [result, forestExpanded]);
 
   // ── Build session snapshot once per render — passed to AI calls so Claude
   //    sees data load opts (sep, sheet, encoding), pipeline, dictionary, etc.
@@ -1633,6 +1557,7 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
           { heading: "Outputs", items: [
             "LaTeX Stargazer table: multi-column comparison of all pinned models, publication-ready",
             "Forest plot: coefficient + 95% CI across all pinned specifications",
+            "Levels of a factor variable are collapsed behind a per-factor toggle — expand one and the LaTeX table drops the same rows, so figure and table always agree",
             "AI Narrative: 2–3 academic paragraphs interpreting the results",
             "Replication bundle: R + Stata + Python scripts plus the data, as a zip",
           ]},
@@ -1715,7 +1640,7 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
               <Lbl mb={0}>Coefficient Estimates · 95% Confidence Intervals</Lbl>
               <CopyBtn
-                text={buildStargazer([{ label: modelLabel, result, yVar }])}
+                text={buildStargazer([{ label: modelLabel, result, yVar }], { omitVars: forestOmit })}
                 label="Copy LaTeX"
                 successLabel="Copied ✓"
                 color={C.gold}
@@ -1732,6 +1657,11 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
               beta={result.beta}
               se={result.se}
               pVals={result.pVals}
+              factorVars={result.spec?.factorVars ?? []}
+              expanded={forestExpanded}
+              onExpandedChange={setForestExpanded}
+              svgId="forest-report"
+              filename="report_coefficients.svg"
             />
           </div>
         )}

@@ -265,14 +265,12 @@ function emitCrossStepStata(g, datasets, allDatasets) {
   if (/_join$/.test(g.opType ?? "")) {
     const inner = g.opType === "inner_join";
     out.push(`use "${L.expr}", clear`);
-    // See stepTranslators.js: Stata cannot express a true many-to-many merge.
-    // 1:m assumes the key is unique in the master; joinby is the general form
-    // but has no suffixes(). UNVERIFIED against a real Stata run.
-    out.push(`* 1:m — assumes '${lk}' is unique in the master. If both sides repeat it,`);
-    out.push(`* use: joinby ${lk} using "${R2.expr}", unmatched(master)`);
-    out.push(`merge 1:m ${lk} using "${R2.expr}"`);
-    out.push(inner ? `keep if _merge == 3` : `drop if _merge == 2`);
-    out.push(`drop _merge`);
+    // joinby, not `merge 1:m` — verified on StataNow 19.5 that it reproduces
+    // dplyr's and Litux's row counts in every cardinality regime, where
+    // `merge 1:m` errors (r(459)) the moment the master key repeats.
+    // services/export/stataJoin.js owns this decision and its measurements.
+    out.push(`joinby ${lk} using "${R2.expr}", unmatched(${inner ? "none" : "master"})`);
+    out.push(`capture drop _merge`);
     out.push(`save "${outFile}", replace`);
   } else if (g.opType === "lookup") {
     out.push(`use "${L.expr}", clear`);

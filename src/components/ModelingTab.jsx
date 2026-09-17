@@ -2971,7 +2971,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     { id: "yhat",  label: "Y vs Ŷ",
                       node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={resultY} /> },
                     { id: "forest", label: "Coefficient plot",
-                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-ols" filename="ols_coefficients.svg" /> },
+                      node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-ols" filename="ols_coefficients.svg" /> },
                     { id: "resid",  label: "Residuals vs Fitted",
                       node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
                     { id: "qq",     label: "Q-Q",
@@ -3025,7 +3025,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   defaultId="forest"
                   plots={[
                     { id: "forest", label: "Coefficient plot",
-                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-spatial" filename="spatial_regression_coefficients.svg" /> },
+                      node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-spatial" filename="spatial_regression_coefficients.svg" /> },
                     { id: "yhat", label: "Y vs Ŷ",
                       node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={yVar[0]} svgIdSuffix="-spatial" /> },
                     { id: "resid", label: "Residuals vs Fitted",
@@ -3276,7 +3276,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} factorMap={r.factorMap} />
                 <PlotSelector accentColor={C.blue} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
-                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
+                    node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
                   { id: "resid", label: "Residuals", node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
                 ]} />
                 <ExportBar yVar={yVar[0]} results={r} model="LSDV"
@@ -3310,7 +3310,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} factorMap={r.factorMap} />
                 <PlotSelector accentColor={C.violet} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
-                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poisson" filename="poisson_coefficients.svg" /> },
+                    node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poisson" filename="poisson_coefficients.svg" /> },
                 ]} />
               </div>
             );
@@ -3402,7 +3402,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 )}
                 <PlotSelector accentColor={C.violet} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
-                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={isNegBin ? "forest-negbinfe" : "forest-poissonfe"} filename={isNegBin ? "negbinfe_coefficients.svg" : "poissonfe_coefficients.svg"} /> },
+                    node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={isNegBin ? "forest-negbinfe" : "forest-poissonfe"} filename={isNegBin ? "negbinfe_coefficients.svg" : "poissonfe_coefficients.svg"} /> },
                 ]} />
                 <ExportBar yVar={yVar[0]} results={r} model={r.type}
                   onReport={() => openReport({ ...r, modelLabel: isNegBin ? "Negative Binomial FE" : "Poisson FE", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
@@ -3512,7 +3512,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       ? { id: "main", label: "Parallel trends", node: <DiDPlot result={r} yLabel={yVar[0]} /> }
                       : { id: "main", label: "Event study",     node: <EventStudyPlot result={r} yLabel={yVar[0]} /> },
                     { id: "forest", label: "Coefficient plot",
-                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${result.type.toLowerCase()}`} filename={`${result.type.toLowerCase()}_coefficients.svg`} /> },
+                      node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${result.type.toLowerCase()}`} filename={`${result.type.toLowerCase()}_coefficients.svg`} /> },
                   ]}
                 />
                 {/* Goodman-Bacon: explains the TWFE number by splitting it into
@@ -3660,7 +3660,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     { id: "hist", label: "Predicted Probabilities",
                       node: <PredProbHistogram fitted={r.Yhat} Y={validY} /> },
                     { id: "forest", label: "Coefficient plot",
-                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${family}`} filename={`${family}_coefficients.svg`} /> },
+                      node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${family}`} filename={`${family}_coefficients.svg`} /> },
                   ]}
                 />
 

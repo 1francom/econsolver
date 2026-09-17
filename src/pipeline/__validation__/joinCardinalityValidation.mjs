@@ -126,7 +126,13 @@ assert.doesNotMatch(pyJoin, /drop_duplicates/, "Python join must not dedup the r
 
 const stJoin = toStata(jStep, "df", dsNames);
 assert.doesNotMatch(stJoin, /_n == 1/, "Stata join must not dedup the right side any more");
-assert.match(stJoin, /merge 1:m/, "Stata join must allow expansion");
+// This used to assert `merge 1:m`. That was measured on StataNow 19.5 (2026-09-12)
+// and it does not run: with the `suffixes()` the emitter added it is r(198)
+// (no such option), and without it, it is r(459) as soon as the master key
+// repeats. `joinby` returns 200/200/60 on the three cardinality regimes —
+// exactly dplyr and the JS runner. See services/export/stataJoin.js.
+assert.match(stJoin, /joinby .* unmatched\(/, "Stata join must expand in every regime");
+assert.doesNotMatch(stJoin, /merge 1:m/, "merge 1:m cannot express a repeated master key");
 
 // lookup keeps the uniqueness contract in every language
 assert.match(toR(lStep, "df_panel", dsNames), /relationship = "many-to-one"/);
@@ -145,11 +151,18 @@ const stataLocal = generateStataScript({
   allDatasets: { comunas: { name: "comunas", filename: "comunas.csv" } },
   pipeline: [jStep],
 });
-assert.match(stataLocal, /merge 1:m/, "stataScript.js's local join must match the shared module's cardinality");
+assert.match(stataLocal, /joinby/, "stataScript.js's local join must match the shared module's cardinality");
 assert.doesNotMatch(stataLocal, /merge 1:1/, "merge 1:1 errors on any repeated key");
-// Stata cannot express a true many-to-many merge; both emitters must SAY so
-// rather than emit code that silently means something else.
-assert.match(stataLocal, /joinby/, "the m:m limitation must be stated in the script, not hidden");
-assert.match(toStata(jStep, "df", dsNames), /joinby/, "same note in the shared module");
+assert.doesNotMatch(stataLocal, /merge 1:m/, "merge 1:m errors on a repeated master key");
+assert.match(toStata(jStep, "df", dsNames), /joinby/, "same command in the shared module");
+
+// `suffixes()` is not a Stata option at all (r(198)) — the suffix has to be
+// reproduced by renaming the using's colliding columns. Comment lines
+// legitimately mention the option to explain why, so only code is checked.
+const noComments = t => t.split("\n").filter(l => !/^\s*\*/.test(l)).join("\n");
+for (const [label, text] of [["shared", stJoin], ["local", stataLocal]]) {
+  assert.doesNotMatch(noComments(text), /suffixes\(/, `${label} join still emits suffixes()`);
+  assert.match(text, /unab _mastervars : _all/, `${label} join must capture the master's varlist`);
+}
 
 console.log("joinCardinalityValidation: translators OK");
