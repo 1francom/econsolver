@@ -578,7 +578,13 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
             // user their analysis is silently running on a stale preview instead of
             // just showing a wrong "N obs" with no explanation (see ExplorerModule's
             // duckdbRestoreFailed banner).
-            if (restoreFailed || m.rowCount > raw.rows.length) {
+            // A failed OPFS restore only matters if rows are actually missing: a
+            // dataset loaded through DuckDB can still have its FULL table in
+            // IndexedDB (a mid-sized .dta, say), and flagging it produced a false
+            // "running on a 11,547-row preview" banner over 11,547 of 11,547 rows.
+            // With no recorded row count, a failed restore stays flagged.
+            const expected = Number(m.rowCount) || 0;
+            if (expected ? expected > raw.rows.length : restoreFailed) {
               raw._duckdbRestoreFailed = true;
               raw._expectedRowCount = m.rowCount || raw.rows.length;
             }
