@@ -50,3 +50,7 @@ LMU tutorials/
 .claude/worktrees/
 # Local dev-server config for the preview tooling — machine-specific, not project state.
 .claude/launch.json
+
+# Real-data validation material (LMU course scripts/data, thesis code) — local only, never published.
+# The harness code lives in tools/validation/ (tracked).
+/validation/

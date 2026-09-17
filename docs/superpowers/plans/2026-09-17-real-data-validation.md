@@ -45,7 +45,12 @@ assembles exactly this set, minus encryption). Franco exports each validation
 project once into `validation/<unit>/project.litux.json`. Also useful to users
 as a local backup. Contains recipes and dataset metadata only, never rows.
 
-## Harness — `validation/harness/`
+## Harness — `tools/validation/`
+
+The harness code is tracked; everything under `validation/` (LMU scripts and
+data, project exports, results) is git-ignored — the course material is not
+ours to publish in a public repo.
+
 
 1. `loadProject(unit)` — read `project.litux.json`, load each dataset from
    `validation/` with the app's own parsers (`parsers/tabular.js`, `rds.js`,
