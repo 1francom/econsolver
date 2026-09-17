@@ -25,6 +25,7 @@ import { coerceLiteral } from "./literals.js";
 // Distribution emitters shared with the Simulate tab (src/math/dgpScript.js),
 // so a distribution can never be drawable in the app but unexportable here.
 import { distExprR, distExprPy, distExprStata, stataCategoricalLines, RNG_NOTE } from "../math/dgpScript.js";
+import { dummyR, dummyStata, dummyPython } from "../services/export/dummyStep.js";
 
 // ─── SHARED HELPERS ──────────────────────────────────────────────────────────
 
@@ -566,10 +567,7 @@ export function toR(step, df = "df", allDatasets = {}) {
     }
 
     case "dummy":
-      return [
-        `# One-hot encode ${step.col} (prefix: "${step.pfx}")`,
-        `${df} <- fastDummies::dummy_cols(${df}, select_columns = ${rStr(step.col)}, remove_first_dummy = FALSE, remove_selected_columns = FALSE)`,
-      ].join("\n");
+      return dummyR(step, df);
 
     case "lag": {
       const ec = step.ec ? rName(step.ec) : null;
@@ -1137,10 +1135,7 @@ export function toStata(step, df = "df", allDatasets = {}) {
     }
 
     case "dummy":
-      return [
-        `* One-hot encode ${step.col} (prefix: ${step.pfx})`,
-        `tabulate ${v}, generate(${stVar(step.pfx ?? step.col)})`,
-      ].join("\n");
+      return dummyStata(step);
 
     case "lag": {
       const ec = step.ec ? stVar(step.ec) : null;
@@ -1760,10 +1755,8 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return `${df}[${o}] = (${df}[${c}] - ${mu}) / ${sd}`;
     }
 
-    case "dummy": {
-      const pfx = step.pfx ? pyStr(step.pfx) : pyStr(step.col);
-      return `${df} = pd.get_dummies(${df}, columns=[${c}], prefix=${pfx}, dtype=int)`;
-    }
+    case "dummy":
+      return dummyPython(step, df);
 
     case "lag": {
       const n  = step.n ?? 1;

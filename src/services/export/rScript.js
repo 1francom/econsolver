@@ -39,6 +39,7 @@ import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 import { stepLabel } from "../../pipeline/registry.js";
 import { toR, jsExprToR, rRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildRLoadLine } from "./loadLine.js";
+import { dummyR } from "./dummyStep.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -280,11 +281,7 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     }
 
     case "dummy":
-      return [
-        `# One-hot encode ${step.col} with prefix "${step.pfx}"`,
-        `${dfVar} <- ${dfVar} |> fastDummies::dummy_cols(select_columns = ${rStr(step.col)}, remove_first_dummy = FALSE, remove_selected_columns = FALSE)`,
-        `# Rename generated columns to prefix "${step.pfx}_*" if needed`,
-      ].join("\n");
+      return dummyR(step, dfVar);
 
     case "lag": {
       const ec = step.ec ? rName(step.ec) : null;

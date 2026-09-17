@@ -14,6 +14,7 @@ import { factorLevelsFromMap, needsEncode, encodedName, encodedRefCode, stataEnc
 import { toStata, jsExprToStata, stataRightLoad } from "../../pipeline/stepTranslators.js";
 import { UNMATCHED_BY_HOW, stataMasterVarlist, stataSuffixHomonyms, stataDropMergeMarker } from "./stataJoin.js";
 import { buildStataLoadLine } from "./loadLine.js";
+import { dummyStata } from "./dummyStep.js";
 
 export function generateStataScript(config = {}) {
   const {
@@ -267,7 +268,8 @@ function transpileStep(step, allDatasets = {}) {
         : `gen ${out} = max(${lo}, min(${hi}, ${col}))`;
     }
     case "dummy":
-      return `tabulate ${stVar(step.col)}, generate(${(step.pfx || step.col)}_)`;
+      return dummyStata(step);
+
     case "lag": {
       const col = stVar(step.col), out = stVar(step.nn || `${step.col}_lag${step.n ?? 1}`), n = step.n ?? 1;
       if (step.ec && step.tc) return `xtset ${stVar(step.ec)} ${stVar(step.tc)}\ngen ${out} = L${n}.${col}`;

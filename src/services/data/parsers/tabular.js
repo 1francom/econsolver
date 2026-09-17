@@ -21,6 +21,12 @@ export function parseCSV(text, delimiter = ",") {
         }
         fields.push(field);
         if (line[i] === delimiter) i++;
+        // End of line right after a closing quote: without this the loop goes
+        // round once more and the `i === line.length` case above appends an
+        // empty field. A header row whose last name is quoted — what R's
+        // write.csv and many Excel exports produce — then grew a phantom
+        // trailing column (named "col", all nulls).
+        else if (i >= line.length) break;
       } else {
         const end = line.indexOf(delimiter, i);
         if (end === -1) { fields.push(line.slice(i)); break; }

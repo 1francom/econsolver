@@ -13,6 +13,7 @@ import { opInfix } from "../../pipeline/predicate.js";
 import { feTerm, pyFEInteractionSetup } from "./feInteractionTerm.js";
 import { toPython, jsExprToPython, pyRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildPyLoadLine } from "./loadLine.js";
+import { dummyPython } from "./dummyStep.js";
 
 export function generatePythonScript(config = {}) {
   const {
@@ -296,7 +297,8 @@ function transpileStep(step, allDatasets = {}) {
       return `df[${out}] = df[${col}].clip(lower=${Number(step.lo)}, upper=${Number(step.hi)})`;
     }
     case "dummy":
-      return `df = pd.get_dummies(df, columns=[${pyStr(step.col)}], prefix=${pyStr(step.pfx || step.col)}, drop_first=False, dtype=int)`;
+      return dummyPython(step, "df");
+
     case "lag": {
       const col = pyStr(step.col), out = pyStr(step.nn || `${step.col}_lag${step.n ?? 1}`), n = step.n ?? 1;
       if (step.ec && step.tc) {
