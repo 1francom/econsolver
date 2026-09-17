@@ -15,6 +15,7 @@ import { generateMultiModelPythonScript } from "../../services/export/pythonScri
 import { generateMultiModelStataScript }  from "../../services/export/stataScript.js";
 import { buildStargazer }                 from "../../services/export/latexTable.js";
 import { deriveFactorSpec }               from "../../services/export/factorSpec.js";
+import { exportSpecExtras }               from "../../services/export/exportSpecExtras.js";
 
 
 function getTypeColor(type, C) {
@@ -382,6 +383,7 @@ function ExportBlock({ models, dataDictionary, pipeline = [], filename = "datase
       const fs = deriveFactorSpec(m);
       return {
       model: {
+        ...exportSpecExtras(m),
         type: m.type,
         yVar:       m.spec?.yVar       ?? m.yVar       ?? "y",
         xVars:      m.spec?.xVars      ?? m.xVars      ?? [],

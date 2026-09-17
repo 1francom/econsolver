@@ -32,6 +32,7 @@ import { generateStataScript } from "./services/export/stataScript.js";
 import { ForestPlot } from "./components/modeling/resultDisplay.jsx";
 import { buildCoefGroups, hiddenCoefNames } from "./components/modeling/coefGroups.js";
 import { buildStargazer }      from "./services/export/latexTable.js";
+import { exportSpecExtras }    from "./services/export/exportSpecExtras.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 // ─── SAFE NUMBER FORMATTER ────────────────────────────────────────────────────
@@ -779,6 +780,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
       dataDictionary: spec.dataDictionary ?? (sameAsActive ? cleanedData?.dataDictionary : null),
       dataLoadOpts:   modelDs?.loadOpts ?? (sameAsActive ? cleanedData?.loadOpts : null) ?? null,
       model: {
+        ...exportSpecExtras(model),
         type:       model.type      ?? "OLS",
         yVar:       spec.yVar       ?? "",
         xVars:      spec.xVars      ?? [],

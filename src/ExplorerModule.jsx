@@ -1866,7 +1866,7 @@ function generateExploreScript(language, { headers, info, filename }) {
       `version 17`,
       `set more off`,
       ``,
-      `import delimited "${filename || `${base}.csv`}", clear`,
+      `import delimited "${filename || `${base}.csv`}", case(preserve) asdouble clear`,
       ``,
       `* ── Overview ──`,
       `describe`,

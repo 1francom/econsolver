@@ -119,6 +119,9 @@ export function buildPyLoadLine(filename, loadOpts = null) {
 }
 
 // ─── Stata ───────────────────────────────────────────────────────────────────
+// Options every emitted `import delimited` carries — see the csv case below.
+export const STATA_CSV_OPTS = ["case(preserve)", "asdouble"];
+
 export function buildStataLoadLine(filename, loadOpts = null) {
   const fmt = inferFormat(filename, loadOpts);
   const f   = stataPath(filename);
@@ -132,11 +135,14 @@ export function buildStataLoadLine(filename, loadOpts = null) {
       if (loadOpts?.encoding && loadOpts.encoding !== "utf-8") {
         opts.push(`encoding("${loadOpts.encoding}")`);
       }
-      opts.push("clear");
+      // import delimited lowercases every name and stores float unless told
+      // otherwise: a column `D` becomes `d` (r(111) on the model line) and every
+      // coefficient picks up ~1e-9 of float noise. Measured on StataNow 19.5.
+      opts.push(...STATA_CSV_OPTS, "clear");
       return `import delimited "${f}", ${opts.join(" ")}`;
     }
     case "tsv":
-      return `import delimited "${f}", delimiter(tab) clear`;
+      return `import delimited "${f}", delimiter(tab) ${STATA_CSV_OPTS.join(" ")} clear`;
     case "excel": {
       const sheet = loadOpts?.sheetName ? ` sheet("${loadOpts.sheetName}")` : "";
       return `import excel "${f}", firstrow${sheet} clear`;
@@ -154,6 +160,6 @@ export function buildStataLoadLine(filename, loadOpts = null) {
     case "shapefile-dbf":
       return `spshape2dta "${f.replace(/\.(shp|zip|dbf)$/i, "")}", replace\nuse "${f.replace(/\.(shp|zip|dbf)$/i, "")}", clear`;
     default:
-      return `import delimited "${f}", clear`;
+      return `import delimited "${f}", ${STATA_CSV_OPTS.join(" ")} clear`;
   }
 }

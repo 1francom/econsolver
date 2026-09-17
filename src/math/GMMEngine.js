@@ -161,9 +161,14 @@ export function runGMM(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
   const resid = Y.map((y, i) => y - dot(X[i], beta));
 
   // ── Robust SE override ─────────────────────────────────────────────────────
-  // Ainv scaled by n serves as the asymptotic variance matrix (Var(β̂) = n·Ainv)
-  const AinvN  = Ainv.map(row => row.map(v => v * n));
-  const robSE  = computeRobustSE(seOpts, AinvN, X, resid, n, k, valid);
+  // The GMM sandwich is A⁻¹ · Σ êᵢ² x̃ᵢx̃ᵢ′ · A⁻¹ with x̃ᵢ = X′ZΩ̂⁻¹zᵢ and the
+  // SECOND-step residuals — the ordinary sandwich with x̃ in place of x.
+  // This used to pass n·A⁻¹ as the bread and the raw regressors X as the
+  // scores, which is neither: on a 400-row fixture HC1 came out 1.90 where
+  // Stata's `ivregress gmm, wmatrix(robust) vce(robust) small` and the same
+  // formula coded by hand in R both give 0.16873.
+  const Xg     = Z.map(zi => XtZ_OI.map(row => dot(row, zi)));
+  const robSE  = computeRobustSE(seOpts, Ainv, Xg, resid, n, k, valid);
   if (robSE) {
     se     = robSE;
     tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
@@ -265,7 +270,11 @@ export function runLIML(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
   const XtMzY = MzX.map(mzxj => dot(mzxj, Y));
   const beta  = lhsInv.map(row => dot(row, XtY.map((v, j) => v - kappa * XtMzY[j])));
 
-  // ── SE: σ̂²(X′P_Z X)⁻¹ — reuse ZtZinv already computed above ──────────────────
+  // ── SE: σ̂²(X′(I−κM_Z)X)⁻¹ — the k-class covariance ──────────────────────
+  // Previously σ̂²(X′P_Z X)⁻¹, the 2SLS bread: asymptotically equivalent but
+  // not what Stata's `ivregress liml` reports (0.17581 vs 0.17587 on the
+  // fixture; the k-class form matches Stata and a hand-coded R to 1e-8).
+  // (X′P_Z X)⁻¹ is still returned as XtXinv for the diagnostics that use it.
   const ZtX     = matMul(Zt, X);
   const PzX     = matMul(Z, matMul(ZtZinv, ZtX));
   const XtPzXi  = matInv(matMul(transpose(PzX), X));
@@ -275,14 +284,17 @@ export function runLIML(rows, yCol, xCols, wCols, zCols, seOpts = {}) {
   const resid = Y.map((y, i) => y - dot(X[i], beta));
   const SSR   = resid.reduce((s, e) => s + e * e, 0);
   const s2    = SSR / Math.max(1, df);
-  let se    = XtPzXi.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
+  let se    = lhsInv.map((row, i) => Math.sqrt(Math.abs(row[i] * s2)));
   let tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);
   let pVals  = tStats.map(t => isFinite(t) ? pValue(t, df) : NaN);
 
   // ── Robust SE override ─────────────────────────────────────────────────────
-  // Bread for sandwich = (X'P_Z X)^{-1}. Do NOT pre-multiply by s2 — that
-  // would inflate every robust SE by s2 (squaring the s2 factor in bread×meat×bread).
-  const robSE    = computeRobustSE(seOpts, XtPzXi, X, resid, n, k, valid);
+  // k-class sandwich: bread (X′(I−κM_Z)X)⁻¹, scores x̃ᵢ = rows of (I−κM_Z)X.
+  // It used to pair the (X′P_Z X)⁻¹ bread with the RAW regressors X, which
+  // is no sandwich at all — the endogenous regressor's HC1 SE came out 0.275
+  // where Stata (`vce(robust) small`) and hand-coded R both give 0.1769.
+  const Xk       = X.map((row, i) => row.map((v, j) => v - kappa * MzX[j][i]));
+  const robSE    = computeRobustSE(seOpts, lhsInv, Xk, resid, n, k, valid);
   if (robSE) {
     se     = robSE;
     tStats = beta.map((b, i) => se[i] > 0 ? b / se[i] : NaN);

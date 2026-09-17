@@ -1322,9 +1322,12 @@ function transpileModel(model) {
     }
 
     case "GMM": {
-      const endog  = wVars.map(rName).join(", ");
-      const exog   = xVars.map(fmtR).join(" + ") || "1";
-      const instrs = [...xVars, ...zVars].map(rName).join(", ");
+      // X = endogenous, W = exogenous controls — the order runGMM(rows, y, X,
+      // W, Z) uses. These were swapped (the controls were instrumented and the
+      // endogenous regressor instrumented itself), so the script fitted a
+      // different model without any error.
+      const exog   = wVars.map(fmtR).join(" + ");
+      const instrs = [...wVars.map(fmtR), ...zVars.map(rName)].join(" + ");
       return [
         `# ── Two-Step Efficient GMM ───────────────────────────────────────────`,
         `# Install: install.packages("gmm")`,
@@ -1332,17 +1335,25 @@ function transpileModel(model) {
         ``,
         `# Structural: ${y} ~ exogenous + endogenous`,
         `# Instruments: exogenous + excluded`,
-        `fit <- gmm::gmm(${y} ~ ${exog}${wVars.length ? ` + ${wVars.map(fmtR).join(" + ")}` : ""},`,
+        `fit <- gmm::gmm(${y} ~ ${[exog, xVars.map(fmtR).join(" + ")].filter(Boolean).join(" + ") || "1"},`,
         `  ~ ${instrs || "1"},`,
-        // gmm::gmm's vcov vocabulary is "iid" / "MDS" / "HAC" — not sandwich's.
-        // "MDS" is the martingale-difference (heteroskedasticity-robust) weight
-        // matrix, which is the closest counterpart to the HC family here.
-        `  data = df, vcov = ${(() => {
+        // gmm::gmm's `vcov` sets the WEIGHT MATRIX as well as the covariance.
+        // "iid" makes it 2SLS, not the two-step robust-weight GMM Litux fits —
+        // measured: "iid" returned the 2SLS coefficients, "MDS" returns Litux's
+        // to 2e-6. So MDS always (HAC only when that was asked for).
+        `  data = df, vcov = ${(seType || "classical").toLowerCase() === "hac" ? `"HAC"` : `"MDS"`})`,
+        ...((() => {
           const s = (seType || "classical").toLowerCase();
-          if (s === "classical") return `"iid"`;
-          if (s === "hac") return `"HAC"`;
-          return `"MDS"`;
-        })()})`,
+          if (s === "classical") return [
+            `# NOTE: Litux reported the efficient GMM SE computed from the first-step`,
+            `# weight matrix (Stata: ivregress gmm, wmatrix(robust) vce(unadjusted)).`,
+            `# gmm::gmm has no such option; its MDS SEs are the robust (HC0) ones.`,
+          ];
+          if (s === "hc1") return [
+            `# NOTE: gmm's MDS SEs are HC0. Litux's HC1 = these x sqrt(n / (n - k)).`,
+          ];
+          return [];
+        })()),
         ``,
         `summary(fit)`,
         `coef(fit)`,
@@ -1353,15 +1364,16 @@ function transpileModel(model) {
       // fmtR, not rName: a factor appearing anywhere on a formula RHS — endogenous
       // side or instrument list — still needs factor()/relevel(), otherwise the
       // raw column name is emitted and R treats it as numeric.
-      const endog  = wVars.map(fmtR).join(" + ");
-      const exog   = xVars.map(fmtR).join(" + ") || "1";
-      const instrs = [...xVars.map(fmtR), ...zVars.map(rName)].join(" + ");
+      // Same X = endogenous / W = exogenous convention as GMM above.
+      const endog  = xVars.map(fmtR).join(" + ");
+      const exog   = wVars.map(fmtR).join(" + ") || "1";
+      const instrs = [...wVars.map(fmtR), ...zVars.map(rName)].join(" + ");
       return [
         `# ── Limited Information Maximum Likelihood (LIML) ────────────────────`,
         `# Install: install.packages("ivreg")`,
         `library(ivreg)`,
         ``,
-        `fit <- ivreg::ivreg(${y} ~ ${exog}${wVars.length ? ` + ${endog}` : ""} | ${instrs || "1"},`,
+        `fit <- ivreg::ivreg(${y} ~ ${exog}${xVars.length ? ` + ${endog}` : ""} | ${instrs || "1"},`,
         `  data = df, method = "liml")`,
         ``,
         `summary(fit, diagnostics = TRUE)`,

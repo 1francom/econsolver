@@ -60,10 +60,10 @@ export function stataRightLoad(id, allDatasets) {
   const ds   = allDatasets?.[id];
   const name = (ds?.name ?? id).replace(/\s+/g, "_");
   const file = ds?.filename;
-  if (!file) return `import delimited "<path_to_${name}.csv>", clear`;
+  if (!file) return `import delimited "<path_to_${name}.csv>", case(preserve) asdouble clear`;
   const fl = file.toLowerCase();
   if (fl.endsWith(".dta")) return `use "${file}", clear`;
-  return `import delimited "${file}", clear`;
+  return `import delimited "${file}", case(preserve) asdouble clear`;
 }
 
 // Split a comma-separated argument list, respecting nested parentheses/brackets.

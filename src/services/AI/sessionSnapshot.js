@@ -278,7 +278,7 @@ export function loadOptsToScriptHint(loadOpts, language) {
     const opts = [];
     if (sepStr) opts.push(`delimiter(${delimiter === "\t" ? "tab" : sepStr})`);
     if (encoding && encoding !== "utf-8") opts.push(`encoding("${encoding}")`);
-    opts.push("clear");
+    opts.push("case(preserve)", "asdouble", "clear");
     return `import delimited ${f}, ${opts.join(" ")}`;
   }
   return "";

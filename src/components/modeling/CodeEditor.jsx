@@ -11,6 +11,7 @@ import { useTheme }                         from "./shared.jsx";
 import { generateRScript }                  from "../../services/export/rScript.js";
 import { generatePythonScript }             from "../../services/export/pythonScript.js";
 import { generateStataScript }              from "../../services/export/stataScript.js";
+import { exportSpecExtras }                 from "../../services/export/exportSpecExtras.js";
 
 // ─── TAB DEFINITIONS ─────────────────────────────────────────────────────────
 const TABS = [
@@ -34,6 +35,7 @@ function buildScript(tab, result, allDatasets = {}) {
     auditTrail:    spec.auditTrail    ?? null,
     allDatasets,
     model: {
+      ...exportSpecExtras(result),
       type:       result.type ?? spec.type ?? "OLS",
       yVar:       spec.yVar       ?? "",
       xVars:      spec.xVars      ?? [],

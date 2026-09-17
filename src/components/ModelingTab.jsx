@@ -1694,8 +1694,11 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
           if (effModel === "LIML") {
             // ── LIML SQL branch (Fase 3b + Fase 8 robust-SE backfill) ──
-            if (!["classical", "HC0", "HC1", "clustered", "HAC"].includes(seTypeNorm)) {
-              throw new Error(`LIML SQL path does not support ${seTypeNorm} - fallback to JS`);
+            // Robust LIML needs k-class scores (1−κ)x + κx̂ in the meat; the SQL
+            // meat builders use the raw design, which gave SEs ~55% off Stata on
+            // the endogenous regressor. Classical only until that exists.
+            if (seTypeNorm !== "classical") {
+              throw new Error(`LIML SQL path supports classical SE only (${seTypeNorm}) - fallback to JS`);
             }
             const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable, factorRefs });
             const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable, factorRefs });

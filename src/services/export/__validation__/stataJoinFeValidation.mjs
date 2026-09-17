@@ -98,7 +98,10 @@ const mk = (type, feCols) => ({
 
 check("T7 REGRESSION: one FE dimension still emits xtreg, fe", () => {
   const s = generateStataScript(mk("FE", ["a"]));
-  assert.match(s, /^xtset a t$/m);
+  // The panel id goes through a runtime numeric check (group() for a string
+  // id, which xtset rejects with r(109)); a numeric id is used as is.
+  assert.match(s, /^if _rc == 0 local _pid a$/m);
+  assert.match(s, /^xtset `_pid' t$/m);
   assert.match(s, /^xtreg y x z, fe$/m);
   assert.doesNotMatch(s, /reghdfe/);
 });
@@ -118,7 +121,7 @@ check("T9 LSDV savefe spelling is absorb(NEWVAR=fevar), not the reverse", () => 
 check("T10 REGRESSION: one-dimension LSDV keeps xtreg + areg", () => {
   const s = generateStataScript(mk("LSDV", ["a"]));
   assert.match(s, /^xtreg y x z, fe$/m);
-  assert.match(s, /^areg y x z, absorb\(a\)/m);
+  assert.match(s, /^areg y x z, absorb\(`_pid'\)/m);
 });
 
 check("T11 Python FE indexes the FE columns and turns time_effects on", () => {

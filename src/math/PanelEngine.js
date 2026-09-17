@@ -534,7 +534,11 @@ export function runEventStudyMulti(
   // Original Event Study df: n − (ΣL_d − (D−1)) − regressors − 1  (= n − (Lu+Lt−1) −
   // regressors − 1 for the default 2-way case; intercept counted separately).
   const k_total  = regressors.length + 1; // include intercept
-  const df_fe    = valid.length - absorbedFE - regressors.length - 1;
+  // absorbedFE already contains the grand mean (ΣL − (D−1)), so the intercept
+  // must not be subtracted again. It was: df came out one short of fixest and
+  // reghdfe (342 vs 343 on a 40×10 panel, every SE 0.15% too large), and of
+  // runTWFEDiDMulti, whose `- 1` is the treatment column, not an intercept.
+  const df_fe    = valid.length - absorbedFE - regressors.length;
   if (df_fe <= 0)
     return { error: "Degrees of freedom ≤ 0 — reduce window or add more observations." };
   const s2_fe    = res.SSR / df_fe;

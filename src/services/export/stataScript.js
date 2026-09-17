@@ -92,7 +92,7 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, factorMap: model.factorMap ?? null, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null }));
+  lines.push(...transpileModel({ ...model, type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, factorMap: model.factorMap ?? null, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null }));
   lines.push("");
 
   return lines.join("\n");
@@ -725,6 +725,38 @@ function buildStataVarlist(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
 // Estimators whose Stata command is a panel command (xtreg / reghdfe / areg /
 // ppmlhdfe) — these accept vce(cluster) but not vce(hc2)/vce(hc3) or a HAC option.
+// `xtset` rejects a string panel id with r(109) ("string variables not
+// allowed"), and so does `areg, absorb()`. Country/region names are the most
+// ordinary panel id there is, and the column type is not known when the script
+// is written — so the check happens in Stata. group() numbers the ids 1..G in
+// sorted order, which relabels the panel without changing any estimate.
+// Returns the lines plus the macro reference to use in place of the entity.
+// Kernel weight on |u| = |x - c| / h, zero outside the window. Matches the
+// weights runSharpRDD / runFuzzyRDD apply (the constant factor of the
+// Epanechnikov kernel cancels in WLS).
+function stataKernelWeight(kernel, absDist, h) {
+  const u = `(${absDist}) / ${h}`;
+  if (kernel === "uniform")      return `1 if ${absDist} <= ${h}`;
+  if (kernel === "epanechnikov") return `1 - (${u})^2 if ${absDist} <= ${h}`;
+  return `1 - ${u} if ${absDist} <= ${h}`;
+}
+
+function stataPanelId(entityCol) {
+  const e = entityCol ?? "id";
+  return {
+    ref: "`_pid'",
+    lines: [
+      `capture confirm numeric variable ${e}`,
+      `if _rc == 0 local _pid ${e}`,
+      `else {`,
+      `    capture drop _pid`,
+      `    egen long _pid = group(${e})   // xtset needs a numeric panel id`,
+      `    local _pid _pid`,
+      `}`,
+    ],
+  };
+}
+
 const PANEL_TYPES = new Set(["FE", "FD", "TWFE", "LSDV", "EventStudy", "PoissonFE"]);
 
 // One factor variable's Stata term.
@@ -758,7 +790,7 @@ function stFactorTerm(v, fvSet, factorRefs, factorLevels = {}) {
   return `i.${v}`;
 }
 
-function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVarsIn, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, factorMap = null, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null }) {
+function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVarsIn, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, factorMap = null, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null, treatTimeCol = null, windowPre = null, windowPost = null }) {
   // Prefer the PRE-EXPANSION lists in EVERY branch, not only in the plain
   // formula path: the other estimators mapped their factor formatter over the
   // post-expansion columns, so `municipality` arrived as municipality_10,
@@ -839,6 +871,11 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
   // Same mapping for commands that do NOT accept vce(hc2)/vce(hc3).
   const vceNoHC23 = (seLower === "hc2" || seLower === "hc3") ? "robust" : vce;
   const optNoHC23 = vceNoHC23 ? `, ${vceNoHC23}` : "";
+  // `vce(robust)`, not bare `robust`: StataNow 19.5 crashes drawing the LIML
+  // table for `ivregress liml ..., robust small` (Mata _put_tab::add_note()
+  // not found, r(1)) and accepts the vce() spelling.
+  const ivVce     = vceNoHC23 === "robust" ? "vce(robust)" : vceNoHC23;
+  const ivOpt     = ivVce ? `, ${ivVce} small` : `, small`;
 
   // Panel commands (xtreg / reghdfe / areg / ppmlhdfe). These used to hardcode
   // vce(cluster entityCol) regardless of the user's selection, which disagreed
@@ -848,17 +885,23 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
   const pVce = (() => {
     switch (seLower) {
       case "classical": return "";
-      case "hc1": case "hc2": case "hc3": return "robust";   // no hc2/hc3 here
+      // vce(robust), never bare `robust`: reghdfe rejects the bare word with
+      // r(198) ("option robust not allowed"); xtreg/areg/ppmlhdfe take both.
+      case "hc1": case "hc2": case "hc3": return "vce(robust)";   // no hc2/hc3 here
       case "clustered": return `vce(cluster ${clusterVar || entityCol})`;
       // NOTE: single cluster variable only. xtreg and areg reject a second one —
       // `xtreg y x, fe vce(cluster a b)` is a syntax error. Two-way clustering is
       // available on reghdfe, which uses pVceHdfe below.
       case "twoway":    return `vce(cluster ${clusterVar || entityCol})`;
-      case "hac":       return "robust";   // true panel HAC needs xtscc
+      case "hac":       return "vce(robust)";   // true panel HAC needs xtscc
       default:          return "";
     }
   })();
   const pOpt = pVce ? ` ${pVce}` : "";
+  // `xtreg, fe robust` is NOT HC1: xtreg silently turns robust into
+  // vce(cluster panelvar). So an HC choice must not go through xtreg at all —
+  // areg/reghdfe keep robust as heteroskedasticity-robust.
+  const xtregOK = !["hc1", "hc2", "hc3", "hac"].includes(seLower);
 
   // reghdfe accepts multi-way clustering, so it can honour two-way exactly.
   const pVceHdfe = (seLower === "twoway" && clusterVar && clusterVar2)
@@ -947,30 +990,36 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       // Litux/fixest/reghdfe all give x = 2.598920041772, the emitted do-file
       // gave 2.842960069813 — and matched `feols(y ~ x + z | a)` exactly,
       // which is the proof it had silently dropped the second dimension.
-      if (feColsFE.length <= 1) {
+      if (feColsFE.length <= 1 && xtregOK) {
+        const pid = stataPanelId(entityCol);
         lines.push(`* Fixed Effects (within)`);
-        lines.push(`xtset ${entityCol} ${timeCol}`);
+        lines.push(...pid.lines);
+        lines.push(`xtset ${pid.ref} ${timeCol}`);
         lines.push(`xtreg ${yVar} ${xList}, fe${pOpt}`);
         lines.push(`estimates store m_fe`);
       } else {
         lines.push(`* Fixed Effects (within) — N-way absorption via reghdfe`);
         lines.push(`* ssc install reghdfe  // if not installed — required for 2+-way FE absorption`);
-        lines.push(`* (xtreg, fe absorbs only the xtset panel id, so it cannot do this)`);
-        lines.push(`* NOTE: clusters on the first FE column (entityCol) by convention, matching the`);
-        lines.push(`* existing TWFE reghdfe export — does not yet thread the model's actual seType/`);
-        lines.push(`* clusterVar selection through this fallback path.`);
+        lines.push(`* (xtreg, fe absorbs only the xtset panel id, and turns robust into a panel cluster)`);
         lines.push(`reghdfe ${yVar} ${xList}, absorb(${feColsFE.map(c => feTerm(c, "stata")).join(" ")})${pOptHdfe}`);
         lines.push(`estimates store m_fe`);
       }
       break;
     }
 
-    case "FD":
+    case "FD": {
+      // `xtreg` has no fd option — `xtreg y x, fd` is r(198). First differences
+      // are an OLS on D. with a constant, which is exactly what runFDMulti fits
+      // (df = n_diff - k - 1). D. respects the xtset panel, so a gap in time
+      // yields a missing difference rather than a difference across the gap.
+      const pid = stataPanelId(entityCol);
       lines.push(`* First Differences`);
-      lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`xtreg ${yVar} ${xList}, fd${pOpt}`);
+      lines.push(...pid.lines);
+      lines.push(`xtset ${pid.ref} ${timeCol}`);
+      lines.push(`reg D.(${yVar} ${xList})${pVce ? `, ${pVce}` : ""}`);
       lines.push(`estimates store m_fd`);
       break;
+    }
 
     case "2SLS": {
       const endog = xVars.map(fmtS).join(" ");
@@ -983,7 +1032,10 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         lines.push(`* NOTE: Litux used ${seLower.toUpperCase()} SE. ivregress has no hc2/hc3 option;`);
         lines.push(`* this reports robust (HC1) SE instead — expect a small SE difference.`);
       }
-      lines.push(`ivregress 2sls ${yVar} ${exog ? `(${endog} = ${instr}) ${exog}` : `(${endog} = ${instr})`}${optNoHC23}`);
+      // `small` = t/F with n-k degrees of freedom, which is what Litux (and R's
+      // ivreg) report. Without it ivregress scales by n and every SE comes out
+      // smaller by sqrt((n-k)/n) — 0.38% at n=400, k=3, measured.
+      lines.push(`ivregress 2sls ${yVar} ${exog ? `(${endog} = ${instr}) ${exog}` : `(${endog} = ${instr})`}${ivOpt}`);
       lines.push(`estimates store m_2sls`);
       lines.push(`* First-stage F-statistic`);
       lines.push(`estat firststage`);
@@ -1005,7 +1057,6 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       // Fallback preserves the pre-existing entity+time default byte-for-byte.
       const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
       lines.push(`* Two-Way Fixed Effects DiD`);
-      lines.push(`xtset ${entityCol} ${timeCol}`);
       lines.push(`reghdfe ${yVar} ${treatVar}${extra}, absorb(${feColsTWFE.map(c => feTerm(c, "stata")).join(" ")})${pOptHdfe}`);
       lines.push(`* If reghdfe not installed: ssc install reghdfe`);
       lines.push(`estimates store m_twfe`);
@@ -1013,7 +1064,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
     }
 
     case "RDD": {
-      const kernelOpt = kernel === "uniform" ? "nw(1)" : kernel === "epanechnikov" ? "kernel(epanechnikov)" : "kernel(triangular)";
+      const kernelOpt = `kernel(${kernel === "uniform" || kernel === "epanechnikov" ? kernel : "triangular"})`;
       const extra = wVars.length ? ` ${wVars.map(fmtS).join(" ")}` : "";
       lines.push(`* Sharp RDD — local linear regression`);
       lines.push(`* If rdrobust not installed: ssc install rdrobust`);
@@ -1022,8 +1073,8 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       lines.push(`gen _above = (${runningVar} >= ${cutoff ?? 0})`);
       lines.push(`gen _run_c = ${runningVar} - ${cutoff ?? 0}`);
       lines.push(`gen _above_run = _above * _run_c`);
-      lines.push(`* Triangular kernel weights:`);
-      lines.push(`gen _w = max(0, 1 - abs(_run_c) / ${bandwidth ?? 1}) if abs(_run_c) <= ${bandwidth ?? 1}`);
+      lines.push(`* ${kernel === "uniform" || kernel === "epanechnikov" ? kernel[0].toUpperCase() + kernel.slice(1) : "Triangular"} kernel weights:`);
+      lines.push(`gen double _w = ${stataKernelWeight(kernel, "abs(_run_c)", bandwidth ?? 1)}`);
       lines.push(`reg ${yVar} _above _run_c _above_run${extra} [aw=_w]${opt}`);
       lines.push(`drop _above _run_c _above_run _w`);
       break;
@@ -1037,7 +1088,12 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       break;
 
     case "Probit":
-      lines.push(`probit ${yVar} ${xList}`);
+      // runProbit's SEs come from the EXPECTED information (Fisher scoring), as
+      // R's glm() does. `probit` uses the observed information, which for the
+      // non-canonical probit link differs — 1-2% on the fixture. glm with
+      // vce(eim) is the matching estimator. (Logit is canonical: OIM = EIM.)
+      lines.push(`glm ${yVar} ${xList}, family(binomial) link(probit) ${seLower === "classical" ? "vce(eim)" : vce || "vce(eim)"}`);
+      lines.push(`* Equivalent point estimates: probit ${yVar} ${xList}  (its SEs use the observed information)`);
       lines.push(`estimates store m_probit`);
       lines.push(`* Marginal effects at the mean`);
       lines.push(`margins, dydx(*) atmeans`);
@@ -1056,14 +1112,18 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       // time] with it on — so the length here is the model's real dimension
       // count and the [entityCol, timeCol] default above never fires.
       if (feColsLSDV.length <= 1) {
+        const pid = stataPanelId(entityCol);
         lines.push(`* Panel LSDV — recover entity fixed effects explicitly`);
-        lines.push(`xtset ${entityCol} ${timeCol}`);
-        lines.push(`* Within (FE) — numerically equivalent to LSDV`);
-        lines.push(`xtreg ${yVar} ${xList}, fe${pOpt}`);
-        lines.push(`estimates store m_lsdv`);
-        lines.push(``);
+        lines.push(...pid.lines);
+        lines.push(`xtset ${pid.ref} ${timeCol}`);
+        if (xtregOK) {
+          lines.push(`* Within (FE) — numerically equivalent to LSDV`);
+          lines.push(`xtreg ${yVar} ${xList}, fe${pOpt}`);
+          lines.push(`estimates store m_lsdv`);
+          lines.push(``);
+        }
         lines.push(`* Recover alpha_i (entity fixed effects) via areg`);
-        lines.push(`areg ${yVar} ${xList}, absorb(${entityCol})${pOpt}`);
+        lines.push(`areg ${yVar} ${xList}, absorb(${pid.ref})${pOpt}`);
         lines.push(`predict _alpha_i, dresiduals`);
         lines.push(`label var _alpha_i "Entity fixed effect (LSDV alpha_i)"`);
         lines.push(`* List unique entity FEs`);
@@ -1095,26 +1155,28 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
     }
 
     case "FuzzyRDD": {
-      const kernelOpt = kernel === "uniform" ? "nw(1)"
-                      : kernel === "epanechnikov" ? "kernel(epanechnikov)"
-                      : "kernel(triangular)";
+      const kernelOpt = `kernel(${kernel === "uniform" || kernel === "epanechnikov" ? kernel : "triangular"})`;
       const dVar  = treatVar ?? "D";
       const extra = wVars.length ? ` covs(${wVars.map(fmtS).join(" ")})` : "";
       lines.push(`* Fuzzy RDD via rdrobust`);
       lines.push(`* If not installed: ssc install rdrobust`);
       lines.push(`rdrobust ${yVar} ${runningVar}, fuzzy(${dVar}) c(${cutoff ?? 0}) h(${bandwidth ?? "# set bandwidth"}) ${kernelOpt}${extra}`);
-      lines.push(`* First-stage jump in take-up probability`);
-      lines.push(`gen _Z = (${runningVar} >= ${cutoff ?? 0})`);
-      lines.push(`gen _run_c = ${runningVar} - ${cutoff ?? 0}`);
-      lines.push(`ivregress 2sls ${yVar} _run_c (${dVar} = _Z)${optNoHC23}`);
-      lines.push(`drop _Z _run_c`);
+      // Manual equivalent of runFuzzyRDD: local-linear IV inside the bandwidth
+      // with the same kernel weights, instrumenting take-up with the cutoff
+      // dummy. The old line ran over the whole sample with no weights and no
+      // slope change at the cutoff, i.e. a different estimand.
+      lines.push(`* Manual approach — kernel-weighted local-linear IV:`);
+      lines.push(`gen byte _Z = (${runningVar} >= ${cutoff ?? 0})`);
+      lines.push(`gen double _run_c = ${runningVar} - ${cutoff ?? 0}`);
+      lines.push(`gen double _Z_run = _Z * _run_c`);
+      lines.push(`gen double _w = ${stataKernelWeight(kernel, "abs(_run_c)", bandwidth ?? 1)}`);
+      lines.push(`ivregress 2sls ${yVar} _run_c _Z_run (${dVar} = _Z) [aw=_w]${ivOpt}`);
+      lines.push(`drop _Z _run_c _Z_run _w`);
       break;
     }
 
     case "SpatialRDD": {
-      const kernelOpt = kernel === "uniform"      ? "nw(1)"
-                      : kernel === "epanechnikov" ? "kernel(epanechnikov)"
-                      : "kernel(triangular)";
+      const kernelOpt = `kernel(${kernel === "uniform" || kernel === "epanechnikov" ? kernel : "triangular"})`;
       const distV  = distCol      ?? runningVar ?? "dist";
       const trtV   = treatmentCol ?? treatVar   ?? "treatment";
       const h      = bandwidth ? Number(bandwidth).toFixed(6) : null;
@@ -1140,21 +1202,35 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
 
     case "EventStudy": {
       const extra = wVars.length ? ` ${wVars.map(fmtS).join(" ")}` : "";
-      // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
-      // reghdfe natively absorbs any number of dimensions, so no <=2-dim branching is
-      // needed here (unlike PanelOLS/xtreg in the Python/Stata FE and LSDV cases).
-      // Fallback preserves the pre-existing entity+time default byte-for-byte.
       const feColsES = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
-      lines.push(`* Event Study — relative-time dummies`);
-      lines.push(`* Replace treat_time with the variable holding each unit's treatment period`);
-      lines.push(`xtset ${entityCol} ${timeCol}`);
-      lines.push(`gen rel_time = ${timeCol} - treat_time`);
-      lines.push(`* Estimate with unit + time FE, ref = -1`);
+      const tt  = treatTimeCol ?? "treat_time";
+      const pre  = Number.isFinite(Number(windowPre))  && Number(windowPre)  > 0 ? Number(windowPre)  : 3;
+      const post = Number.isFinite(Number(windowPost)) && Number(windowPost) > 0 ? Number(windowPost) : 3;
+      // The same design runEventStudyMulti builds: one dummy per k in
+      // [-pre, post] except the reference k = -1, plus endpoint bins for
+      // k < -pre and k > post; never-treated units (missing treatment time)
+      // get zeros everywhere. Built as explicit dummies rather than
+      // `ib(-1).rel_time`, which Stata refuses — factor variables cannot take
+      // negative values (r(452)) — and which would neither bin the endpoints
+      // nor treat never-treated units the way the app does.
+      // `& !missing(_k)` matters: Stata's missing compares greater than every
+      // number, so a bare `_k > ${post}` would put never-treated units in the
+      // post bin.
+      const nm = k => `ev_${k < 0 ? "m" : "p"}${Math.abs(k)}`;
+      const ks = [];
+      for (let k = -pre; k <= post; k++) if (k !== -1) ks.push(k);
+      if (!treatTimeCol) lines.push(`* Replace treat_time with the variable holding each unit's first treatment period`);
+      lines.push(`* Event Study — relative-time dummies, reference k = -1, window [-${pre}, ${post}]`);
+      lines.push(`capture drop _k ev_*`);
+      lines.push(`gen double _k = ${timeCol} - ${tt} if !missing(${tt})`);
+      ks.forEach(k => lines.push(`gen byte ${nm(k)} = (_k == ${k})`));
+      lines.push(`gen byte ev_pre_bin  = (_k < -${pre}) & !missing(_k)`);
+      lines.push(`gen byte ev_post_bin = (_k > ${post}) & !missing(_k)`);
       lines.push(`* If reghdfe not installed: ssc install reghdfe`);
-      lines.push(`reghdfe ${yVar} ib(-1).rel_time${extra}, absorb(${feColsES.join(" ")})${pOptHdfe}`);
+      lines.push(`reghdfe ${yVar} ${ks.map(nm).join(" ")} ev_pre_bin ev_post_bin${extra}, absorb(${feColsES.map(c => feTerm(c, "stata")).join(" ")})${pOptHdfe}`);
       lines.push(`estimates store m_eventstudy`);
-      lines.push(`* Plot coefficients`);
-      lines.push(`coefplot m_eventstudy, keep(*rel_time*) vertical yline(0) xline(# replace with ref period index)`);
+      lines.push(`* Plot coefficients (ssc install coefplot)`);
+      lines.push(`* coefplot m_eventstudy, keep(ev_m* ev_p*) vertical yline(0)`);
       break;
     }
 
@@ -1215,14 +1291,25 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
     }
 
     case "GMM": {
-      const endog  = wVars.map(fmtS).join(" ");
-      const exog   = xVars.map(fmtS).join(" ");
-      const instrs = [...xVars, ...zVars].join(" ");
+      // X = endogenous, W = exogenous controls: the order estimationDispatch
+      // passes to runGMM(rows, y, X, W, Z) and the 2SLS branch above uses.
+      // These were swapped, so the do-file instrumented the controls and
+      // treated the endogenous regressor as exogenous — a different model that
+      // ran without complaint.
+      const endog  = xVars.map(fmtS).join(" ");
+      const exog   = wVars.map(fmtS).join(" ");
+      const instrs = [...wVars, ...zVars].join(" ");
       lines.push(`* Two-Step Efficient GMM`);
       lines.push(`* Structural: ${yVar} ~ ${exog || "(no exog)"} + (${endog || "endog"}) endogenous`);
       lines.push(`* Instruments: ${instrs || "(instruments)"}`);
-      if (wVars.length) {
-        lines.push(`ivregress gmm ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")}), wmatrix(${seLower === "classical" ? "unadjusted" : "robust"})`);
+      if (xVars.length) {
+        // runGMM is two-step efficient with a heteroskedasticity-robust weight
+        // matrix whatever the SE choice; the SE choice only picks the
+        // covariance. Measured: classical = wmatrix(robust) vce(unadjusted),
+        // HC1 = wmatrix(robust) vce(robust) small (n-k scaling, as for 2SLS),
+        // both exact. wmatrix(unadjusted) is 2SLS, which is what this used to emit.
+        const gmmVce = seLower === "classical" ? " vce(unadjusted)" : ` ${ivVce} small`;
+        lines.push(`ivregress gmm ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")}), wmatrix(robust)${gmmVce}`);
       } else {
         lines.push(`* No endogenous variables specified — using 2SLS form`);
         lines.push(`ivregress gmm ${yVar} ${exog}${optNoHC23}`);
@@ -1232,11 +1319,12 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
     }
 
     case "LIML": {
-      const endog  = wVars.map(fmtS).join(" ");
-      const exog   = xVars.map(fmtS).join(" ");
+      // Same X = endogenous / W = exogenous convention as GMM above.
+      const endog  = xVars.map(fmtS).join(" ");
+      const exog   = wVars.map(fmtS).join(" ");
       lines.push(`* Limited Information Maximum Likelihood (LIML)`);
-      if (wVars.length) {
-        lines.push(`ivregress liml ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")})${optNoHC23}`);
+      if (xVars.length) {
+        lines.push(`ivregress liml ${yVar}${exog ? ` ${exog}` : ""} (${endog} = ${zVars.join(" ")})${ivOpt}`);
       } else {
         lines.push(`* No endogenous variables specified — defaulting to OLS`);
         lines.push(`reg ${yVar} ${exog}${opt}`);
@@ -1247,7 +1335,12 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
 
     case "Poisson": {
       lines.push(`* Poisson regression (count GLM, log link)`);
-      lines.push(`poisson ${yVar} ${xList}${opt ? opt : ", vce(robust)"} irr`);
+      if (seLower !== "classical") {
+        lines.push(`* NOTE: Stata's robust VCE for poisson scales by n/(n-1); Litux's HC1 uses`);
+        lines.push(`* n/(n-k), as R's sandwich does — expect SEs ~sqrt((n-1)/(n-k)) apart.`);
+      }
+      // Classical used to be silently upgraded to vce(robust).
+      lines.push(`poisson ${yVar} ${xList}${opt ? `${opt} irr` : ", irr"}`);
       lines.push(`* irr option reports Incidence Rate Ratios (exp(beta))`);
       lines.push(`estimates store m_poisson`);
       lines.push(`* Overdispersion check: deviance / df and Pearson / df`);
@@ -1300,26 +1393,27 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       const csAnticipation = anticipation ?? 0;
 
       // Map est_method to Stata csdid method names
-      const methodMap = { dr: "dripw", reg: "drimp", ipw: "ipw" };
+      // R did's "dr" is drdid_panel = csdid dripw; "reg" is reg_did_panel =
+      // csdid reg; "ipw" is std_ipw_did_panel (normalised weights) = stdipw.
+      const methodMap = { dr: "dripw", reg: "reg", ipw: "stdipw" };
       const csdidMethod = methodMap[csEstMethod] || "dripw";
 
-      // Build covariates flag: if xVars non-empty, add them after csdid Y
-      const xvarsLine = (csXVars && csXVars.length && !csXVars.includes("~1"))
-        ? `* Add covariates\ncsdid ${csY} ${csXVars.map(stVar).join(" ")}`
-        : `csdid ${csY}`;
-
-      // Build notyet flag
+      const covs = (csXVars && csXVars.length && !csXVars.includes("~1"))
+        ? ` ${csXVars.map(stVar).join(" ")}` : "";
       const notyet_flag = csCompGroup === "notyettreated" ? " notyet" : "";
-
-      // Build pre flag for anticipation
-      const pre_flag = csAnticipation > 0 ? ` pre(${csAnticipation})` : "";
+      // csdid has no anticipation option; the closest is shifting gvar back.
+      const antNote = csAnticipation > 0;
 
       lines.push(`* Callaway-Sant'Anna (2021) Staggered DiD`);
-      lines.push(`* Install: net install csdid, from(https://friosavila.github.io/stpackages)`);
-      lines.push(``);
-      lines.push(xvarsLine);
-      lines.push(`  ivar(${entityCol}) time(${timeCol}) gvar(${csTreatCol})${notyet_flag} ///`);
-      lines.push(`  method(${csdidMethod})${pre_flag}`);
+      lines.push(`* Install: ssc install csdid; ssc install drdid`);
+      // csdid codes never-treated as gvar = 0. Litux accepts 0 or blank for
+      // that, so normalise blanks — csdid would otherwise drop those units.
+      lines.push(`capture drop _gvar`);
+      lines.push(`gen double _gvar = cond(missing(${csTreatCol}), 0, ${csTreatCol})`);
+      if (antNote) lines.push(`* NOTE: Litux used anticipation = ${csAnticipation}; csdid has no such option.`);
+      // Previously `csdid y` and the options were emitted on separate lines
+      // with no ///, so Stata ran `csdid y` bare and then choked on `ivar(`.
+      lines.push(`csdid ${csY}${covs}, ivar(${entityCol}) time(${timeCol}) gvar(_gvar)${notyet_flag} method(${csdidMethod})`);
       lines.push(``);
       lines.push(`* Aggregations`);
       lines.push(`estat simple`);
@@ -1435,7 +1529,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
       lines.push(`preserve`);
       if (filterExpr) lines.push(`  keep if ${filterExpr}`);
       else            lines.push(`  * Full sample — no filter`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm, factorVars: fvm, factorRefs: frm, factorMap: fmm, seType: seM, clusterVar: clM, clusterVar2: cl2M, noIntercept: niM });
+      const modelLines = transpileModel({ ...(configs[0].model ?? {}), type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixm, xVarsRaw: xrm, wVarsRaw: wrm, factorVars: fvm, factorRefs: frm, factorMap: fmm, seType: seM, clusterVar: clM, clusterVar2: cl2M, noIntercept: niM });
       let hasStore = false;
       modelLines.forEach(l => {
         const ov = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
@@ -1472,7 +1566,7 @@ export function generateMultiModelStataScript(configs = [], dataDictionary = nul
               seType: seC = "classical", clusterVar: clC = null, clusterVar2: cl2C = null, noIntercept: niC = false } = c.model ?? {};
       const allX = [...xVars, ...wVars];
       lines.push(`* Model ${i+1}: ${c.label ?? type}`);
-      const modelLines = transpileModel({ type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, factorVars: fvc, factorRefs: frc, factorMap: fmc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
+      const modelLines = transpileModel({ ...(c.model ?? {}), type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, treatedUnit, treatTime, feCols: feCols ?? null, cohortCol: cohortCol ?? null, periodCol: periodCol ?? null, controlMode: controlMode ?? null, refPeriod: refPeriod ?? null, interactionTerms: ixc, xVarsRaw: xrc, wVarsRaw: wrc, factorVars: fvc, factorRefs: frc, factorMap: fmc, seType: seC, clusterVar: clC, clusterVar2: cl2C, noIntercept: niC });
       let hasStore = false;
       modelLines.forEach(l => {
         const overridden = l.replace(/^estimates store \S+/, `estimates store ${estName}`);
