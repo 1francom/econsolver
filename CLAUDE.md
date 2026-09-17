@@ -35,9 +35,7 @@ src/
 │   ├── ModelHypothesis.js          ← post-estimation coefficient/effect hypothesis tests + R/Python/Stata snippet generator
 │   ├── SampleTests.js              ← pre-model sample tests: one-sample mean t, variance χ², generic parameter t/z
 │   ├── EstimationResult.js         ← shared result type for all engines
-│   └── __validation__/
-│       ├── README.md
-│       └── engineValidation.js     ← systematic R comparison harness
+│   └── __validation__/             ← pure-logic checks only (inference, dgp, workbench, panelWithin)
 │
 ├── core/
 │   ├── diagnostics/
@@ -200,6 +198,8 @@ src/
 ```
 
 ## Estimators implemented
+> **2026-09-17 — the simulated-data R benchmark suites were deleted** (Franco's call): `engineValidation.js`, the `fase1–8`/`polyRDD` suites, the bacon/callaway/sunAbraham/clusterRobust/factorExpansion/modelHypothesis/spatial/drdid harnesses with their `*Benchmarks.json`, `*.R` and fixture CSVs, `goldenFileHarness.js`/`seTolerances.js`, and `validation/GMM_check.R`. Several of them were stale or wrong anyway (GMM SE "benchmarks" of 0.0023). The "validated vs R" notes in this table describe what was checked at the time, against simulated data; **numerical validation now runs against REAL datasets** — the LMU Applied Econometrics tutorial scripts (`validation/LMU-tutorials/`) and Franco's BA thesis (`validation/BA check/`), with the data files placed in `validation/`. Pure-logic harnesses (predicates, pipeline, export shape, persistence, dispatch) were kept.
+
 | Estimator | File | Status |
 |-----------|------|--------|
 | OLS | LinearEngine.js | ✓ validated vs R (6 decimal places) |
@@ -394,7 +394,7 @@ Fase 8 supplement (2026-05-21): the Fase 3a/3c robust-SE guards above are lifted
 - **R is installed but NOT on PATH** — invoke it by full path: `"/c/Program Files/R/R-4.4.1/bin/Rscript.exe"` (4.3.2 and 4.4.0 also present). `command -v Rscript` returning empty is NOT evidence R is missing — that misreading degraded validation across a whole session. Generate real R benchmarks directly instead of deferring them. Installed: `fixest`, `Synth`, `rdrobust`. Missing: `bacondecomp`, `haven`, `clubSandwich`, `estimatr`, `wooldridge` — ask before `install.packages`.
 - **Never use browser preview/automation tools (preview_start, screenshots, etc.) to validate changes in this repo.** After any change, just confirm `npm run build` is green (and `npm run lint:undef` if touched). Franco does all browser validation himself.
 - Patches are surgical — state what to add, what to delete, and exact location
-- Math files get validated against R to 6 decimal places on coefficients, 4 on SE
+- Math files get validated against R to 6 decimal places on coefficients, 4 on SE — on the real datasets in `validation/`, not on simulated fixtures
 - R validation libraries: `fixest`, `plm`, `rdrobust`, `AER`, `modelsummary`
 
 ## Planning & spec tracking — never orphan a spec

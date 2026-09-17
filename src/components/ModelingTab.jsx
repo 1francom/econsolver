@@ -568,7 +568,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // for THIS estimation only; never mutates the stored panel declaration.
   const [selectedFeCols, setSelectedFeCols] = useState(null);
   // Plain "FE" (linear, within estimator) historically demeans by ENTITY ONLY
-  // (validated vs R fixest::feols(y ~ x | unit) — see engineValidation.js).
+  // (the fixest::feols(y ~ x | unit) default).
   // LSDV also historically defaulted to entity-only (its old separate "Time
   // Fixed Effects" toggle defaulted off — that toggle is gone now, the Fixed
   // Effects picker is the sole source of truth). Both must stay entity-only,

@@ -787,8 +787,7 @@ function rVcov(seType, { clusterVar, clusterVar2 } = {}) {
 // HC2/HC3 are the one case that cannot be made exact: there is no native fixest
 // support, and an LSDV lm() refit computes leverage on a design that INCLUDES
 // the FE dummies, whereas Litux computes h_ii on the within-transformed design
-// (duckdbWithinHC23). The two agree to ~1e-3 — see the "panel-hc23-leverage"
-// entry in __validation__/seTolerances.js. Emit the refit, but label it as
+// (duckdbWithinHC23). The two agree to ~1e-3. Emit the refit, but label it as
 // approximate rather than claiming it reproduces the platform exactly.
 function rPanelHC23Lines(hcExact, formula, feCols = []) {
   if (!hcExact) return [];
