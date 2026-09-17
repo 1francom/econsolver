@@ -120,6 +120,7 @@ import {
   buildModelAvail, buildModelHint, resolveEstimator,
 } from "./modeling/helpers.js";
 import { runEstimationOnRows, buildEstimationConfigFromSpec } from "./modeling/runEstimation.js";
+import { nextPaint } from "../utils/nextPaint.js";
 
 // ─── CS RESULTS PANEL (Callaway-Sant'Anna) ────────────────────────────────────
 // Tabbed result panel for CallawayCS estimation. Separated from the IIFE
@@ -1006,6 +1007,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setSpecRunning(true);
     try {
       const baseRows = await getFullRows();
+      await nextPaint();
       for (let t = Number(start); t <= Number(end) + 1e-9; t += s) {
         const filtered = (baseRows ?? []).filter(row => {
           const v = Number(row[col]);
@@ -1041,6 +1043,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setSubsetRunSummary(null);
     try {
       const baseRows = await getFullRows();
+      await nextPaint();
       const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
       const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
       const failures = [];
@@ -1105,6 +1108,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setRunning(true);
     try {
       const baseRows = await getFullRows();
+      await nextPaint();
       // The model buffer is a fixed-size FIFO, so importing a full file can
       // evict pins the user already had — permanently, since it persists.
       // Measured, not assumed: `before + added - after` needs no knowledge of
@@ -2158,6 +2162,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       // ── Standard path: extract full rows into JS, run engine ───────────────
       // For DuckDB datasets, `rows` is only a 500-row preview.
       const estimationRows = await getFullRows();
+      await nextPaint();   // let "running" render before the engine blocks the thread
       const mj = await measure(async () => _runEstimation(estimationRows));
       const out = mj.result;
       logEstimate({

@@ -19,7 +19,7 @@
 
 import { describePredicate } from "./pipeline/predicate.js";
 import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
-import * as XLSX from "xlsx";
+import { parseInWorker } from "./services/data/parseInWorker.js";
 import { useTheme } from "./ThemeContext.jsx";
 import WranglingModule from "./WranglingModule.jsx";
 import { saveRawData, loadRawData, deleteRawData, saveDatasetRegistry, loadDatasetRegistry, saveProject } from "./services/Persistence/indexedDB.js";
@@ -42,62 +42,6 @@ function genId() {
 // ─── CSV PARSER ───────────────────────────────────────────────────────────────
 // Handles: RFC 4180 quoting, embedded commas/newlines, CRLF/LF, type inference.
 // Detects and handles TSV automatically.
-function parseCSV(text, delimiter = ",") {
-  const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|#na|\.\.?|\s*)$/i;
-
-  function tokenize(line) {
-    const fields = [];
-    let i = 0;
-    while (i <= line.length) {
-      if (i === line.length) { fields.push(""); break; }
-      if (line[i] === '"') {
-        let field = ""; i++;
-        while (i < line.length) {
-          if (line[i] === '"') {
-            if (line[i + 1] === '"') { field += '"'; i += 2; }
-            else { i++; break; }
-          } else { field += line[i++]; }
-        }
-        fields.push(field);
-        if (line[i] === delimiter) i++;
-      } else {
-        const end = line.indexOf(delimiter, i);
-        if (end === -1) { fields.push(line.slice(i)); break; }
-        fields.push(line.slice(i, end)); i = end + 1;
-      }
-    }
-    return fields;
-  }
-
-  const lines = text.split(/\r?\n/);
-  const rawHeaders = tokenize(lines[0]);
-  // Deduplicate headers (Excel often exports duplicates)
-  const headerCount = {};
-  const headers = rawHeaders.map(h => {
-    const t = h.trim() || "col";
-    headerCount[t] = (headerCount[t] || 0) + 1;
-    return headerCount[t] === 1 ? t : `${t}_${headerCount[t]}`;
-  });
-  if (!headers.length) return null;
-
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    const vals = tokenize(lines[i]);
-    const row = {};
-    headers.forEach((h, j) => {
-      const raw = (vals[j] ?? "").trim();
-      if (!raw || NA_PAT.test(raw)) { row[h] = null; return; }
-      // Strip thousands separators before numeric parse
-      const clean = raw.replace(/,(?=\d{3})/g, "");
-      const n = Number(clean);
-      row[h] = isNaN(n) ? raw : n;
-    });
-    rows.push(row);
-  }
-  return rows.length ? { headers, rows } : null;
-}
-
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
 // Excel parser — uses the installed xlsx npm package (bundled by Vite).
 //
@@ -110,56 +54,9 @@ function parseCSV(text, delimiter = ",") {
 // rows, wrong sheet.
 //
 // Returns: { tables: [{ name, headers, rows }], skipped: [{ name, reason }] }
-const EXCEL_NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
-
-function excelRows(data) {
-  const headers = Object.keys(data[0]);
-  const rows = data.map(r => {
-    const row = {};
-    headers.forEach(h => {
-      const v = r[h];
-      if (v === null || v === undefined) { row[h] = null; return; }
-      if (typeof v === "number") { row[h] = v; return; }
-      const t = String(v).trim();
-      if (!t || EXCEL_NA_PAT.test(t)) { row[h] = null; return; }
-      const n = Number(t.replace(/,(?=\d{3})/g, ""));
-      row[h] = isNaN(n) ? t : n;
-    });
-    return row;
-  });
-  return { headers, rows };
-}
-
 async function parseExcel(file) {
   const buf = await file.arrayBuffer();
-  const wb  = XLSX.read(buf, { type: "array", cellDates: true });
-  if (!wb.SheetNames?.length) throw new Error("Excel file has no sheets.");
-
-  const tables = [];
-  const skipped = [];
-  for (const name of wb.SheetNames) {
-    const ws = wb.Sheets[name];
-    if (!ws) { skipped.push({ name, reason: "sheet missing from workbook" }); continue; }
-    let data;
-    try {
-      data = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
-    } catch (e) {
-      skipped.push({ name, reason: e?.message || "could not be read" });
-      continue;
-    }
-    // Empty and header-only sheets are extremely common in real workbooks
-    // (blank tabs, notes). Report them rather than failing the whole file.
-    if (!data.length) { skipped.push({ name, reason: "no rows" }); continue; }
-    const { headers, rows } = excelRows(data);
-    if (!headers.length) { skipped.push({ name, reason: "no columns" }); continue; }
-    tables.push({ name, headers, rows });
-  }
-
-  if (!tables.length) {
-    const detail = skipped.map(s => `${s.name} (${s.reason})`).join(", ");
-    throw new Error(`No readable sheet in this workbook${detail ? ` — ${detail}` : ""}.`);
-  }
-  return { tables, skipped };
+  return parseInWorker("excel", buf);
 }
 
 // ─── JSON PARSER ──────────────────────────────────────────────────────────────
@@ -230,22 +127,6 @@ async function parseJSON(file) {
 // ─── DELIMITER DETECTION ─────────────────────────────────────────────────────
 // Samples up to 5 non-empty lines and picks the most frequent candidate delimiter.
 // Handles comma, semicolon, tab, pipe — covers sep=",", sep=";", sep="\t", sep="|".
-function detectDelimiter(text) {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (!lines.length) return ",";
-  // Use only the header line — data rows may contain commas/semicolons inside
-  // values (e.g. WKT geometry coordinates), which would skew a multi-line count.
-  const header = lines[0];
-  const tabs   = (header.match(/\t/g)  || []).length;
-  const commas = (header.match(/,/g)   || []).length;
-  const semis  = (header.match(/;/g)   || []).length;
-  const pipes  = (header.match(/\|/g)  || []).length;
-  if (tabs  > commas && tabs  > semis && tabs  > pipes) return "\t";
-  if (semis > commas && semis > pipes && semis > tabs)  return ";";
-  if (pipes > commas && pipes > semis && pipes > tabs)  return "|";
-  return ",";
-}
-
 // ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
 export async function parseFileForPrimary(file) { return parseFile(file); }
 
@@ -466,17 +347,17 @@ async function parseFile(file) {
       // DuckDB auto-detects delimiter — record as "auto" so exports can mirror that.
       return withLoadOpts(await loadLargeCSV(file), { format: "csv", delimiter: "auto", engine: "duckdb" });
     }
-    const text = await file.text();
-    const delimiter = detectDelimiter(text);
-    return withLoadOpts(parseCSV(text, delimiter), { format: "csv", delimiter, encoding: "utf-8" });
+    // Parsed in a worker so the UI keeps drawing while a large file is read.
+    const { parsed, delimiter } = await parseInWorker("csv", await file.arrayBuffer());
+    return withLoadOpts(parsed, { format: "csv", delimiter, encoding: "utf-8" });
   }
   if (ext === "tsv") {
     if (file.size > 10 * 1024 * 1024) {
       const { loadLargeCSV } = await import("./services/data/duckdb.js");
       return withLoadOpts(await loadLargeCSV(file), { format: "tsv", delimiter: "\t", engine: "duckdb" });
     }
-    const text = await file.text();
-    return withLoadOpts(parseCSV(text, "\t"), { format: "tsv", delimiter: "\t", encoding: "utf-8" });
+    const { parsed } = await parseInWorker("csv", await file.arrayBuffer(), { delimiter: "\t" });
+    return withLoadOpts(parsed, { format: "tsv", delimiter: "\t", encoding: "utf-8" });
   }
   if (["xlsx", "xls"].includes(ext)) {
     // Like .RData, a workbook can hold several tables, so it can yield MORE THAN
@@ -504,22 +385,20 @@ async function parseFile(file) {
     return withLoadOpts(await parseJSON(file), { format: "json", encoding: "utf-8" });
   }
   if (ext === "dta") {
-    const { parseStata } = await import("./services/data/parsers/stata.js");
     if (file.size > 10 * 1024 * 1024) {
       const { loadLargeParsedData } = await import("./services/data/duckdb.js");
       return withLoadOpts(await loadLargeParsedData(
         file,
-        async () => parseStata(await file.arrayBuffer()),
+        async () => parseInWorker("stata", await file.arrayBuffer()),
         "stata"
       ), { format: "stata", engine: "duckdb" });
     }
     const buf = await file.arrayBuffer();
-    return withLoadOpts(await parseStata(buf), { format: "stata" });
+    return withLoadOpts(await parseInWorker("stata", buf), { format: "stata" });
   }
   if (ext === "rds") {
-    const { parseRDS } = await import("./services/data/parsers/rds.js");
     const buf = await file.arrayBuffer();
-    return withLoadOpts(await parseRDS(buf), { format: "rds" });
+    return withLoadOpts(await parseInWorker("rds", buf), { format: "rds" });
   }
   if (ext === "rdata" || ext === "rda") {
     // A workspace can hold several data.frames, so this is the one parser that
@@ -527,8 +406,7 @@ async function parseFile(file) {
     // envelope; parseFiles/handleLoadFile fan it out into separate datasets.
     // `objectName` is kept in loadOpts so replication scripts can emit
     // `load(file)` followed by `df <- <objectName>` rather than guessing.
-    const { parseRData } = await import("./services/data/parsers/rdata.js");
-    const { tables, skipped } = await parseRData(await file.arrayBuffer());
+    const { tables, skipped } = await parseInWorker("rdata", await file.arrayBuffer());
     const multi = tables.map(t => withLoadOpts(
       { headers: t.headers, rows: t.rows },
       { format: "rdata", objectName: t.name, sourceFile: file.name },
@@ -595,9 +473,8 @@ async function parseFile(file) {
   }
   // Unknown extension: try CSV as fallback with auto-detected delimiter
   try {
-    const text = await file.text();
-    const delimiter = detectDelimiter(text);
-    return withLoadOpts(parseCSV(text, delimiter), { format: "csv", delimiter, encoding: "utf-8", fallback: true });
+    const { parsed, delimiter } = await parseInWorker("csv", await file.arrayBuffer());
+    return withLoadOpts(parsed, { format: "csv", delimiter, encoding: "utf-8", fallback: true });
   } catch { return null; }
 }
 

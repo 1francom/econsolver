@@ -96,45 +96,58 @@ export function validatePanel(rows, ec, tc, extraFeCols = []) {
 //   max        number|null
 //   outliers   number   — IQR-based count
 export function buildInfo(headers, rows) {
+  // One pass per column, finite numbers collected into a Float64Array and
+  // sorted natively. The previous version built three JS arrays per column
+  // (map, filter, a copy) and sorted with a comparator: 582 ms for 100k rows ×
+  // 12 columns, recomputed whenever Clean or Explore got new rows. Sums still
+  // run over the SORTED values, in the same order, so mean/std are unchanged.
   const info = {};
+  const n = rows.length;
   headers.forEach(h => {
-    const vals = rows.map(r => r[h]);
-    let nc = 0, na = 0, tx = 0;
+    let nc = 0, na = 0, tx = 0, k = 0;
     const u = new Set();
-
-    vals.forEach(v => {
-      if (v === null || v === undefined) { na++; return; }
+    const buf = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const v = rows[i][h];
+      if (v === null || v === undefined) { na++; continue; }
       u.add(v);
-      if (typeof v === "number") nc++; else tx++;
-    });
-
-    const num    = vals.filter(v => typeof v === "number" && isFinite(v)).sort((a, b) => a - b);
-    const mean   = num.length ? num.reduce((a, b) => a + b, 0) / num.length : null;
-    const std    = (num.length && mean != null)
-      ? Math.sqrt(num.reduce((s, v) => s + (v - mean) ** 2, 0) / num.length)
-      : null;
-    const q1     = num[Math.floor(num.length * 0.25)] ?? null;
-    const q3     = num[Math.floor(num.length * 0.75)] ?? null;
+      if (typeof v === "number") {
+        nc++;
+        if (isFinite(v)) buf[k++] = v;
+      } else tx++;
+    }
+    const num = buf.subarray(0, k).sort();
+    let sum = 0;
+    for (let i = 0; i < k; i++) sum += num[i];
+    const mean = k ? sum / k : null;
+    let ss = 0;
+    if (k) for (let i = 0; i < k; i++) ss += (num[i] - mean) ** 2;
+    const std    = k ? Math.sqrt(ss / k) : null;
+    const q1     = k ? num[Math.floor(k * 0.25)] : null;
+    const q3     = k ? num[Math.floor(k * 0.75)] : null;
     const iqr    = (q1 != null && q3 != null) ? q3 - q1 : null;
-    const outliers = iqr != null ? num.filter(v => v < q1 - 1.5 * iqr || v > q3 + 1.5 * iqr).length : 0;
-    const sorted = [...num];
-    const median = sorted.length
-      ? (sorted.length % 2 === 0
-          ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
-          : sorted[Math.floor(sorted.length / 2)])
+    let outliers = 0;
+    if (iqr != null) {
+      const lo = q1 - 1.5 * iqr, hi = q3 + 1.5 * iqr;
+      for (let i = 0; i < k; i++) if (num[i] < lo || num[i] > hi) outliers++;
+    }
+    const median = k
+      ? (k % 2 === 0 ? (num[k / 2 - 1] + num[k / 2]) / 2 : num[Math.floor(k / 2)])
       : null;
 
+    const uVals = [];
+    for (const v of u) { if (uVals.length >= 20) break; uVals.push(v); }
     info[h] = {
       isNum: nc > 0 && tx === 0,
       isCat: tx > 0 && u.size <= 30,
       naCount: na,
-      naPct: vals.length ? na / vals.length : 0,
-      total: vals.length,
+      naPct: n ? na / n : 0,
+      total: n,
       uCount: u.size,
-      uVals: [...u].slice(0, 20),
+      uVals,
       mean, std, median, q1, q3, iqr,
-      min: num[0] ?? null,
-      max: num[num.length - 1] ?? null,
+      min: k ? num[0] : null,
+      max: k ? num[k - 1] : null,
       outliers,
     };
   });

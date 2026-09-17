@@ -12,6 +12,7 @@ import ConfirmPopover from './components/shared/ConfirmPopover.jsx';
 import FeedbackModal from './components/feedback/FeedbackModal.jsx';
 import WorldBankFetcher from './components/wrangling/WorldBankFetcher.jsx';
 import SplitDivider from './components/workspace/SplitDivider.jsx';
+import FreezeWhenHidden from "./components/workspace/FreezeWhenHidden.jsx";
 import ObservatorioFetcher from './components/wrangling/ObservatorioFetcher.jsx';
 import { SessionStateProvider, useSessionDispatch, registerDataset } from './services/session/sessionState.jsx';
 import { SessionLogProvider } from './services/session/sessionLog.jsx';
@@ -3170,10 +3171,20 @@ export default function App() {
 
   // Wrap a raw dataset in the cleanedData shape (empty pipeline = passthrough)
   // so any module can use a freshly-selected dataset without a prior Clean run.
-  const rawToCleaned = (rd) => (rd?.rows?.length
-    ? { headers: rd.headers, cleanRows: rd.rows, colInfo: {}, dataDictionary: {}, pipeline: [], panelIndex: null, issues: [], removed: 0,
-        _duckdb: rd._duckdb ?? null, _duckdbRestoreFailed: rd._duckdbRestoreFailed ?? false, _expectedRowCount: rd._expectedRowCount ?? null }
-    : null);
+  // Cached by the rows array: the dataset mirror is rebuilt on every
+  // DataStudio change and every tab's selection is a dependency below, so a
+  // fresh wrapper each time made Explore/Model/Report recompute everything off
+  // an unchanged dataset. Same rows + headers + DuckDB handle → same object.
+  const rawWrapCache = useRef(new WeakMap());
+  const rawToCleaned = (rd) => {
+    if (!rd?.rows?.length) return null;
+    const hit = rawWrapCache.current.get(rd.rows);
+    if (hit && hit.headers === rd.headers && hit._duckdb === (rd._duckdb ?? null)) return hit;
+    const w = { headers: rd.headers, cleanRows: rd.rows, colInfo: {}, dataDictionary: {}, pipeline: [], panelIndex: null, issues: [], removed: 0,
+        _duckdb: rd._duckdb ?? null, _duckdbRestoreFailed: rd._duckdbRestoreFailed ?? false, _expectedRowCount: rd._expectedRowCount ?? null };
+    rawWrapCache.current.set(rd.rows, w);
+    return w;
+  };
 
   // Stable cleanedData per output tab: prefer pipeline output, fall back to the
   // raw dataset so users can go straight to Explore/Model/Report without first
@@ -3383,6 +3394,7 @@ export default function App() {
 
                 {/* DATA — dataset overview + file upload + World Bank fetcher */}
                 <div {...paneFocusProps("data")} style={{...paneBox("data"), flexDirection:"column"}}>
+                  <FreezeWhenHidden frozen={!panes.includes("data")}>
                   <DataTab
                     filename={filename} studioRef={studioRef}
                     cleanedData={tabOutput("data")}
@@ -3392,10 +3404,12 @@ export default function App() {
                     onDeleteDataset={id => { studioRef.current?.removeDataset(id); }}
                     onRenameDataset={(id, name) => { studioRef.current?.renameDataset?.(id, name); }}
                   />
+                  </FreezeWhenHidden>
                 </div>
 
                 {/* CLEAN — only mounted when there is data */}
                 <div {...paneFocusProps("clean")} style={{...paneBox("clean"), flexDirection:"column"}}>
+                  <FreezeWhenHidden frozen={!panes.includes("clean")}>
                   <DataStudio
                     ref={studioRef}
                     key={pid}
@@ -3412,10 +3426,12 @@ export default function App() {
                     assistantPrefill={assistantPrefill}
                     onConsumePrefill={() => setAssistantPrefill(null)}
                   />
+                  </FreezeWhenHidden>
                 </div>
 
                 {/* EXPLORE */}
                 <div {...paneFocusProps("explore")} style={{...paneBox("explore"), flexDirection:"column"}}>
+                  <FreezeWhenHidden frozen={!panes.includes("explore")}>
                   {exploreCleanedData
                     ? <ExplorerModule
                         key={tabDsId("explore")}
@@ -3434,10 +3450,12 @@ export default function App() {
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
+                  </FreezeWhenHidden>
                 </div>
 
                 {/* MODEL */}
                 <div {...paneFocusProps("model")} style={{...paneBox("model"), flexDirection:"column"}}>
+                  <FreezeWhenHidden frozen={!panes.includes("model")}>
                   {modelCleanedData
                     ? <ModelingTab
                         cleanedData={modelCleanedData}
@@ -3453,10 +3471,12 @@ export default function App() {
                       />
                     : <NeedsOutput onGoToClean={()=>navigateToTab("clean")}/>
                   }
+                  </FreezeWhenHidden>
                 </div>
 
                 {/* SPATIAL — Phase 11 */}
                 <div {...paneFocusProps("spatial")} style={{...paneBox("spatial"), flexDirection:"column"}}>
+                  <FreezeWhenHidden frozen={!panes.includes("spatial")}>
                   <SpatialTab
                     rows={tabOutput("spatial")?.cleanRows ?? tabRawData("spatial")?.rows ?? []}
                     headers={tabOutput("spatial")?.headers ?? tabRawData("spatial")?.headers ?? []}
@@ -3471,10 +3491,12 @@ export default function App() {
                       return newId;
                     }}
                   />
+                  </FreezeWhenHidden>
                 </div>
 
                 {/* SIMULATE — Phase 9.8 */}
                 <div {...paneFocusProps("simulate")} style={{...paneBox("simulate"), flexDirection:"column"}}>
+                  <FreezeWhenHidden frozen={!panes.includes("simulate")}>
                   <SimulateTab
                     rows={tabOutput("simulate")?.cleanRows ?? tabRawData("simulate")?.rows ?? []}
                     headers={tabOutput("simulate")?.headers ?? tabRawData("simulate")?.headers ?? []}
@@ -3495,18 +3517,22 @@ export default function App() {
                       if (newId) selectDataset("simulate", newId);
                     }}
                   />
+                  </FreezeWhenHidden>
                 </div>
 
                 {/* REPORT — Phase 9.10 */}
                 <div {...paneFocusProps("report")} style={{...paneBox("report")}}>
+                  <FreezeWhenHidden frozen={!panes.includes("report")}>
                   {(reportCleanedData || (modelingSession?.pinnedModels?.length ?? 0) > 0)
                     ? <ReportingModule result={activeResult} cleanedData={reportCleanedData} availableDatasets={availableDatasets} pinnedModels={modelingSession?.pinnedModels ?? []} pid={pid} />
                     : <NeedsOutput onGoToClean={() => navigateToTab("clean")} />
                   }
+                  </FreezeWhenHidden>
                 </div>
 
                 {/* CALCULATE — Phase 9.7 */}
                 <div {...paneFocusProps("calculate")} style={{...paneBox("calculate"), flexDirection:"column"}}>
+                  <FreezeWhenHidden frozen={!panes.includes("calculate")}>
                   <CalculateTab
                     pid={pid}
                     rows={tabOutput("calculate")?.cleanRows ?? tabRawData("calculate")?.rows ?? []}
@@ -3528,6 +3554,7 @@ export default function App() {
                       if (newId) selectDataset("calculate", newId);
                     }}
                   />
+                  </FreezeWhenHidden>
                 </div>
 
               </div>

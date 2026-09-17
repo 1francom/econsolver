@@ -677,7 +677,18 @@ function SummaryTable({rows,headers,info,panel,onPin}){
   const [viewN,    setViewN]    = useState(6);
   const [extraQs,  setExtraQs]  = useState([]);      // custom percentiles e.g. [5,95]
   const [qInput,   setQInput]   = useState("");
-  const groups=groupBy?[...new Set(rows.map(r=>r[groupBy]).filter(v=>v!=null))].sort():["All"];
+  // Rows are partitioned ONCE per (rows, groupBy). The table used to filter the
+  // whole dataset for every group × column on every render — 2.6 s per render
+  // at 100k rows, 180 groups and 7 variables, including each keystroke in the
+  // percentile box.
+  const groupRows=useMemo(()=>{
+    if(!groupBy) return null;
+    const m=new Map();
+    for(const r of rows){ const v=r[groupBy]; if(v==null) continue; let a=m.get(v); if(!a){a=[];m.set(v,a);} a.push(r); }
+    return m;
+  },[rows,groupBy]);
+  const groups=useMemo(()=>groupRows?[...groupRows.keys()].sort():["All"],[groupRows]);
+  const subsetOf=g=>groupRows?(groupRows.get(g)??[]):rows;
 
   function qtile(sorted,p){
     if(!sorted.length)return null;
@@ -685,7 +696,9 @@ function SummaryTable({rows,headers,info,panel,onPin}){
     return lo===hi?sorted[lo]:sorted[lo]+(sorted[hi]-sorted[lo])*(i-lo);
   }
   function statsFor(subset,col){
-    const vals=subset.map(r=>r[col]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
+    const buf=new Float64Array(subset.length); let k=0;
+    for(const r of subset){ const v=r[col]; if(typeof v==="number"&&isFinite(v)) buf[k++]=v; }
+    const vals=buf.subarray(0,k).sort();
     if(!vals.length)return{mean:null,std:null,min:null,max:null,median:null,q1:null,q3:null,n:0};
     const mean=vals.reduce((a,b)=>a+b,0)/vals.length;
     const std=Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length);
@@ -702,15 +715,11 @@ function SummaryTable({rows,headers,info,panel,onPin}){
   const fmt=v=>v!=null?v.toFixed(3):"—";
   const [copiedExport,setCopiedExport]=useState("");
 
-  function buildRows(){
-    return numH.map(h=>{
-      const subset=groupBy?null:rows;
-      return{h,groups:groups.map(g=>{
-        const sub=groupBy?rows.filter(r=>r[groupBy]===g):rows;
-        return{g,s:statsFor(sub,h)};
-      })};
-    });
-  }
+  const numKey=numH.join("");
+  const statsTable=useMemo(()=>numH.map(h=>({h,groups:groups.map(g=>({g,s:statsFor(subsetOf(g),h)}))})),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [numKey,groups,groupRows,rows,extraQs]);
+  function buildRows(){ return statsTable; }
 
   function copyCSV(){
     const tblRows=buildRows();
@@ -815,7 +824,7 @@ function SummaryTable({rows,headers,info,panel,onPin}){
               <tr>
                 <th style={{...thS,textAlign:"left",minWidth:80}}>Variable</th>
                 {groups.map(g=><th key={g} colSpan={nCols} style={{...thS,textAlign:"center",color:C.gold}}>
-                  {groupBy?String(g):"Full sample"}{groupBy&&<span style={{color:C.textMuted}}> ({rows.filter(r=>r[groupBy]===g).length})</span>}
+                  {groupBy?String(g):"Full sample"}{groupBy&&<span style={{color:C.textMuted}}> ({subsetOf(g).length})</span>}
                 </th>)}
               </tr>
               <tr>
@@ -824,14 +833,12 @@ function SummaryTable({rows,headers,info,panel,onPin}){
               </tr>
             </thead>
             <tbody>
-              {numH.map((h,ri)=>(
+              {statsTable.map(({h,groups:grs},ri)=>(
                 <tr key={h} style={{background:ri%2?C.surface2:C.surface}}>
                   <td style={{...tdS,textAlign:"left",color:C.teal}}>{h}</td>
-                  {groups.map(g=>{
-                    const subset=groupBy?rows.filter(r=>r[groupBy]===g):rows;
-                    const s=statsFor(subset,h);
-                    return <Fragment key={g}>{allCols.map(([k])=><td key={k} style={tdS}>{fmt(s[k])}</td>)}</Fragment>;
-                  })}
+                  {grs.map(({g,s})=>(
+                    <Fragment key={g}>{allCols.map(([k])=><td key={k} style={tdS}>{fmt(s[k])}</td>)}</Fragment>
+                  ))}
                 </tr>
               ))}
             </tbody>
