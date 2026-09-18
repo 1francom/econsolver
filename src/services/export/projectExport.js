@@ -24,6 +24,8 @@ import { buildModelFile, buildPlotsFile } from "./artifactIO.js";
 
 export const PROJECT_EXPORT_KIND = "litux/project-export";
 export const PROJECT_EXPORT_VERSION = 1;
+// Suffixes PlotBuilder instances append to their history key (see buildProjectExport).
+export const PLOT_KEY_SUFFIXES = ["_model", "_spec", "_bacon"];
 
 // Sync/session bookkeeping is about THIS browser, not about the project.
 const PROJECT_META_DROP = new Set([
@@ -94,7 +96,12 @@ export async function buildProjectExport(pid) {
     calcWorkspace:  session.calcWorkspace  ?? null,
     // Model specs only — buildModelFile never writes coefficients.
     models: buildModelFile(pins),
-    plots:       await collectByKey(async k => buildPlotsFile(await getPlotHistory(k)), keys),
+    // Plot histories also live under suffixed keys: the Model tab's Plot Builder
+    // saves as `<pid>_model` (result plots) and `<pid>_spec` (spec curve), and
+    // Explore's Goodman-Bacon mode as `<pid>_bacon`. Collecting only the bare
+    // keys silently left every Model-tab plot out of the export.
+    plots:       await collectByKey(async k => buildPlotsFile(await getPlotHistory(k)),
+      keys.flatMap(k => [k, ...PLOT_KEY_SUFFIXES.map(s => `${k}${s}`)])),
     maps:        await collectByKey(getMapHistory, keys),
     explorePins: await collectByKey(getExplorePins, keys),
     spatialMaps: (await loadSpatialMaps(pid)) ?? null,
