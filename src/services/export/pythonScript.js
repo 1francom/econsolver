@@ -124,7 +124,7 @@ export function generatePythonScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push("# ── Estimation ─────────────────────────────────────────────────────────────");
-  lines.push(...transpileModel({ ...model, type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null, basePeriod: model.basePeriod ?? null }));
+  lines.push(...pythonModelLines(model));
   lines.push("");
 
   return lines.join("\n");
@@ -679,6 +679,27 @@ function buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionT
   return parts.join(" + ") || "1";
 }
 
+/**
+ * The estimation lines of one model (no header, imports, load or pipeline),
+ * plus the packages they need — for the Report's unified script.
+ * generatePythonScript uses it too, so the two cannot drift.
+ */
+export function pythonModelLines(model = {}) {
+  const {
+    type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [], entityCol = null, timeCol = null,
+    postVar = null, treatVar = null, runningVar = null, cutoff = null, bandwidth = null,
+    kernel = "triangular", distCol = null, treatmentCol = null, offsetCol = null,
+    seType = "classical", clusterVar = null, clusterVar2 = null,
+  } = model;
+  const allX = [...(xVars ?? []), ...(wVars ?? [])];
+  return transpileModel({ ...model, type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null, basePeriod: model.basePeriod ?? null });
+}
+
+/** Python packages a model's estimation code needs (same rule as the single-model header). */
+export function pythonModelPackages(model = {}, pipeline = []) {
+  return [...buildPackageList(model.type ?? "OLS", pipeline)];
+}
+
 // ─── MODEL TRANSPILER ─────────────────────────────────────────────────────────
 function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVarsIn, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol = null, treatmentCol = null, factorVars = [], factorRefs = {}, feCols = null, offsetCol = null, treatedUnit, treatTime, weightCol = null, cohortCol = null, periodCol = null, controlMode = null, refPeriod = null, interactionTerms = [], xVarsRaw = null, wVarsRaw = null, seType = "classical", clusterVar = null, clusterVar2 = null, noIntercept = false, treatCol = null, compGroup = null, estMethod = null, anticipation = null, basePeriod = null }) {
   // Prefer the PRE-EXPANSION lists in EVERY branch, not only in the plain
@@ -757,12 +778,17 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
   // linearmodels has no HC2/HC3 — those fall back to its `robust` sandwich, so
   // the SE will differ slightly from Litux's. `ivCovNote()` says so out loud
   // rather than leaving the user to discover the mismatch numerically.
-  const ivCov = () => {
+  // `debiased=True` is linearmodels' n−k small-sample scaling — Stata's `small`,
+  // which is what Litux's 2SLS/LIML report. Without it the classical IV SEs
+  // came out ×sqrt((n−k)/n): 0.0988 vs 0.1416 on LMU PS5's IV-DiD (k=98, n=190).
+  // GMM is left as it was (its Stata export uses vce(unadjusted) unscaled).
+  const ivCov = ({ debiased = true } = {}) => {
+    const d = debiased ? ", debiased=True" : "";
     switch ((seType || "classical").toLowerCase()) {
-      case "classical": return `cov_type="unadjusted"`;
-      case "clustered": return clusterVar ? `cov_type="clustered", clusters=df["${clusterVar}"]` : `cov_type="robust"`;
-      case "hac":       return `cov_type="kernel"`;
-      default:          return `cov_type="robust"`;   // HC1/HC2/HC3 → robust sandwich
+      case "classical": return `cov_type="unadjusted"${d}`;
+      case "clustered": return clusterVar ? `cov_type="clustered", clusters=df["${clusterVar}"]${d}` : `cov_type="robust"${d}`;
+      case "hac":       return `cov_type="kernel"${d}`;
+      default:          return `cov_type="robust"${d}`;   // HC1/HC2/HC3 → robust sandwich
     }
   };
   // linearmodels PanelOLS / FirstDifferenceOLS `.fit(...)` covariance argument.
@@ -1241,7 +1267,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       lines.push(`exog_vars  = ${design(wVars, "df")}` );
       lines.push(`endog_vars = ${design(xVars, "df", { intercept: false })}`);
       lines.push(`instr_vars = df[[${zList || `"# add instrument columns"`}]]`);
-      lines.push(`model = IVGMM(dependent, exog_vars, endog_vars, instr_vars).fit(${ivCov()})`);
+      lines.push(`model = IVGMM(dependent, exog_vars, endog_vars, instr_vars).fit(${ivCov({ debiased: false })})`);
       lines.push(`print(model.summary)`);
       lines.push(`# J-statistic (over-identification test)`);
       lines.push(`print(f"J-stat: {model.j_stat.stat:.4f}  p={model.j_stat.pval:.4f}")`);

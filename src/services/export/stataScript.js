@@ -96,10 +96,26 @@ export function generateStataScript(config = {}) {
 
   // ── Model ───────────────────────────────────────────────────────────────────
   lines.push(`* ── Estimation ───────────────────────────────────────────────────────────`);
-  lines.push(...transpileModel({ ...model, type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, factorMap: model.factorMap ?? null, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null }));
+  lines.push(...stataModelLines(model));
   lines.push("");
 
   return lines.join("\n");
+}
+
+/**
+ * The estimation lines of one model, with no header, load or pipeline — what
+ * the Report's unified do-file emits after `use`-ing the model's dataset.
+ * generateStataScript uses it too, so the two cannot drift.
+ */
+export function stataModelLines(model = {}) {
+  const {
+    type = "OLS", yVar = "y", xVars = [], wVars = [], zVars = [], entityCol = null, timeCol = null,
+    postVar = null, treatVar = null, runningVar = null, cutoff = null, bandwidth = null,
+    kernel = "triangular", distCol = null, treatmentCol = null, offsetCol = null,
+    seType = "classical", clusterVar = null, clusterVar2 = null,
+  } = model;
+  const allX = [...(xVars ?? []), ...(wVars ?? [])];
+  return transpileModel({ ...model, type, yVar, allX, xVars, wVars, zVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel, distCol, treatmentCol, factorVars: model.factorVars ?? [], factorRefs: model.factorRefs ?? {}, factorMap: model.factorMap ?? null, feCols: model.feCols ?? null, offsetCol, cohortCol: model.cohortCol ?? null, periodCol: model.periodCol ?? null, controlMode: model.controlMode ?? null, refPeriod: model.refPeriod ?? null, interactionTerms: model.interactionTerms ?? [], xVarsRaw: model.xVarsRaw ?? null, wVarsRaw: model.wVarsRaw ?? null, seType, clusterVar, clusterVar2, noIntercept: model.noIntercept ?? false, treatCol: model.treatCol ?? null, compGroup: model.compGroup ?? null, estMethod: model.estMethod ?? null, anticipation: model.anticipation ?? null });
 }
 
 // ─── STEP TRANSPILER ─────────────────────────────────────────────────────────

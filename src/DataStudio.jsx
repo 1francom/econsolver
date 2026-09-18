@@ -707,6 +707,9 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       headers:  d.rawData?.headers ?? [],
       crs:      datasetCrs(d),
       loadOpts: d.rawData?._loadOpts ?? null,
+      // Which dataset it was derived from — the unified script flags a derived
+      // dataset that has no lineage record (it cannot be rebuilt from raw data).
+      origin:   d.origin ?? null,
       // Full-table pointer — consumers MUST compute off this (SQL / extractAllRows),
       // never off `rows`, which is a 500-row preview for large DuckDB datasets.
       _duckdb:  d.rawData?._duckdb  ?? null,

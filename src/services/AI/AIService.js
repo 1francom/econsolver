@@ -24,6 +24,7 @@ import {
   RESEARCH_COACH_PROMPT,
   COACH_DISPATCH_PROMPT,
   UNIFIED_SCRIPT_PROMPT,
+  SCRIPT_NOTES_PROMPT,
   INTERPRET_MARGINAL_EFFECTS_PROMPT,
   INTERPRET_OPTIMIZATION_PROMPT,
   NL_TO_PIPELINE_PROMPT,
@@ -1266,6 +1267,40 @@ export async function interpretOptimization({ session, results = {}, dataDiction
 //
 // Returns: Promise<string> — the unified script text (no markdown fences).
 // On failure: returns a fallback that concatenates the sections with headers.
+
+/**
+ * Commentary for the deterministic unified script (services/export/unifiedScript.js).
+ * The model sees the script and returns a COMMENT BLOCK only; any line that is
+ * not a comment is turned into one here, so nothing it returns can execute.
+ * Literal data (values pasted by an inject_column step) is stripped before the
+ * script leaves the browser — the notes need structure, not values.
+ * @returns {Promise<string>} comment lines, ready to sit above the code
+ */
+export async function generateScriptNotes(script, language, { snapshot = null } = {}) {
+  const cmt = language === "stata" ? "*" : "#";
+  const langLabel = language === "r" ? "R" : language === "stata" ? "Stata" : "Python";
+  const NL = String.fromCharCode(10);
+  const stripped = String(script ?? "")
+    .split(NL)
+    // numeric-only lines are pasted data (inject_column values, Stata input rows)
+    .filter(l => !(/[0-9]/.test(l) && /^[-+0-9.eE,\s]+$/.test(l.trim())))
+    .join(NL)
+    .slice(0, 40000);
+  const user = [
+    `LANGUAGE: ${langLabel}. COMMENT CHARACTER: ${cmt}`,
+    snapshot ? `${NL}SESSION SNAPSHOT:${NL}${serializeSnapshot(snapshot)}` : "",
+    `${NL}SCRIPT:${NL}${stripped}`,
+    `${NL}Write the comment header now.`,
+  ].join("");
+  const raw = await callClaude({ system: SCRIPT_NOTES_PROMPT, user, maxTokens: 1500, task: "script_notes" });
+  return String(raw ?? "")
+    .split(NL)
+    .map(l => l.trimEnd())
+    .filter(l => l.trim() !== "" && !l.trim().startsWith("```"))
+    .map(l => (l.trimStart().startsWith(cmt) ? l.trimStart() : `${cmt} ${l.trim()}`))
+    .slice(0, 45)
+    .join(NL);
+}
 
 export async function generateUnifiedScript(sections, language, dataDictionary = null, { snapshot = null, userInstruction = null, manualEditNote = null } = {}) {
   const langLabel = language === "r" ? "R" : language === "stata" ? "Stata" : "Python";

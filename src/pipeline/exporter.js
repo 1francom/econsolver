@@ -464,6 +464,21 @@ export function topoSort(datasets, globalPipeline) {
  * @param {object[]} opts.globalPipeline - G-steps array
  * @returns {string}
  */
+// A dataset derived inside Litux BEFORE lineage was recorded (registry
+// `origin` set, but no G-step builds it) has no recipe: nothing can rebuild it
+// from the raw file. Say so above its load line — the only way to run the
+// script is to export it from Litux as CSV, or re-derive it so it gets one.
+function noRecipeNote(ds, globalPipeline, cm) {
+  if (!ds?.origin || isInAppDataset(ds, globalPipeline)) return [];
+  const file = toLoadFile(ds);
+  return [
+    `${cm} NOTE: ${ds.name} was derived inside Litux before its lineage was recorded, so`,
+    `${cm} this script cannot rebuild it from the raw data. Export it from Litux`,
+    `${cm} (Dataset Manager → CSV) as "${file}" next to this script — or re-derive it`,
+    `${cm} in Litux (Save as dataset) and re-generate the script to rebuild it here.`,
+  ];
+}
+
 export function generateWorkspaceScript({ language, datasets, globalPipeline = [] }) {
   const dsList = Object.values(datasets);
   if (!dsList.length) return { perDataset: `# No datasets in session`, crossDataset: "" };
@@ -496,6 +511,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
+      lines.push(...noRecipeNote(ds, globalPipeline, "#"));
       lines.push(buildRLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/m, df));
       const local = localStepsOf(ds, globalPipeline);
       const inline = prefixStepsFor(ds);
@@ -534,6 +550,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`* ${"─".repeat(60)}`);
       lines.push(`* Dataset: ${ds.name}`);
       lines.push(`* ${"─".repeat(60)}`);
+      lines.push(...noRecipeNote(ds, globalPipeline, "*"));
       lines.push(buildStataLoadLine(file, ds.loadOpts ?? null));
       const local = localStepsOf(ds, globalPipeline);
       const inline = prefixStepsFor(ds);
@@ -574,6 +591,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
+      lines.push(...noRecipeNote(ds, globalPipeline, "#"));
       lines.push(buildPyLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/m, df));
       const local = localStepsOf(ds, globalPipeline);
       const inline = prefixStepsFor(ds);

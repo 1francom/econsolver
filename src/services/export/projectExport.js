@@ -100,7 +100,7 @@ export async function buildProjectExport(pid) {
     // saves as `<pid>_model` (result plots) and `<pid>_spec` (spec curve), and
     // Explore's Goodman-Bacon mode as `<pid>_bacon`. Collecting only the bare
     // keys silently left every Model-tab plot out of the export.
-    plots:       await collectByKey(async k => buildPlotsFile(await getPlotHistory(k)),
+    plots:       await collectByKey(async k => buildPlotsFile(await getPlotHistory(k), { keepDataset: true }),
       keys.flatMap(k => [k, ...PLOT_KEY_SUFFIXES.map(s => `${k}${s}`)])),
     maps:        await collectByKey(getMapHistory, keys),
     explorePins: await collectByKey(getExplorePins, keys),

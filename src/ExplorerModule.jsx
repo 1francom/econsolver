@@ -2722,7 +2722,9 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
       params: { ...params, dataset: filename ?? null, filters: filterConds.length ? filterConds : null },
       label,
     });
-    setPinnedItems(prev => [...prev, { id: Date.now(), kind: params.kind, label, params }]);
+    // `dataset` binds the pin to the data it was computed on (the unified script
+    // and the project export need it; params stay exactly what re-renders it).
+    setPinnedItems(prev => [...prev, { id: Date.now(), kind: params.kind, label, params, dataset: filename ?? null }]);
   };
   const removePin = (id) => setPinnedItems(prev => prev.filter(p => p.id !== id));
 

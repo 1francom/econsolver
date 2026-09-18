@@ -1531,6 +1531,16 @@ function transpileModel(model) {
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
+/** The estimation code of one model (no header, packages, load or pipeline). */
+export function rModelCode(model = {}) {
+  return transpileModel(model);
+}
+
+/** R packages a model's estimation code needs (same rule as the single-model header). */
+export function rModelPackages(model = {}, pipeline = []) {
+  return [...buildPackageList(model.type, pipeline, model.seType)];
+}
+
 export function generateRScript(config) {
   const {
     filename       = "dataset.csv",

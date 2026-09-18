@@ -383,6 +383,18 @@ function vectorValues(obj) {
       const levels = am["levels"];
       if (levels) {
         const lvlArr = strsxpStrings(levels);
+        // A factor whose labels are numbers IN NUMERIC ORDER (municipality
+        // "1".."96", year "2012".."2015") is returned as numbers. As strings,
+        // Litux sorts factor levels as text, so the reference level became "10"
+        // while R — which uses the factor's own level order — uses "1"/"2"; every
+        // municipality fixed effect and the intercept differed from R (LMU PS5).
+        // Stata (haven codes) and pandas (ordered categories) follow R's order
+        // too. Any other level order is kept as strings, because then R's
+        // reference is not the numerically smallest level.
+        const canon = (s) => s !== "" && Number.isFinite(Number(s)) && String(Number(s)) === s;
+        const numericInOrder = lvlArr.length > 0 && lvlArr.every(canon)
+          && lvlArr.every((s, i) => i === 0 || Number(lvlArr[i - 1]) < Number(s));
+        if (numericInOrder) return obj.values.map(v => v == null ? null : (lvlArr[v - 1] == null ? null : Number(lvlArr[v - 1])));
         return obj.values.map(v => v == null ? null : (lvlArr[v - 1] ?? null));
       }
     }
