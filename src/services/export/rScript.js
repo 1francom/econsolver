@@ -42,12 +42,17 @@ import { buildRLoadLine } from "./loadLine.js";
 import { dummyR } from "./dummyStep.js";
 import { safeGroupedMutate } from "./groupedMutateExport.js";
 import { safeIfElse } from "./ifElseStep.js";
+import { injectColumnR } from "./injectColumnStep.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-// Safe R variable name: replace spaces and special chars with underscores
+// A column reference in R. readr keeps headers verbatim ("Both genders"), so a
+// non-syntactic name must be BACKTICKED, not rewritten: the old underscore
+// replacement emitted `rename(education = Both_genders)` for a column that is
+// called `Both genders` in the data frame (LMU PS4). Same rule as stepTranslators.
 function rName(s) {
-  return String(s ?? "").replace(/[^a-zA-Z0-9_.]/g, "_").replace(/^([0-9])/, "_$1");
+  const n = String(s ?? "");
+  return /^([A-Za-z]|\.(?![0-9]))[A-Za-z0-9_.]*$/.test(n) ? n : `\`${n.replace(/`/g, "\\`")}\``;
 }
 
 // Quote a string for R
@@ -132,16 +137,11 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       return `${dfVar} <- ${dfVar} |> select(-${rName(step.col)})`;
 
     case "filter": {
-      const opMap = {
-        notna: `!is.na(${col})`,
-        eq:    `${col} == ${rStr(step.value)}`,
-        neq:   `${col} != ${rStr(step.value)}`,
-        gt:    `${col} > ${step.value}`,
-        lt:    `${col} < ${step.value}`,
-        gte:   `${col} >= ${step.value}`,
-        lte:   `${col} <= ${step.value}`,
-      };
-      return `${dfVar} <- ${dfVar} |> filter(${opMap[step.op] ?? "TRUE"})`;
+      // Canonical compiler (predicateExport), as stepTranslators uses. This local
+      // copy read step.op only: a compound Clean filter (step.predicate) has none,
+      // so the filter was DROPPED from every per-model script (R: filter(TRUE)).
+      try { return toR(step, dfVar); }
+      catch (e) { return `stop(${JSON.stringify("filter step not exported: " + e.message)})`; }
     }
 
     case "add_column":
@@ -541,14 +541,8 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       ].join("\n");
     }
 
-    case "inject_column": {
-      const vals = (step.values ?? []).map(v => (v == null ? "NA" : Number(v).toFixed(8))).join(", ");
-      return [
-        `# inject_column: "${step.colName}" — extracted from model output`,
-        `# Re-run estimation and extract again if the pipeline changes upstream.`,
-        `${dfVar}[["${rName(step.colName)}"]] <- c(${vals})`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnR(step, dfVar);
 
     case "fill_na_grouped": {
       const fn = step.strategy === "median" ? "median" : "mean";

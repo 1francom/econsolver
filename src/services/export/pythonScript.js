@@ -16,6 +16,7 @@ import { buildPyLoadLine } from "./loadLine.js";
 import { dummyPython } from "./dummyStep.js";
 import { safeGroupedMutate } from "./groupedMutateExport.js";
 import { safeIfElse } from "./ifElseStep.js";
+import { injectColumnPython } from "./injectColumnStep.js";
 
 export function generatePythonScript(config = {}) {
   const {
@@ -240,18 +241,11 @@ function transpileStep(step, allDatasets = {}) {
     case "drop":
       return `df = df.drop(columns=[${pyStr(step.col)}], errors="ignore")`;
     case "filter": {
-      const col = pyStr(step.col);
-      const v = step.value;
-      switch (step.op) {
-        case "notna": return `df = df[df[${col}].notna()]`;
-        case "eq":    return `df = df[df[${col}] == ${pyStr(v)}]`;
-        case "neq":   return `df = df[df[${col}] != ${pyStr(v)}]`;
-        case "gt":    return `df = df[df[${col}] > ${Number(v)}]`;
-        case "lt":    return `df = df[df[${col}] < ${Number(v)}]`;
-        case "gte":   return `df = df[df[${col}] >= ${Number(v)}]`;
-        case "lte":   return `df = df[df[${col}] <= ${Number(v)}]`;
-        default:      return `# filter: unsupported op "${step.op}"`;
-      }
+      // Canonical compiler (predicateExport), as stepTranslators uses. This local
+      // copy read step.op only: a compound Clean filter (step.predicate) has none,
+      // so the filter was DROPPED from every per-model script (R: filter(TRUE)).
+      try { return toPython(step, "df"); }
+      catch (e) { return `raise NotImplementedError(${JSON.stringify("filter step not exported: " + e.message)})`; }
     }
     case "drop_na":
       if (step.cols?.length) {
@@ -621,13 +615,8 @@ function transpileStep(step, allDatasets = {}) {
       ].join("\n");
     }
 
-    case "inject_column": {
-      const vals = (step.values ?? []).map(v => (v == null ? "np.nan" : Number(v).toFixed(8))).join(", ");
-      return [
-        `# inject_column: "${step.colName}" — extracted from model output`,
-        `df["${step.colName}"] = np.array([${vals}])`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnPython(step, "df");
 
     default:
       return `# [${type}] — not yet transpiled`;

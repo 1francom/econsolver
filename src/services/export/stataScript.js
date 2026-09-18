@@ -17,6 +17,7 @@ import { buildStataLoadLine } from "./loadLine.js";
 import { dummyStata } from "./dummyStep.js";
 import { safeGroupedMutate } from "./groupedMutateExport.js";
 import { safeIfElse } from "./ifElseStep.js";
+import { injectColumnStata } from "./injectColumnStep.js";
 
 export function generateStataScript(config = {}) {
   const {
@@ -103,7 +104,7 @@ export function generateStataScript(config = {}) {
 
 // ─── STEP TRANSPILER ─────────────────────────────────────────────────────────
 function stVar(s) {
-  return String(s ?? "").replace(/[^a-zA-Z0-9_]/g, "_").replace(/^([0-9])/, "_$1").slice(0, 32);
+  return String(s ?? "").replace(/[^\p{L}\p{N}_]/gu, "_").replace(/^(\p{N})/u, "_$1").slice(0, 32);
 }
 
 function stStr(s) {
@@ -209,17 +210,11 @@ function transpileStep(step, allDatasets = {}) {
     case "drop":
       return `drop ${stVar(step.col)}`;
     case "filter": {
-      const col = stVar(step.col), v = step.value;
-      switch (step.op) {
-        case "notna": return `keep if !missing(${col})`;
-        case "eq":    return `keep if ${col} == ${stValue(v)}`;
-        case "neq":   return `keep if ${col} != ${stValue(v)}`;
-        case "gt":    return `keep if ${col} > ${Number(v)}`;
-        case "lt":    return `keep if ${col} < ${Number(v)}`;
-        case "gte":   return `keep if ${col} >= ${Number(v)}`;
-        case "lte":   return `keep if ${col} <= ${Number(v)}`;
-        default:      return `* filter: unsupported op "${step.op}"`;
-      }
+      // Canonical compiler (predicateExport), as stepTranslators uses. This local
+      // copy read step.op only: a compound Clean filter (step.predicate) has none,
+      // so the filter was DROPPED from every per-model script (R: filter(TRUE)).
+      try { return toStata(step, "df"); }
+      catch (e) { return `display as error "filter step not exported: ${String(e.message).replace(/"/g, "'")}"\nexit 198`; }
     }
     case "drop_na": {
       const cols = (step.cols ?? []).map(stVar);
@@ -656,19 +651,8 @@ function transpileStep(step, allDatasets = {}) {
       ].join("\n");
     }
 
-    case "inject_column": {
-      const vals = (step.values ?? []).map(v => (v == null ? "." : Number(v).toFixed(8)));
-      // svmat needs an n×1 column vector (backslash separators), not a row vector.
-      // Note: Stata matrices are bounded by matsize — for very large n, export the
-      // column to a .dta and merge instead.
-      const matName = String(step.colName ?? "").replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32);
-      return [
-        `* inject_column: "${step.colName}" — extracted from model output`,
-        `matrix ${matName} = (${vals.join(" \\ ")})`,
-        `svmat ${matName}, name(${step.colName})`,
-        `rename ${step.colName}1 ${step.colName}`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnStata(step);
 
     default:
       return `* [${type}] — not yet transpiled`;

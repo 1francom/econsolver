@@ -127,6 +127,23 @@ export function buildPyLoadLine(filename, loadOpts = null) {
 // Options every emitted `import delimited` carries — see the csv case below.
 export const STATA_CSV_OPTS = ["case(preserve)", "asdouble"];
 
+// import delimited / import excel STRIP characters a Stata name cannot hold
+// ("Both genders" -> Bothgenders, "GDP per capita" -> GDPpercapita) and keep the
+// original header as the variable label. Every later line of an exported
+// do-file spells a column the way strtoname() would ("Both_genders"), so the
+// renamed variables are brought to that spelling right after the import — or
+// `rename Both genders education` is a syntax error (r(198); LMU PS4).
+export const STATA_NAME_FIX = [
+  "* Names Stata had to change on import (spaces, symbols) -> strtoname(header)",
+  "foreach _v of varlist * {",
+  "    local _l : variable label `_v'",
+  "    if `\"`_l'\"' != \"\" {",
+  "        local _n = strtoname(`\"`_l'\"')",
+  "        if \"`_n'\" != \"`_v'\" capture rename `_v' `_n'",
+  "    }",
+  "}",
+].join("\n");
+
 export function buildStataLoadLine(filename, loadOpts = null) {
   const fmt = inferFormat(filename, loadOpts);
   const f   = stataPath(filename);
@@ -144,13 +161,13 @@ export function buildStataLoadLine(filename, loadOpts = null) {
       // otherwise: a column `D` becomes `d` (r(111) on the model line) and every
       // coefficient picks up ~1e-9 of float noise. Measured on StataNow 19.5.
       opts.push(...STATA_CSV_OPTS, "clear");
-      return `import delimited "${f}", ${opts.join(" ")}`;
+      return `import delimited "${f}", ${opts.join(" ")}\n${STATA_NAME_FIX}`;
     }
     case "tsv":
-      return `import delimited "${f}", delimiter(tab) ${STATA_CSV_OPTS.join(" ")} clear`;
+      return `import delimited "${f}", delimiter(tab) ${STATA_CSV_OPTS.join(" ")} clear\n${STATA_NAME_FIX}`;
     case "excel": {
       const sheet = loadOpts?.sheetName ? ` sheet("${loadOpts.sheetName}")` : "";
-      return `import excel "${f}", firstrow${sheet} clear`;
+      return `import excel "${f}", firstrow${sheet} clear\n${STATA_NAME_FIX}`;
     }
     case "stata":
       return `use "${f}", clear`;

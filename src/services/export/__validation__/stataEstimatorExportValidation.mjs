@@ -30,8 +30,8 @@ const iv = (type, seType = "classical") =>
 
 check("E1 CSV import keeps case and double precision", () => {
   // Default import lowercases names: a column D became d and the model line died r(111).
-  assert.match(buildStataLoadLine("fx.csv"), /case\(preserve\) asdouble clear$/);
-  assert.match(buildStataLoadLine("fx.tsv"), /delimiter\(tab\) case\(preserve\) asdouble clear$/);
+  assert.match(buildStataLoadLine("fx.csv"), /case\(preserve\) asdouble clear$/m);
+  assert.match(buildStataLoadLine("fx.tsv"), /delimiter\(tab\) case\(preserve\) asdouble clear$/m);
 });
 
 check("E2 WLS keeps its weights end to end", () => {

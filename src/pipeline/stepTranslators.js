@@ -28,6 +28,7 @@ import { distExprR, distExprPy, distExprStata, stataCategoricalLines, RNG_NOTE }
 import { dummyR, dummyStata, dummyPython } from "../services/export/dummyStep.js";
 import { safeGroupedMutate } from "../services/export/groupedMutateExport.js";
 import { safeIfElse } from "../services/export/ifElseStep.js";
+import { injectColumnR, injectColumnStata, injectColumnPython } from "../services/export/injectColumnStep.js";
 
 // ─── SHARED HELPERS ──────────────────────────────────────────────────────────
 
@@ -267,7 +268,10 @@ export function jsExprToStata(expr) {
 
 /** Stata variable names: strip backticks, quote with spaces (we can't actually
  *  have spaces in Stata varnames, so we just pass through and let the user fix) */
-function stVar(c) { return c.replace(/`/g, ""); }
+// The spelling Stata's strtoname() gives a header — the one the load line
+// renames imported variables to (see loadLine STATA_NAME_FIX). Unicode
+// letters are legal in Stata 14+ names and are kept.
+function stVar(c) { return String(c ?? "").replace(/[^\p{L}\p{N}_]/gu, "_").replace(/^(\p{N})/u, "_$1").slice(0, 32); }
 
 // ─── PYTHON HELPERS ───────────────────────────────────────────────────────────
 
@@ -424,6 +428,7 @@ export function toR(step, df = "df", allDatasets = {}) {
       // FilterBuilder emits. The hand-written opMap this replaced read only
       // step.op — undefined for a tree — and defaulted to TRUE, so every
       // compound filter exported as "keep every row".
+      if (step.expr) { const e = jsExprToR(step.expr); if (!e) throw new Error(`formula filter cannot be translated: ${step.expr}`); return `${df} <- ${df} |> filter(${e})`; }
       return `${df} <- ${df} |> filter(${predicateToR(filterStepToNode(step), { name: rName })})`;
 
     case "drop_na": {
@@ -861,13 +866,8 @@ export function toR(step, df = "df", allDatasets = {}) {
     case "patch":
       return `# manual cell edit (${step.col ?? "column"} @ row ${step.ri ?? step.rowId ?? "?"}) — not replayable on the raw file; load the exported *_cleaned.csv instead`;
 
-    case "inject_column": {
-      const icVals = (step.values ?? []).map(v => (v == null ? "NA" : Number(v).toFixed(8))).join(", ");
-      return [
-        `# inject_column: "${step.colName}" — extracted from model output`,
-        `${df}[["${rName(step.colName)}"]] <- c(${icVals})`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnR(step, df);
 
     case "clean_strings": {
       const csFn = { lower: "tolower", upper: "toupper", title: "stringr::str_to_title" }[step.case];
@@ -966,6 +966,7 @@ export function toStata(step, df = "df", allDatasets = {}) {
     case "filter":
       // See the R case: the opMap this replaced defaulted to `1`, so a compound
       // filter exported as `keep if 1` — every row.
+      if (step.expr) { const e = jsExprToStata(step.expr); if (!e) throw new Error(`formula filter cannot be translated: ${step.expr}`); return `keep if ${e}`; }
       return `keep if ${predicateToStata(filterStepToNode(step), { name: stVar })}`;
 
     case "drop_na": {
@@ -1545,16 +1546,8 @@ export function toStata(step, df = "df", allDatasets = {}) {
     case "patch":
       return `* manual cell edit (${step.col ?? "column"} @ row ${step.ri ?? step.rowId ?? "?"}) — not replayable on the raw file; load the exported *_cleaned.csv instead`;
 
-    case "inject_column": {
-      const stIcVals    = (step.values ?? []).map(v => (v == null ? "." : Number(v).toFixed(8)));
-      const stIcMatName = String(step.colName ?? "").replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32);
-      return [
-        `* inject_column: "${step.colName}" — extracted from model output`,
-        `matrix ${stIcMatName} = (${stIcVals.join(" \\ ")})`,
-        `svmat ${stIcMatName}, name(${step.colName})`,
-        `rename ${step.colName}1 ${step.colName}`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnStata(step);
 
     case "geocode": {
       const stGcAddr = step.addressCol ?? "address";
@@ -1599,6 +1592,7 @@ export function toPython(step, df = "df", allDatasets = {}) {
     case "filter": {
       // See the R case: the opMap this replaced defaulted to `True`, so a
       // compound filter exported as `df[True]` — every row.
+      if (step.expr) { const e = jsExprToPython(step.expr, df); if (!e) throw new Error(`formula filter cannot be translated: ${step.expr}`); return `${df} = ${df}[pd.Series(${e}, index=${df}.index).fillna(False).astype(bool)]`; }
       return `${df} = ${df}[${predicateToPython(filterStepToNode(step), { df })}]`;
     }
 
@@ -2065,13 +2059,8 @@ export function toPython(step, df = "df", allDatasets = {}) {
     case "patch":
       return `# manual cell edit (${step.col ?? "column"} @ row ${step.ri ?? step.rowId ?? "?"}) — not replayable on the raw file; load the exported *_cleaned.csv instead`;
 
-    case "inject_column": {
-      const pyIcVals = (step.values ?? []).map(v => (v == null ? "np.nan" : Number(v).toFixed(8))).join(", ");
-      return [
-        `# inject_column: "${step.colName}" — extracted from model output`,
-        `${df}["${step.colName}"] = np.array([${pyIcVals}])`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnPython(step, df);
 
     case "geocode": {
       const pyGcAddr = step.addressCol ?? "address";
