@@ -40,6 +40,8 @@ import { stepLabel } from "../../pipeline/registry.js";
 import { toR, jsExprToR, rRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildRLoadLine } from "./loadLine.js";
 import { dummyR } from "./dummyStep.js";
+import { safeGroupedMutate } from "./groupedMutateExport.js";
+import { safeIfElse } from "./ifElseStep.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -607,12 +609,8 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       return `${dfVar} <- ${dfVar} |> mutate(${col} = ${inner})`;
     }
 
-    case "if_else": {
-      const cond = jsExprToR(step.cond);
-      const out  = rName(step.nn);
-      if (!cond) return `# if_else: ${step.nn} = if (${step.cond}) ... — translate condition to R manually`;
-      return `${dfVar} <- ${dfVar} |> mutate(${out} = dplyr::if_else(${cond}, ${rValue(step.trueVal)}, ${rValue(step.falseVal)}))`;
-    }
+    case "if_else":
+      return safeIfElse("r", step, dfVar);
 
     case "case_when": {
       const out = rName(step.nn);
@@ -625,23 +623,8 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
         : `# case_when: no valid conditions — translate manually`;
     }
 
-    case "grouped_mutate": {
-      const by = (step.by ?? []).map(rName).join(", ");
-      const out = rName(step.newCol || "grouped");
-      const fn = step.fn ?? "mean";
-      if (!by || !step.newCol) return `# grouped_mutate: incomplete config`;
-      if (fn === "expr" && step.expr) {
-        const rExpr = jsExprToR(step.expr);
-        return rExpr
-          ? `${dfVar} <- ${dfVar} |> group_by(${by}) |> mutate(${out} = ${rExpr}) |> ungroup()`
-          : `# grouped_mutate (expr): translate "${step.expr}" to R manually`;
-      }
-      const rhs = step.col ? rFn(fn, step.col) : "n()";
-      return [
-        `# grouped_mutate: ${fn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `${dfVar} <- ${dfVar} |> group_by(${by}) |> mutate(${out} = ${rhs}) |> ungroup()`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("r", step, dfVar);
 
     case "pivot_wider": {
       const idCols    = (step.idCols ?? []).map(rName).join(", ");

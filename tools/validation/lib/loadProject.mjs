@@ -93,9 +93,20 @@ export async function loadProjectUnit(unit, { dir = path.join(VAL, unit) } = {})
 
   // 1. Parse every dataset from its ORIGINAL file.
   const entries = [];
+  const derivedMetas = [];
+  const producers = new Map((payload.globalPipeline ?? [])
+    .filter(g => g.opType === "derive" && g.outputDatasetId).map(g => [g.outputDatasetId, g]));
   for (const meta of payload.datasets) {
+    // A dataset built inside Litux has no file of its own: it is rebuilt from
+    // its frozen lineage record (step 1b), exactly as the exported script does.
+    if (producers.has(meta.id)) { derivedMetas.push(meta); continue; }
     const src = resolveDataFile(meta.filename);
-    if (!src) { warnings.push(`dataset "${meta.name ?? meta.id}": source file "${meta.filename}" not found under validation/`); continue; }
+    if (!src) {
+      warnings.push(meta.origin
+        ? `dataset "${meta.name ?? meta.filename}": derived inside Litux with NO recipe (saved before lineage was recorded) — not reproducible from the project; re-derive it in the app to record one`
+        : `dataset "${meta.name ?? meta.id}": source file "${meta.filename}" not found under validation/`);
+      continue;
+    }
     const parsed = ensureRowIdentity(await parseDataFile(src, meta.loadOpts));
     entries.push({
       id: meta.id,
@@ -104,6 +115,25 @@ export async function loadProjectUnit(unit, { dir = path.join(VAL, unit) } = {})
       file: src,
       loadOpts: meta.loadOpts ?? null,
       rawData: parsed,
+    });
+  }
+
+  // 1b. Derived datasets: the parent's RAW file with the parent's pipeline as it
+  //     was when the child was saved (the frozen snapshot), which is what the
+  //     app materialised as the child's rows.
+  for (const meta of derivedMetas) {
+    const g = producers.get(meta.id);
+    const parent = entries.find(e => e.id === g.right?.datasetId);
+    if (!parent) { warnings.push(`dataset "${meta.name ?? meta.filename}": parent ${g.right?.datasetId} unavailable`); continue; }
+    const snap = runPipeline(parent.rawData.rows, parent.rawData.headers, g.right.snapshot ?? [], {});
+    entries.push({
+      id: meta.id,
+      name: meta.name ?? meta.filename,
+      filename: meta.filename,
+      file: null,
+      derivedFrom: g,
+      loadOpts: null,
+      rawData: ensureRowIdentity({ headers: snap.headers, rows: snap.rows }),
     });
   }
 
@@ -118,7 +148,11 @@ export async function loadProjectUnit(unit, { dir = path.join(VAL, unit) } = {})
   for (const e of entries) {
     const rec   = payload.pipelines?.[e.id] ?? {};
     const steps = rec.steps ?? [];
-    const needsWorker = steps.some(s => WORKER_STEPS.has(s.type));
+    // Node has no Worker: runPipelineAsync then nulls every expression step's
+    // output (by design — it never re-evaluates on the main thread), which made
+    // the "Litux truth" for if_else/mutate an all-null column. The sync runner
+    // evaluates the same expressions in-process, so it is the truth here.
+    const needsWorker = typeof Worker !== "undefined" && steps.some(s => WORKER_STEPS.has(s.type));
     let clean;
     try {
       clean = needsWorker

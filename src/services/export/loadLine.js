@@ -101,12 +101,17 @@ export function buildPyLoadLine(filename, loadOpts = null) {
       return `df = pd.read_excel(${f}${sheet})`;
     }
     case "stata":
-      return `df = pd.read_stata(${f})`;
+      // Litux reads the stored CODES (state = 1, as haven::read_dta and Stata
+      // do). pandas' default swaps them for value labels and RAISES when a
+      // label set repeats a label — real LMU data (LM6) crashed on load.
+      return `df = pd.read_stata(${f}, convert_categoricals=False)`;
     case "rds":
-      return `df = pyreadr.read_r(${f})[None]  # requires pyreadr`;
+      // The import rides with the load line: the script header only imports
+      // pandas/numpy, so a bare `pyreadr.` raised NameError on the first line.
+      return `import pyreadr  # pip install pyreadr\ndf = pyreadr.read_r(${f})[None]`;
     case "rdata":
       // pyreadr returns an OrderedDict keyed by the workspace object names.
-      return `df = pyreadr.read_r(${f})[${loadOpts?.objectName ? pyStr(loadOpts.objectName) : "None  # TODO: name the object from the workspace"}]  # requires pyreadr`;
+      return `import pyreadr  # pip install pyreadr\ndf = pyreadr.read_r(${f})[${loadOpts?.objectName ? pyStr(loadOpts.objectName) : "None  # TODO: name the object from the workspace"}]`;
     case "parquet":
       return `df = pd.read_parquet(${f})`;
     case "shapefile-shp":

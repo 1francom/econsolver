@@ -12,10 +12,10 @@
 // Paths are absolute, so scripts run from a scratch directory without touching
 // validation/.
 
-import { writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, copyFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
-import { generateCleanScript, toDfVar } from "../../../src/pipeline/exporter.js";
+import { generateCleanScript, generateWorkspaceScript, toDfVar, toStataFile } from "../../../src/pipeline/exporter.js";
 import { parseCSV } from "../../../src/services/data/parsers/tabular.js";
 
 export const RSCRIPT = process.env.RSCRIPT_EXE ?? "C:/Program Files/R/R-4.4.1/bin/Rscript.exe";
@@ -33,7 +33,14 @@ const fwd = (p) => String(p).replace(/\\/g, "/");
 function exportLine(language, dfVar, outCsv) {
   if (language === "r")      return `write.csv(${dfVar}, "${fwd(outCsv)}", row.names = FALSE, na = "")`;
   if (language === "python") return `${dfVar}.to_csv(r"${outCsv}", index=False, na_rep="")`;
-  return `export delimited using "${fwd(outCsv)}", replace datafmt`;
+  // nolabel: write codes, as Litux holds them. The explicit %21.0g on every
+  // numeric variable keeps full precision; datafmt alone would write each
+  // variable's display format (e.g. %9.0g), and a date format as "1990q1".
+  return [
+    `quietly ds, has(type numeric)`,
+    `if "\`r(varlist)'" != "" format \`r(varlist)' %21.0g`,
+    `export delimited using "${fwd(outCsv)}", replace datafmt nolabel`,
+  ].join("\n");
 }
 
 function run(language, file, cwd) {
@@ -92,6 +99,50 @@ export function runPipelineScript({ language, dataset, allDatasets = {}, dir }) 
     table = parseCSV(text, ",");
   }
   return { language, script: file, ok: !err && !!table, err: err || (table ? "" : "no output table written"), table };
+}
+
+/**
+ * Emit + run the WORKSPACE script (every dataset, derived ones rebuilt from
+ * their lineage) and read back one table per dataset. Source files are copied
+ * into `dir` and the script runs there with relative paths — the Stata version
+ * saves every intermediate as <name>.dta in its working directory, which must
+ * never be the real data folder.
+ * @param datasets  Map from loadProjectUnit
+ * @returns {{ language, script, ok, err, tables: Map<id, table> }}
+ */
+export function runWorkspaceScript({ language, datasets, globalPipeline, dir }) {
+  mkdirSync(dir, { recursive: true });
+  const wsDatasets = {};
+  for (const d of datasets.values()) {
+    if (d.file) copyFileSync(d.file, path.join(dir, path.basename(d.file)));
+    // A Stata run of an .RData dataset reads the sibling .dta, as the script says.
+    if (d.file && /\.(rdata|rda)$/i.test(d.file)) {
+      const dta = d.file.replace(/\.(rdata|rda)$/i, ".dta");
+      if (existsSync(dta)) copyFileSync(dta, path.join(dir, path.basename(dta)));
+    }
+    wsDatasets[d.id] = {
+      id: d.id, name: d.name, filename: d.file ? path.basename(d.file) : d.filename,
+      loadOpts: d.loadOpts, pipeline: d.steps ?? [],
+    };
+  }
+  const { perDataset, crossDataset } = generateWorkspaceScript({ language, datasets: wsDatasets, globalPipeline });
+  const stem = `workspace_${language}`;
+  const file = path.join(dir, `${stem}.${EXT[language]}`);
+  const outFor = (d) => path.join(dir, `${stem}__${d.id}.out.csv`);
+  const exports = [...datasets.values()].map(d => {
+    rmSync(outFor(d), { force: true });
+    if (language === "stata") return `use "${toStataFile(d.name)}", clear\n${exportLine("stata", null, outFor(d))}`;
+    return exportLine(language, toDfVar(d.name), outFor(d));
+  });
+  writeFileSync(file, `${perDataset}\n\n${crossDataset}\n\n${exports.join("\n")}\n`);
+
+  const res = run(language, file, dir);
+  const err = language === "stata" ? (stataLogError(file) || (res.ok ? "" : res.err)) : (res.ok ? "" : res.err);
+  const tables = new Map();
+  for (const d of datasets.values()) {
+    if (existsSync(outFor(d))) tables.set(d.id, parseCSV(readFileSync(outFor(d), "utf8"), ","));
+  }
+  return { language, script: file, ok: !err, err, tables };
 }
 
 /**

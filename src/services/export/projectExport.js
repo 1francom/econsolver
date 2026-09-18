@@ -33,6 +33,21 @@ const PROJECT_META_DROP = new Set([
 const pickProjectMeta = (p = {}) =>
   Object.fromEntries(Object.entries(p).filter(([k]) => !PROJECT_META_DROP.has(k)));
 
+// The panel declaration carries validatePanel's cached output, whose `pres`
+// matrix is entities × periods: on a 17 × 754 panel it was 99% of a 363 KB
+// export (13.8k lines) for a two-step pipeline. It is derived data — the app
+// recomputes it from entityCol/timeCol — so only the verdicts the UI reads
+// (balance, blockFD) and the few duplicate examples are kept.
+function compactPanel(panel) {
+  if (!panel?.validation) return panel ?? null;
+  const { balance, blockFD, dups } = panel.validation;
+  return { ...panel, validation: { balance, blockFD, dups } };
+}
+
+export const compactPipelines = (pipes = {}) =>
+  Object.fromEntries(Object.entries(pipes).map(([id, p]) =>
+    [id, p && typeof p === "object" ? { ...p, panel: compactPanel(p.panel) } : p]));
+
 // Plot/map/pin histories are keyed per project AND per dataset (ExplorerModule
 // passes `projectPid ?? pid`, PlotBuilder's history is per dataset), so every
 // key is collected and kept under its own id rather than merged — merging would
@@ -60,7 +75,9 @@ export async function buildProjectExport(pid) {
   const registry   = (await loadDatasetRegistry(pid)) ?? [];
   const pipeRecord = (await loadProjectPipelines(pid)) ?? {};
   const session    = (await loadSessionMeta(pid)) ?? {};
-  const pins       = (await loadModelBuffer(pid)) ?? [];
+  // loadModelBuffer returns the STORE RECORD { pid, models, ts }, not the list —
+  // reading it as the list exported every project with `models: []`.
+  const pins       = (await loadModelBuffer(pid))?.models ?? [];
   const keys       = [pid, ...registry.map(d => d?.id).filter(Boolean)];
 
   return {
@@ -72,7 +89,7 @@ export async function buildProjectExport(pid) {
     // everything needed to re-read the source file exactly as the app did.
     datasets: registry,
     // { [datasetId]: { steps, panel, dataDictionary, branchPointIndex } }
-    pipelines: pipeRecord.datasetPipelines ?? {},
+    pipelines: compactPipelines(pipeRecord.datasetPipelines ?? {}),
     globalPipeline: session.globalPipeline ?? [],
     calcWorkspace:  session.calcWorkspace  ?? null,
     // Model specs only — buildModelFile never writes coefficients.

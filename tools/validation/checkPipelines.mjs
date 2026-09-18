@@ -13,7 +13,7 @@
 import { mkdirSync, existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { loadProjectUnit, compareTables, VAL, resolveDataFile, parseDataFile } from "./lib/loadProject.mjs";
-import { runPipelineScript, LANGS } from "./lib/runScripts.mjs";
+import { runPipelineScript, runWorkspaceScript, LANGS } from "./lib/runScripts.mjs";
 import { runPipeline } from "../../src/pipeline/runner.js";
 import { ensureRowIdentity } from "../../src/services/data/rowIdentity.js";
 
@@ -71,6 +71,7 @@ async function checkUnit(unit) {
 
   for (const ds of proj.datasets.values()) {
     console.log(`\n   ${ds.name}  (${ds.steps.length} steps · Litux: ${ds.clean.rows.length} rows × ${ds.clean.headers.length} cols)`);
+    if (!ds.file) { console.log("     (derived inside Litux — checked in the workspace phase below)"); continue; }
     if (!ds.steps.length) { console.log("     (no pipeline — nothing to reproduce)"); continue; }
     for (const language of LANGS) {
       const res = runPipelineScript({ language, dataset: ds, allDatasets, dir });
@@ -78,6 +79,23 @@ async function checkUnit(unit) {
       const cmp = compareTables(ds.clean, res.table, { tol: 1e-6 });
       if (cmp.ok) console.log(`     ok   ${language.padEnd(6)} ${res.table.rows.length} rows × ${res.table.headers.length} cols${cmp.orderNote ? `  [${cmp.orderNote}]` : ""}`);
       else { fails++; console.log(`     DIFF ${language.padEnd(6)} ${cmp.diffs.slice(0, 4).join(" | ")}`); }
+    }
+  }
+
+  // Workspace phase: the whole-project script, which is the only export that
+  // rebuilds datasets derived inside Litux (and does so from their lineage).
+  if (unit !== "selftest" && [...proj.datasets.values()].some(d => !d.file)) {
+    console.log(`\n   workspace script (all datasets)`);
+    for (const language of LANGS) {
+      const res = runWorkspaceScript({ language, datasets: proj.datasets, globalPipeline: proj.globalPipeline, dir: path.join(dir, "workspace") });
+      if (!res.ok) { fails++; console.log(`     FAIL ${language.padEnd(6)} ${String(res.err).split("\n").filter(Boolean).slice(-2).join(" ").slice(0, 240)}`); }
+      for (const ds of proj.datasets.values()) {
+        const t = res.tables.get(ds.id);
+        if (!t) { if (res.ok) { fails++; console.log(`     FAIL ${language.padEnd(6)} ${ds.name}: no table written`); } continue; }
+        const cmp = compareTables(ds.clean, t, { tol: 1e-6 });
+        if (cmp.ok) console.log(`     ok   ${language.padEnd(6)} ${ds.name}  ${t.rows.length} rows × ${t.headers.length} cols`);
+        else { fails++; console.log(`     DIFF ${language.padEnd(6)} ${ds.name}: ${cmp.diffs.slice(0, 3).join(" | ")}`); }
+      }
     }
   }
   return fails;

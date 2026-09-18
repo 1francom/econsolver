@@ -799,6 +799,17 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
   // ── G12: Plot Builder panel ───────────────────────────────────────────────
   const [plotOpen,        setPlotOpen]        = useState(false);
+  // Post-estimation tools (Plot Builder, Predict, Coefficient Test, model
+  // export/import) sit in ONE collapsible block below the result, closed by
+  // default, so the model output is not pushed off screen by four headers.
+  // Remembered per browser — a per-viewer convenience, not project state.
+  const [toolsOpen, setToolsOpen] = useState(() => {
+    try { return localStorage.getItem("litux.modelToolsOpen") === "1"; } catch { return false; }
+  });
+  const toggleTools = () => setToolsOpen(v => {
+    try { localStorage.setItem("litux.modelToolsOpen", v ? "0" : "1"); } catch { /* storage blocked */ }
+    return !v;
+  });
   const [plotTemplateKey, setPlotTemplateKey]  = useState(0);
   const [plotInitLayers,  setPlotInitLayers]   = useState([]);
 
@@ -2379,6 +2390,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               "Extract: write fitted values, residuals or estimated fixed effects back as dataset columns",
               "Coefficient test: post-estimation hypothesis tests on a pinned model, joint tests included",
               "Bacon decomposition (under a TWFE DiD result): shows how much weight sits on later-vs-earlier-treated comparisons",
+              "Post-estimation tools (collapsed below the result, click to open): Plot Builder, Predict from Model, Coefficient Test, and Export / Import models",
               "Plot Builder: result-augmented charts, plus a coefficient-comparison mode across pinned models",
               "◫ in the top bar opens the floating artifact panel without leaving this tab — useful for checking a saved plot against the spec you are building",
               "Subsets: define named subsets and run the same spec on all of them at once",
@@ -3797,6 +3809,30 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
         </div>
 
+        {/* ── Post-estimation tools: one collapsible block ── */}
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, marginBottom: toolsOpen ? "1.4rem" : "0.6rem", overflow: "hidden" }}>
+          <button
+            onClick={toggleTools}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 8,
+              padding: "0.5rem 0.85rem", background: C.surface2, border: "none",
+              borderBottom: toolsOpen ? `1px solid ${C.border}` : "none",
+              cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+              color: C.textDim, textAlign: "left",
+            }}
+          >
+            <span style={{ color: C.textMuted }}>{toolsOpen ? "▾" : "▸"}</span>
+            <span style={{ letterSpacing: "0.2em", textTransform: "uppercase" }}>Post-estimation tools</span>
+            <span style={{ color: C.textMuted }}>
+              {[result && "Plot Builder", pinnedModels.length > 0 && "Predict", pinnedModels.length > 0 && "Coefficient test", "Export / Import models"].filter(Boolean).join(" · ")}
+            </span>
+            {pinnedModels.length > 0 && (
+              <span style={{ marginLeft: "auto", color: C.textMuted }}>{pinnedModels.length} pinned</span>
+            )}
+          </button>
+          {toolsOpen && (
+          <div style={{ padding: "0.6rem 0.6rem 0" }}>
+
         {/* ── G12: Plot Builder panel ── */}
         {result && (
           <div style={{ borderTop: `1px solid ${C.border}`, background: C.surface }}>
@@ -4012,6 +4048,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           filenameBase={(cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100)}
           onImportAll={importModelsFromFile}
         />
+          </div>
+          )}
+        </div>
 
         {/* ── Import summary: every spec estimated + pinned, failures named ── */}
         {importSummary && (() => {

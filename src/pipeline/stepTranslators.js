@@ -26,6 +26,8 @@ import { coerceLiteral } from "./literals.js";
 // so a distribution can never be drawable in the app but unexportable here.
 import { distExprR, distExprPy, distExprStata, stataCategoricalLines, RNG_NOTE } from "../math/dgpScript.js";
 import { dummyR, dummyStata, dummyPython } from "../services/export/dummyStep.js";
+import { safeGroupedMutate } from "../services/export/groupedMutateExport.js";
+import { safeIfElse } from "../services/export/ifElseStep.js";
 
 // ─── SHARED HELPERS ──────────────────────────────────────────────────────────
 
@@ -52,7 +54,7 @@ export function pyRightLoad(id, allDatasets) {
   const file = ds?.filename;
   if (!file) return `pd.read_csv("<path_to_${name}.csv>")`;
   const fl = file.toLowerCase();
-  if (fl.endsWith(".dta"))               return `pd.read_stata("${file}")`;
+  if (fl.endsWith(".dta"))               return `pd.read_stata("${file}", convert_categoricals=False)`;
   if (fl.endsWith(".xlsx") || fl.endsWith(".xls")) return `pd.read_excel("${file}")`;
   return `pd.read_csv("${file}")`;
 }
@@ -875,12 +877,8 @@ export function toR(step, df = "df", allDatasets = {}) {
       return `${df} <- ${df} |> mutate(${col} = ${csIn})`;
     }
 
-    case "if_else": {
-      const ieCond = jsExprToR(step.cond);
-      const ieOut  = rName(step.nn);
-      if (!ieCond) return `# if_else: ${step.nn} = if (${step.cond}) ... — translate condition to R manually`;
-      return `${df} <- ${df} |> mutate(${ieOut} = dplyr::if_else(${ieCond}, ${rValue(coerceLiteral(step.trueVal))}, ${rValue(coerceLiteral(step.falseVal))}))`;
-    }
+    case "if_else":
+      return safeIfElse("r", step, df);
 
     case "case_when": {
       const cwOut  = rName(step.nn);
@@ -892,23 +890,8 @@ export function toR(step, df = "df", allDatasets = {}) {
         : `# case_when: no valid conditions — translate manually`;
     }
 
-    case "grouped_mutate": {
-      const gmBy  = (step.by ?? []).map(rName).join(", ");
-      const gmOut = rName(step.newCol || "grouped");
-      const gmFn  = step.fn ?? "mean";
-      if (!gmBy || !step.newCol) return `# grouped_mutate: incomplete config`;
-      if (gmFn === "expr" && step.expr) {
-        const gmExpr = jsExprToR(step.expr);
-        return gmExpr
-          ? `${df} <- ${df} |> group_by(${gmBy}) |> mutate(${gmOut} = ${gmExpr}) |> ungroup()`
-          : `# grouped_mutate (expr): translate "${step.expr}" to R manually`;
-      }
-      const gmRhs = step.col ? rFn(gmFn, step.col) : "n()";
-      return [
-        `# grouped_mutate: ${gmFn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `${df} <- ${df} |> group_by(${gmBy}) |> mutate(${gmOut} = ${gmRhs}) |> ungroup()`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("r", step, df);
 
     case "pivot_wider": {
       const pwIds  = (step.idCols ?? []).map(rName).join(", ");
@@ -1530,12 +1513,8 @@ export function toStata(step, df = "df", allDatasets = {}) {
       return `replace ${stCsCol} = ${stCsIn}`;
     }
 
-    case "if_else": {
-      const stIeOut  = stVar(step.nn);
-      const stIeCond = jsExprToStata(step.cond);
-      if (!stIeCond) return `* if_else: ${step.nn} = cond(${step.cond}, ...) — translate condition to Stata manually`;
-      return `gen ${stIeOut} = cond(${stIeCond}, ${stValue(coerceLiteral(step.trueVal))}, ${stValue(coerceLiteral(step.falseVal))})`;
-    }
+    case "if_else":
+      return safeIfElse("stata", step);
 
     case "case_when": {
       const stCwOut = stVar(step.nn);
@@ -1546,17 +1525,8 @@ export function toStata(step, df = "df", allDatasets = {}) {
       return [`gen ${stCwOut} = ${stValue(coerceLiteral(step.defaultVal))}`, ...stCwBrs].join("\n");
     }
 
-    case "grouped_mutate": {
-      const stGmBy   = (step.by ?? []).map(stVar).join(" ");
-      const stGmOut  = stVar(step.newCol || "grouped");
-      const stGmFn   = step.fn ?? "mean";
-      if (!stGmBy || !step.newCol) return `* grouped_mutate: incomplete config`;
-      const stGmEgen = stGmFn === "sd" ? "sd" : stGmFn === "count" ? "count" : stGmFn === "expr" ? "mean" : stGmFn;
-      return [
-        `* grouped_mutate: ${stGmFn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `bysort ${stGmBy}: egen ${stGmOut} = ${stGmEgen}(${stVar(step.col || (step.by ?? [])[0] || "")})`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("stata", step);
 
     case "balance_panel": {
       const stBpEnt  = stVar(step.entityCol);
@@ -2050,12 +2020,8 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return `${df}[${pyCsCol}] = ${pyCsExpr}`;
     }
 
-    case "if_else": {
-      const pyIeOut  = pyStr(step.nn);
-      const pyIeCond = jsExprToPython(step.cond, df);
-      if (!pyIeCond) return `# if_else: ${step.nn} = where(${step.cond}) — translate condition to Python manually`;
-      return `${df}[${pyIeOut}] = np.where(${pyIeCond}, ${pyValue(coerceLiteral(step.trueVal), "string")}, ${pyValue(coerceLiteral(step.falseVal), "string")})`;
-    }
+    case "if_else":
+      return safeIfElse("python", step, df);
 
     case "case_when": {
       const pyCwOut     = pyStr(step.nn);
@@ -2069,26 +2035,8 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return `${df}[${pyCwOut}] = np.select([${pyCwConds.join(", ")}], [${pyCwChoices.join(", ")}], default=${pyValue(coerceLiteral(step.defaultVal), "string")})`;
     }
 
-    case "grouped_mutate": {
-      const pyGmBy  = step.by ?? [];
-      const pyGmOut = pyStr(step.newCol || "grouped");
-      const pyGmFn  = step.fn ?? "mean";
-      if (!pyGmBy.length || !step.newCol) return `# grouped_mutate: incomplete config`;
-      if (pyGmFn === "expr" && step.expr) {
-        const pyGmExpr = jsExprToPython(step.expr, df);
-        return pyGmExpr
-          ? `${df}[${pyGmOut}] = ${df}.groupby(${pyList(pyGmBy)}).apply(lambda g: ${pyGmExpr}).reset_index(level=${pyList(pyGmBy)}, drop=True)`
-          : `# grouped_mutate (expr): translate "${step.expr}" to Python manually`;
-      }
-      const pyGmAgg = pyGmFn === "sd" ? "std" : pyGmFn === "count" ? "size" : pyGmFn;
-      const pyGmGrp = step.col
-        ? `${df}.groupby(${pyList(pyGmBy)})[${pyStr(step.col)}]`
-        : `${df}.groupby(${pyList(pyGmBy)})[${pyStr(pyGmBy[0])}]`;
-      return [
-        `# grouped_mutate: ${pyGmFn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `${df}[${pyGmOut}] = ${pyGmGrp}.transform("${pyGmAgg}")`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("python", step, df);
 
     case "pivot_wider": {
       const pyPwIds  = pyList(step.idCols ?? []);

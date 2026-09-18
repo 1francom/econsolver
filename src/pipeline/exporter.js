@@ -78,7 +78,7 @@ export function toDfVar(name) {
   return "df_" + base.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^[0-9]/, "_");
 }
 
-function toStataFile(name) {
+export function toStataFile(name) {
   return name.replace(/[^a-zA-Z0-9_]/g, "_") + ".dta";
 }
 
@@ -139,12 +139,14 @@ function emitOperand(frozen, liveDs, lang, allDatasets, toStep, loadLine) {
     };
   }
 
-  const tmp = `.${safe}_at_join`;
+  // R hides a leading-dot name from ls(); Python has no such name — a leading
+  // dot is a syntax error, so the Python branch uses an underscore.
+  const tmp = lang === "python" ? `_${safe}_at_join` : `.${safe}_at_join`;
   return {
     expr: tmp,
     pre: [
       note,
-      loadLine(file, frozen.loadOpts ?? null).replace(/^df\b/, tmp),
+      loadLine(file, frozen.loadOpts ?? null).replace(/^df\b/m, tmp),
       ...(frozen.snapshot ?? []).map(s => toStep(s, tmp, allDatasets)),
     ],
     mode,
@@ -339,7 +341,7 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
     const lines = [
       rHeader(datasetName),
       `# ── Load dataset ──`,
-      buildRLoadLine(filename, loadOpts).replace(/^df/, df),
+      buildRLoadLine(filename, loadOpts).replace(/^df\b/m, df),
       ``,
     ];
     if (pipeline.length) {
@@ -382,7 +384,7 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
     const lines = [
       pythonHeader(datasetName),
       `# ── Load dataset ──`,
-      buildPyLoadLine(filename, loadOpts).replace(/^df/, df),
+      buildPyLoadLine(filename, loadOpts).replace(/^df\b/m, df),
       ``,
     ];
     if (pipeline.length) {
@@ -494,7 +496,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
-      lines.push(buildRLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
+      lines.push(buildRLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/m, df));
       const local = localStepsOf(ds, globalPipeline);
       const inline = prefixStepsFor(ds);
       for (let i = 0; i <= local.length; i++) {
@@ -572,7 +574,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
-      lines.push(buildPyLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
+      lines.push(buildPyLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/m, df));
       const local = localStepsOf(ds, globalPipeline);
       const inline = prefixStepsFor(ds);
       for (let i = 0; i <= local.length; i++) {

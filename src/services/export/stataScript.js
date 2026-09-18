@@ -15,6 +15,8 @@ import { toStata, jsExprToStata, stataRightLoad } from "../../pipeline/stepTrans
 import { UNMATCHED_BY_HOW, stataMasterVarlist, stataSuffixHomonyms, stataDropMergeMarker } from "./stataJoin.js";
 import { buildStataLoadLine } from "./loadLine.js";
 import { dummyStata } from "./dummyStep.js";
+import { safeGroupedMutate } from "./groupedMutateExport.js";
+import { safeIfElse } from "./ifElseStep.js";
 
 export function generateStataScript(config = {}) {
   const {
@@ -443,12 +445,8 @@ function transpileStep(step, allDatasets = {}) {
       const lines = (step.dummyCols ?? []).map(d => `gen ${stVar(pfx + d)} = ${cont} * ${stVar(d)}`);
       return lines.length ? lines.join("\n") : `* factor_interactions: no dummy columns specified`;
     }
-    case "if_else": {
-      const out = stVar(step.nn);
-      const cond = jsExprToStata(step.cond);
-      if (!cond) return `* if_else: ${step.nn} = cond(${step.cond}, ...) — translate condition to Stata manually`;
-      return `gen ${out} = cond(${cond}, ${stValue(step.trueVal)}, ${stValue(step.falseVal)})`;
-    }
+    case "if_else":
+      return safeIfElse("stata", step);
     case "case_when": {
       const out = stVar(step.nn);
       const branches = (step.cases ?? [])
@@ -457,17 +455,9 @@ function transpileStep(step, allDatasets = {}) {
       if (!branches.length) return `* case_when: no valid conditions — translate manually`;
       return [`gen ${out} = ${stValue(step.defaultVal)}`, ...branches].join("\n");
     }
-    case "grouped_mutate": {
-      const by = (step.by ?? []).map(stVar).join(" ");
-      const out = stVar(step.newCol || "grouped");
-      const fn = step.fn ?? "mean";
-      if (!by || !step.newCol) return `* grouped_mutate: incomplete config`;
-      const egenFn = fn === "sd" ? "sd" : fn === "count" ? "count" : fn === "expr" ? "mean" : fn;
-      return [
-        `* grouped_mutate: ${fn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `bysort ${by}: egen ${out} = ${egenFn}(${stVar(step.col || by.split(" ")[0])})`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("stata", step);
+
     case "balance_panel": {
       const ent = stVar(step.entityCol), tim = stVar(step.timeCol);
       const lines = [

@@ -33,6 +33,18 @@ const num = (v, op) => {
   return String(n);
 };
 
+// A value that is exactly how JS prints a number ("1", "2015", "0.5"). For
+// those, evalPredicate's TEXT comparison against a numeric cell is the same as
+// a numeric one — String(1) === "1" iff 1 == 1 — so the compilers compare
+// numerically when the column is numeric. Comparing as text in the target
+// language is NOT the same: Stata rejects `num != "1"` outright (r(109), which
+// killed PS5's `municipality != 1` filter), pandas prints a float 1 as "1.0",
+// and R prints 100000 as "1e+05".
+const isCanonNum = (v) => {
+  const s = String(v ?? "").trim();
+  return s !== "" && Number.isFinite(Number(s)) && String(Number(s)) === s;
+};
+
 const unknown = (op, lang) => {
   throw new Error(
     `Unknown operator "${op}" — refusing to emit ${lang} that would keep every row.`
@@ -50,7 +62,18 @@ export function predicateToR(node, opts = {}) {
   const c   = name(node.col);
   const op  = normalizeOp(node.op);
   const val = node.value;
-  const list = (Array.isArray(node.values) ? node.values : [val]).map(v => `"${dq(v)}"`).join(", ");
+  const vals = Array.isArray(node.values) && node.values.length ? node.values : [val];
+  const list = vals.map(v => `"${dq(v)}"`).join(", ");
+  // Numeric-looking operands branch on the column type at run time.
+  const numList = vals.every(isCanonNum) ? `c(${vals.map(v => String(Number(v))).join(", ")})` : null;
+  const ifNum = (numExpr, txtExpr) => `(if (is.numeric(${c})) ${numExpr} else ${txtExpr})`;
+
+  switch (op) {
+    case "eq":  if (isCanonNum(val)) return ifNum(`${c} == ${Number(val)}`, `as.character(${c}) == "${dq(val)}"`); break;
+    case "neq": if (isCanonNum(val)) return ifNum(`${c} != ${Number(val)}`, `as.character(${c}) != "${dq(val)}"`); break;
+    case "in":  if (numList) return ifNum(`${c} %in% ${numList}`, `as.character(${c}) %in% c(${list})`); break;
+    case "nin": if (numList) return ifNum(`(!is.na(${c}) & !(${c} %in% ${numList}))`, `(!is.na(${c}) & !(as.character(${c}) %in% c(${list})))`); break;
+  }
 
   switch (op) {
     case "notna":    return `!is.na(${c})`;
@@ -92,7 +115,17 @@ export function predicateToPython(node, opts = {}) {
   const str = `${ref}.astype("string")`;
   const op  = normalizeOp(node.op);
   const val = node.value;
-  const list = (Array.isArray(node.values) ? node.values : [val]).map(v => `"${dq(v)}"`).join(", ");
+  const vals = Array.isArray(node.values) && node.values.length ? node.values : [val];
+  const list = vals.map(v => `"${dq(v)}"`).join(", ");
+  const numList = vals.every(isCanonNum) ? `[${vals.map(v => String(Number(v))).join(", ")}]` : null;
+  const ifNum = (numExpr, txtExpr) => `(${numExpr} if pd.api.types.is_numeric_dtype(${ref}) else ${txtExpr})`;
+
+  switch (op) {
+    case "eq":  if (isCanonNum(val)) return ifNum(`(${ref} == ${Number(val)})`, `(${str} == "${dq(val)}").fillna(False)`); break;
+    case "neq": if (isCanonNum(val)) return ifNum(`(${ref}.notna() & (${ref} != ${Number(val)}))`, `(${ref}.notna() & (${str} != "${dq(val)}"))`); break;
+    case "in":  if (numList) return ifNum(`${ref}.isin(${numList})`, `${str}.isin([${list}])`); break;
+    case "nin": if (numList) return ifNum(`(${ref}.notna() & ~${ref}.isin(${numList}))`, `(${ref}.notna() & ~${str}.isin([${list}]))`); break;
+  }
 
   switch (op) {
     case "notna":    return `${ref}.notna()`;
@@ -137,7 +170,22 @@ export function predicateToStata(node, opts = {}) {
   const c   = name(node.col);
   const op  = normalizeOp(node.op);
   const val = node.value;
-  const vals = Array.isArray(node.values) ? node.values : [val];
+  const vals = Array.isArray(node.values) && node.values.length ? node.values : [val];
+  // Stata cannot branch on a variable's type inside an expression, so a
+  // numeric-looking operand compares numerically: a numeric column then works,
+  // and a string column fails LOUDLY with r(109) instead of selecting other rows.
+  const numVals = vals.every(isCanonNum);
+
+  switch (op) {
+    case "eq":  if (isCanonNum(val)) return `${c} == ${Number(val)}`; break;
+    case "neq": if (isCanonNum(val)) return `(!missing(${c}) & ${c} != ${Number(val)})`; break;
+    case "in":  if (numVals) return `(${vals.map(v => `${c} == ${Number(v)}`).join(" | ")})`; break;
+    case "nin": if (numVals) return `(!missing(${c}) & !(${vals.map(v => `${c} == ${Number(v)}`).join(" | ")}))`; break;
+    // Stata's missing compares as +infinity, so `x > 5` KEEPS missing rows
+    // while evalPredicate drops them. The guard is load-bearing.
+    case "gt":  return `(!missing(${c}) & ${c} > ${num(val, op)})`;
+    case "gte": return `(!missing(${c}) & ${c} >= ${num(val, op)})`;
+  }
 
   switch (op) {
     case "notna":    return `!missing(${c})`;

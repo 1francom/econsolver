@@ -14,6 +14,8 @@ import { feTerm, pyFEInteractionSetup } from "./feInteractionTerm.js";
 import { toPython, jsExprToPython, pyRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildPyLoadLine } from "./loadLine.js";
 import { dummyPython } from "./dummyStep.js";
+import { safeGroupedMutate } from "./groupedMutateExport.js";
+import { safeIfElse } from "./ifElseStep.js";
 
 export function generatePythonScript(config = {}) {
   const {
@@ -454,12 +456,8 @@ function transpileStep(step, allDatasets = {}) {
         `df[${pyStr(pfx + d)}] = df[${cont}] * df[${pyStr(d)}]`);
       return lines.length ? lines.join("\n") : `# factor_interactions: no dummy columns specified`;
     }
-    case "if_else": {
-      const out = pyStr(step.nn);
-      const cond = jsExprToPython(step.cond, "df");
-      if (!cond) return `# if_else: ${step.nn} = where(${step.cond}) — translate condition to Python manually`;
-      return `df[${out}] = np.where(${cond}, ${pyValue(step.trueVal, "string")}, ${pyValue(step.falseVal, "string")})`;
-    }
+    case "if_else":
+      return safeIfElse("python", step, "df");
     case "case_when": {
       const out = pyStr(step.nn);
       const conds = [], choices = [];
@@ -471,24 +469,9 @@ function transpileStep(step, allDatasets = {}) {
       if (!conds.length) return `# case_when: no valid conditions — translate manually`;
       return `df[${out}] = np.select([${conds.join(", ")}], [${choices.join(", ")}], default=${pyValue(step.defaultVal, "string")})`;
     }
-    case "grouped_mutate": {
-      const by = step.by ?? [];
-      const out = pyStr(step.newCol || "grouped");
-      const fn = step.fn ?? "mean";
-      if (!by.length || !step.newCol) return `# grouped_mutate: incomplete config`;
-      if (fn === "expr" && step.expr) {
-        const pyExpr = jsExprToPython(step.expr, "df");
-        return pyExpr
-          ? `df[${out}] = df.groupby(${pyList(by)}).apply(lambda g: ${pyExpr}).reset_index(level=${pyList(by)}, drop=True)`
-          : `# grouped_mutate (expr): translate "${step.expr}" to Python manually`;
-      }
-      const aggFn = fn === "sd" ? "std" : fn === "count" ? "size" : fn;
-      const group = step.col ? `df.groupby(${pyList(by)})[${pyStr(step.col)}]` : `df.groupby(${pyList(by)})[${pyStr(by[0])}]`;
-      return [
-        `# grouped_mutate: ${fn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `df[${out}] = ${group}.transform("${aggFn}")`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("python", step, "df");
+
     case "balance_panel": {
       const ent = pyStr(step.entityCol), tim = pyStr(step.timeCol);
       const dims = step.slotCol ? `[${ent}, ${tim}, ${pyStr(step.slotCol)}]` : `[${ent}, ${tim}]`;
