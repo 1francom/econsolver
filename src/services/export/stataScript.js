@@ -1409,7 +1409,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
       lines.push(``);
       lines.push(`* Aggregations`);
       lines.push(`estat simple`);
-      lines.push(`estat dynamic`);
+      lines.push(`estat event`);  // csdid's dynamic aggregation — `estat dynamic` is not a csdid subcommand (r(199))
       lines.push(`estat group`);
       lines.push(`estat calendar`);
       break;

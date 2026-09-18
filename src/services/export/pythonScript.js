@@ -713,6 +713,14 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
   const design = (cols, dfName, opts) => pyDesign(cols, dfName, fvSet, factorRefs, opts);
   const xFormula = allX.map(v => `"${v}"`).join(", ");
   const pyFormStr = buildPyFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTerms, factorRefs);
+  // Panel design matrix. With interactions the expanded names
+  // (`education:continent_Africa`) exist only inside Litux, so selecting them
+  // raised KeyError; patsy builds them from the raw columns instead, and codes a
+  // factor inside `x:f` with every level when `x` is not a main effect — the
+  // same rule as R's model.matrix and the app.
+  const panelDesign = (dfName) => interactionTerms?.length
+    ? `dmatrix("${pyFormStr}", ${dfName}, return_type="dataframe")`
+    : design(allX, dfName);
 
   // statsmodels `.fit(...)` covariance argument matching the SE the user selected
   // in Litux (was hardcoded "HC3"). statsmodels supports HC1/HC2/HC3 natively.
@@ -884,7 +892,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
         const idx = feColsFE.length === 2 ? feColsFE : [entityCol, timeCol];
         lines.push(`# Fixed Effects (within estimator)`);
         lines.push(`df_panel = df.set_index([${idx.map(c => `"${c}"`).join(", ")}])`);
-        lines.push(`exog = ${design(allX, "df_panel")}`);
+        lines.push(`exog = ${panelDesign("df_panel")}`);
         lines.push(...panelCovNote());
         // Both index levels are real FE dimensions when the model declares two,
         // so time_effects must be on; with one dimension it must NOT be, or the
@@ -911,7 +919,7 @@ function transpileModel({ type, yVar, allX: allXIn, xVars: xVarsIn, wVars: wVars
     case "FD": {
       lines.push(`# First Differences estimator`);
       lines.push(`df_panel = df.set_index(["${entityCol}", "${timeCol}"])`);
-      lines.push(`exog = ${design(allX, "df_panel")}`);
+      lines.push(`exog = ${panelDesign("df_panel")}`);
       lines.push(...panelCovNote());
       lines.push(`model = FirstDifferenceOLS(df_panel["${yVar}"], exog).fit(${panelCov()})`);
       lines.push(`print(model.summary)`);

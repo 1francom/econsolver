@@ -45,6 +45,8 @@ const KNOWN = {
   eventstudy_w2: "panel cluster K excludes non-nested FE levels",
   // Stata's robust VCE for poisson scales by n/(n-1); Litux (and sandwich) by n/(n-k).
   poisson_hc1: "poisson robust scaling n/(n-1) vs n/(n-k)",
+  // csdid's default inference is the wild bootstrap; Litux's is analytic.
+  callaway: "csdid wild-bootstrap SE vs Litux analytic SE",
 };
 const SKIP_IF_MISSING = { rdrobust: ["rdd_", "fuzzy_"], csdid: ["callaway"] };
 
@@ -145,6 +147,8 @@ const ALIAS = { "Post": "post", "Treated": "treat", "Post × Treated (ATT)": "di
   "D (treatment)": "_above", "run − c": "_run_c", "D × (run − c)": "_above_run",
   "take (LATE)": "take", "Z × (run − c)": "_Z_run" };
 const stataName = (n) => /^\(intercept\)$/i.test(n) ? "_cons"
+  // csdid's `estat event, post` names relative periods Tm6 … Tm1, Tp0 … Tp5.
+  : /^e=-?\d+$/.test(n) ? (Number(n.slice(2)) < 0 ? `Tm${-Number(n.slice(2))}` : `Tp${Number(n.slice(2))}`)
   : ALIAS[n] ?? n.replace(/^__ev_k_/, "ev_").replace(/^__ev_/, "ev_");
 const EST = /^(reg|xtreg|reghdfe|areg|ivregress|logit|probit|glm|poisson|ppmlhdfe|nbreg|rdrobust|csdid)\b/;
 // The within/absorbed estimators' intercept is a normalisation, not a parameter
@@ -163,7 +167,15 @@ for (const [name, c] of cases) {
   const lines = generateStataScript(exportConfig({ ...d.result, windowPre: r.windowPre, windowPost: r.windowPost }, spec)).split("\n");
   const hits = lines.map((l, j) => (EST.test(l) ? j : -1)).filter(j => j >= 0);
   // RDD blocks lead with rdrobust; the engine-equivalent regression is the last command.
-  const at = /RDD/.test(d.result.type) ? hits[hits.length - 1] : hits[0];
+  // Callaway-Sant'Anna: csdid's own e(b) is ATT(g,t); Litux reports the
+  // event-time aggregation, which is what `estat event, post` leaves in e(b).
+  const evAt = lines.some(l => /\bcsdid\b/.test(l)) ? lines.findIndex(l => /^estat event\b/.test(l)) : -1;
+  if (evAt >= 0) {
+    lines[evAt] = "estat event, post";
+    // `, post` replaces e(), so the later estat calls have no csdid to act on (r(321)).
+    for (let j = evAt + 1; j < lines.length; j++) if (/^estat /.test(lines[j])) lines[j] = `* (sweep) ${lines[j]}`;
+  }
+  const at = evAt >= 0 ? evAt : /RDD/.test(d.result.type) ? hits[hits.length - 1] : hits[0];
   if (at == null) { console.log(`FAIL ${name}: no estimation command emitted`); fails++; continue; }
   lines.splice(at + 1, 0, DUMP(name));
   for (const f of [`${name}.out`, `${name}.log`]) rmSync(join(DIR, f), { force: true });

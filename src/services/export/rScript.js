@@ -986,12 +986,18 @@ function transpileModel(model) {
         `  model = "fd")`,
         ``,
         `fixest::etable(fit_fe)`,
+        `fit <- fit_fe  # the name the output table below uses`,
         ``,
-        `# Hausman test (FE vs RE)`,
+        // phtest needs two plm fits. The old line piped the fixest object into
+        // `plm::as.plm()`, which does not exist — every FE export died here.
+        `# Hausman test (FE vs RE) — one-way within vs random effects, both via plm`,
+        `fit_w  <- plm::plm(${y} ~ ${xStr}, data = df,`,
+        `  index = c(${rStr(entityCol)}, ${rStr(timeCol)}),`,
+        `  model = "within")`,
         `fit_re <- plm::plm(${y} ~ ${xStr}, data = df,`,
         `  index = c(${rStr(entityCol)}, ${rStr(timeCol)}),`,
         `  model = "random")`,
-        `plm::phtest(fit_fe |> plm::as.plm(), fit_re)`,
+        `plm::phtest(fit_w, fit_re)`,
       ].join("\n");
     }
 
@@ -1004,6 +1010,7 @@ function transpileModel(model) {
         ``,
         `summary(fit_fd)`,
         ...rPlmVcovLines(seType, "fit_fd", { clusterVar }),
+        `fit <- fit_fd  # the name the output table below uses`,
       ].join("\n");
 
     case "2SLS": {

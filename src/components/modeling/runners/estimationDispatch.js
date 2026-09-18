@@ -56,7 +56,7 @@ function _dispatchEstimation(dataRows, ctx, meta = {}) {
   const y = yVar[0];
   if (!y) return { error: "Select a dependent variable (Y)." };
   // ── Interaction + factor expansion (outside try to avoid TDZ) ──────────────
-  const { rows: ixRows, xVars: ixX, wVars: ixW } =
+  const { rows: ixRows, xVars: ixX, wVars: ixW, factorMap: fmIx } =
     expandInteractions(dataRows, xVars, wVars, interactionTerms, factorVars, factorRefs);
   // Through-the-origin: R gives the FIRST factor in formula order full dummy
   // coding and only then switches to contrasts. X is scanned before W, so the
@@ -67,7 +67,8 @@ function _dispatchEstimation(dataRows, ctx, meta = {}) {
     applyFactors(ixRows, ixX, factorVars, factorRefs, { fullFirstFactor: noIntercept });
   const { rows: expRows, vars: expW, factorMap: fmW } =
     applyFactors(_r1, ixW, factorVars, factorRefs, { fullFirstFactor: noIntercept && !fullUsedX });
-  const factorMap = { ...(fmX ?? {}), ...(fmW ?? {}) };
+  // Interaction-only factors contribute their levels too (see expandInteractions).
+  const factorMap = { ...(fmIx ?? {}), ...(fmX ?? {}), ...(fmW ?? {}) };
   meta.factorMap = factorMap;
   dataRows = expRows; // parameter reassignment: safe in JS
 
