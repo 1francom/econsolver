@@ -23,11 +23,12 @@ import { buildUnifiedScript, modelConfigFromResult } from "./services/export/uni
 import { buildLeafletR, buildFoliumPy } from "./services/export/mapScript.js";
 import { getPlotHistory, getMapHistory } from "./services/Persistence/plotHistory.js";
 import { getArtifactOrder, saveArtifactOrder, makeArtifactId, orderArtifacts } from "./services/Persistence/artifactOrder.js";
-import { planExecutionOrder, detectInterleaving } from "./services/export/timelinePlan.js";
+import { planExecutionOrder, detectInterleaving, assignModelsToEstimates } from "./services/export/timelinePlan.js";
 import { loadProjectPipelines } from "./services/Persistence/indexedDB.js";
 import { ForestPlot } from "./components/modeling/resultDisplay.jsx";
 import { buildCoefGroups, hiddenCoefNames } from "./components/modeling/coefGroups.js";
 import { buildStargazer }      from "./services/export/latexTable.js";
+import { storedSteps } from "./services/Persistence/pipelineRecord.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 // ─── SAFE NUMBER FORMATTER ────────────────────────────────────────────────────
@@ -725,8 +726,8 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         for (const ds of availableDatasets) {
           const isActive = ds.filename === cleanedData?.filename;
           const pipe = isActive
-            ? (cleanedData?.pipeline ?? map[ds.id]?.pipeline ?? [])
-            : (map[ds.id]?.pipeline ?? []);
+            ? (cleanedData?.pipeline ?? storedSteps(map[ds.id]))
+            : storedSteps(map[ds.id]);
           const n = (Array.isArray(pipe) ? pipe : []).filter(s => s.type === "patch").length;
           if (n > 0) counts[ds.name ?? ds.filename ?? ds.id] = n;
         }
@@ -846,8 +847,8 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           name:     ds.name ?? ds.filename ?? ds.id,
           filename: dsRec.filename ?? ds.filename ?? null,
           pipeline: isActive
-            ? (cleanedData?.pipeline ?? dsRec.pipeline ?? [])
-            : (Array.isArray(dsRec.pipeline) ? dsRec.pipeline : []),
+            ? (cleanedData?.pipeline ?? storedSteps(dsRec))
+            : storedSteps(dsRec),
           loadOpts: ds.loadOpts ?? dsRec.loadOpts ?? null,
           // A derived dataset with no lineage record gets an explicit NOTE in the script.
           origin:   ds.origin ?? null,
@@ -937,19 +938,30 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         // Analysis blocks in the order they were run. Data prep is not
         // interleaved any more: every dataset has to exist before anything
         // reads it, and a derived one can only be built after its parent.
-        const all = [result, ...pinnedModels].filter(Boolean);
-        const matchModel = ev => {
-          const f = ev?.params?.filename, t = ev?.params?.type, y = ev?.params?.yVar;
-          return all.find(m => (m.spec?.filename ?? null) === f && (m.type ?? null) === t && (m.spec?.yVar ?? null) === y)
-              ?? all.find(m => (m.type ?? null) === t && (m.spec?.yVar ?? null) === y)
-              ?? null;
-        };
-        const seenModels = new Set();
-        for (const blk of (planExecutionOrder(timeline)?.blocks ?? [])) {
+        // The timeline records an estimation as (type, yVar, filename), which
+        // several pinned models can share — PS4 had four FE models on the same
+        // outcome. Matching against the whole list returned the first one every
+        // time, so ONE model was emitted and the other three printed "model not
+        // pinned". Each match therefore consumes its model, and anything the
+        // timeline never matched is appended after the loop rather than lost.
+        const candidates = modelsToReplicate();
+        const blocks = planExecutionOrder(timeline)?.blocks ?? [];
+        // Each estimation block consumes one model (see assignModelsToEstimates):
+        // matching against the whole list emitted one of four FE models on the
+        // same outcome and called the rest unpinned.
+        const estimateBlocks = blocks.filter(b => b.kind === "estimate");
+        const { matched, leftover } = assignModelsToEstimates(estimateBlocks.map(b => b.events?.[0]), candidates);
+        const modelFor = new Map(estimateBlocks.map((b, i) => [b, matched[i]]));
+        const notedBlocks = new Set();
+        for (const blk of blocks) {
           if (blk.kind === "estimate") {
-            const m = matchModel(blk.events?.[0]);
-            if (m && !seenModels.has(m)) { seenModels.add(m); items.push(modelItem(m)); }
-            else if (!m) items.push({ kind: "code", label: blk.label, code: `${comment} ${blk.label} — model not pinned; pin it in the Model tab to replicate` });
+            const m = modelFor.get(blk);
+            if (m) items.push(modelItem(m));
+            else if (!notedBlocks.has(blk.label)) {
+              // Re-runs of one spec produce several identical blocks; say it once.
+              notedBlocks.add(blk.label);
+              items.push({ kind: "code", label: blk.label, code: `${comment} ${blk.label} — not among the models being replicated; pin it in the Model tab to include it` });
+            }
           } else if (blk.kind === "explore") {
             for (const ev of (blk.events ?? [])) if (ev?.opType === "explore_stat") items.push(exploreItem(ev));
           } else if (blk.kind === "spatial") {
@@ -960,6 +972,9 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
             }
           }
         }
+        // A model the timeline never matched (pinned in an earlier session, or
+        // an event whose params drifted) still belongs in the script.
+        items.push(...leftover.map(modelItem));
       } else {
         items.push(...modelsToReplicate().map(modelItem));
         for (const ev of timeline.filter(e => e?.module === "explore" && e.opType === "explore_stat")) items.push(exploreItem(ev));

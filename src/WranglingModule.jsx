@@ -45,6 +45,7 @@ import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
 export { applyStep, runPipeline, runPipelineAsync } from "./pipeline/runner.js";
 import { buildDatasetContext, referencedDatasetIds } from "./pipeline/datasetContext.js";
+import { storedSteps } from "./services/Persistence/pipelineRecord.js";
 export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
@@ -166,10 +167,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         return { rows: ds.rawData.rows, headers: ds.rawData.headers };
       };
       const pipelineFor = (id) => {
-        const rec = stepsById[id];
-        return Array.isArray(rec?.steps) ? rec.steps
-             : Array.isArray(rec?.pipeline) ? rec.pipeline
-             : [];
+        return storedSteps(stepsById[id]);
       };
       try {
         const built = await buildDatasetContext(others, pipelineFor, loadRows, { only });
@@ -419,10 +417,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       gStepId = `G_${stepId}`;
       const selfDs  = { id: pid, name: filename, filename, loadOpts: rawData?._loadOpts ?? null };
       const rightDs = (allDatasets ?? []).find(d => d.id === s.rightId) ?? null;
-      const rightRec  = rightPipelines?.[s.rightId] ?? {};
-      const rightPipe = Array.isArray(rightRec.steps) ? rightRec.steps
-                      : Array.isArray(rightRec.pipeline) ? rightRec.pipeline
-                      : [];
+      const rightPipe = storedSteps(rightPipelines?.[s.rightId]);
       sessionDispatch({
         type: "ADD_GLOBAL_STEP",
         step: {
@@ -498,12 +493,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       const rightIds = [...new Set(staged.map(j => j.rightId).filter(Boolean))];
       const built = await buildDatasetContext(
         allDatasets ?? [],
-        (id) => {
-          const rec = rightPipelines?.[id] ?? {};
-          return Array.isArray(rec.steps) ? rec.steps
-               : Array.isArray(rec.pipeline) ? rec.pipeline
-               : [];
-        },
+        (id) => storedSteps(rightPipelines?.[id]),
         async (d) => {
           const tbl = d.rawData?._duckdb?.tableName;
           return tbl
@@ -546,10 +536,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     );
     const joinRecords = staged.map(j => {
       const rd = (allDatasets ?? []).find(d => d.id === j.rightId) ?? { id: j.rightId };
-      const rec = rightPipelines?.[j.rightId] ?? {};
-      const rp  = Array.isArray(rec.steps) ? rec.steps
-                : Array.isArray(rec.pipeline) ? rec.pipeline
-                : [];
+      const rp  = storedSteps(rightPipelines?.[j.rightId]);
       return {
         how: j.how ?? "left", leftKey: j.leftKey, rightKey: j.rightKey, suffix: j.suffix ?? "_r",
         right: freezeParent({ id:       rd.id,

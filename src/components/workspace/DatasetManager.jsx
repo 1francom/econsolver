@@ -23,6 +23,7 @@ import { createShare, listMyShares, revokeShare } from "../../services/sync/shar
 import { getSyncMeta, listProjects, loadProjectPipelines } from "../../services/Persistence/indexedDB.js";
 import { generateWorkspaceScript } from "../../pipeline/exporter.js";
 import { buildProjectExport, projectExportFilename } from "../../services/export/projectExport.js";
+import { storedSteps } from "../../services/Persistence/pipelineRecord.js";
 
 
 // ─── CASCADE HELPERS ──────────────────────────────────────────────────────────
@@ -255,7 +256,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
           id,
           name:     meta.name ?? id,
           filename: dsRec.filename ?? meta.filename ?? meta.loadOpts?.filename ?? null,
-          pipeline: Array.isArray(dsRec.pipeline) ? dsRec.pipeline : [],
+          pipeline: storedSteps(dsRec),
           loadOpts: dsRec.loadOpts ?? meta.loadOpts ?? null,
         };
       }

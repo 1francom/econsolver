@@ -186,3 +186,31 @@ export function summarizePlan(plan) {
     .map((block, index) => `${index + 1}. [${block.kind}] ${block.label}`)
     .join("\n");
 }
+
+// ─── MATCHING ESTIMATION BLOCKS TO PINNED MODELS ─────────────────────────────
+// A timeline estimation event records only (type, yVar, filename), which
+// several pinned models can share — LMU PS4 had four FE models on the same
+// outcome. Matching each event against the whole list returned the FIRST model
+// every time, so one model was emitted and the other three printed "model not
+// pinned" in the unified script. Each match therefore CONSUMES its model, and
+// whatever the timeline never matched comes back in `leftover` so the caller
+// can still emit it instead of losing it.
+/**
+ * @param {object[]} events      one estimation event per estimate block, in order
+ * @param {object[]} candidates  the models to replicate, in the order they should appear
+ * @returns {{ matched: (object|null)[], leftover: object[] }} matched is aligned with events
+ */
+export function assignModelsToEstimates(events = [], candidates = []) {
+  const used = new Set();
+  const key = (ev) => ({ f: ev?.params?.filename ?? null, t: ev?.params?.type ?? null, y: ev?.params?.yVar ?? null });
+  const matched = events.map(ev => {
+    const { f, t, y } = key(ev);
+    const free = candidates.filter(m => !used.has(m));
+    const hit = free.find(m => (m.spec?.filename ?? null) === f && (m.type ?? null) === t && (m.spec?.yVar ?? null) === y)
+             ?? free.find(m => (m.type ?? null) === t && (m.spec?.yVar ?? null) === y)
+             ?? null;
+    if (hit) used.add(hit);
+    return hit;
+  });
+  return { matched, leftover: candidates.filter(m => !used.has(m)) };
+}

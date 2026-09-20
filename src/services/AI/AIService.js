@@ -38,6 +38,7 @@ import { filterVariableNames, filterSampleRows } from "../Privacy/privacyFilter.
 import { detectPII } from "../Privacy/piiDetector.js";
 import { getSession } from "../auth/authService.js";
 import { isLogVar } from "../../core/validation/logVarDetection.js";
+import { collapseDataLines } from "./scriptNotesInput.js";
 
 const API_URL       = "https://api.anthropic.com/v1/messages";
 const MODEL         = "claude-sonnet-4-6";        // orchestrator: narratives, cleaning, comparison
@@ -1280,12 +1281,7 @@ export async function generateScriptNotes(script, language, { snapshot = null } 
   const cmt = language === "stata" ? "*" : "#";
   const langLabel = language === "r" ? "R" : language === "stata" ? "Stata" : "Python";
   const NL = String.fromCharCode(10);
-  const stripped = String(script ?? "")
-    .split(NL)
-    // numeric-only lines are pasted data (inject_column values, Stata input rows)
-    .filter(l => !(/[0-9]/.test(l) && /^[-+0-9.eE,\s]+$/.test(l.trim())))
-    .join(NL)
-    .slice(0, 40000);
+  const stripped = collapseDataLines(script, cmt);
   const user = [
     `LANGUAGE: ${langLabel}. COMMENT CHARACTER: ${cmt}`,
     snapshot ? `${NL}SESSION SNAPSHOT:${NL}${serializeSnapshot(snapshot)}` : "",
