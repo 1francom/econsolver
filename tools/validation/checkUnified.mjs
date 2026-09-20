@@ -47,7 +47,12 @@ const DEMO_MODELS = {
 const DEMO_EXTRAS = {
   PS5: {
     pins: [{ label: "mean vote share by year", dataset: "PS5_dinas2019_data.RData",
-      params: { kind: "timeseries", yCol: "gdvote", timeCol: "year", groupCol: null, agg: "mean" } }],
+      params: { kind: "timeseries", yCol: "gdvote", timeCol: "year", groupCol: null, agg: "mean" } },
+      // A pin taken under an Explore filter, grouped: exercises both fixes —
+      // the filter must be applied and each group must get its own line.
+      { label: "vote share by year, treated only", dataset: "PS5_dinas2019_data.RData",
+        params: { kind: "timeseries", yCol: "gdvote", timeCol: "year", groupCol: "municipality", agg: "mean",
+          filters: [{ col: "trarrprop", op: "gt", val: "0" }, { col: "municipality", op: "in", val: "2, 3, 4" }] } }],
     plots: [{ name: "vote vs distance 2014", datasetName: "subset_2014",
       layers: [{ id: "a", geom: "point", aes: { x: "logdist", y: "gdvote", color: "" }, visible: true, position: "identity" },
                { id: "b", geom: "smooth", aes: { x: "logdist", y: "gdvote", color: "" }, visible: true, position: "identity" }] }],
@@ -114,7 +119,7 @@ for (const d of proj.datasets.values()) {
     if (dta !== d.file && existsSync(dta)) copyFileSync(dta, path.join(dir, path.basename(dta)));
   }
   wsDatasets[d.id] = { id: d.id, name: d.name, filename: d.file ? path.basename(d.file) : d.filename,
-    loadOpts: d.loadOpts, pipeline: d.steps ?? [] };
+    loadOpts: d.loadOpts, pipeline: d.steps ?? [], origin: d.origin ?? null };
 }
 const fwd = (p) => p.replace(/\\/g, "/");
 const dumpFile = (lang, name) => fwd(path.join(dir, `${lang}_${name}.csv`));

@@ -10,6 +10,9 @@
 //
 // Public: transpileExploreStat(params, language, dfVar) -> string|null
 
+import { predicateToR, predicateToPython, predicateToStata } from "../../pipeline/predicateExport.js";
+import { normalizeOp } from "../../pipeline/predicate.js";
+
 const rStr  = (s) => `"${String(s ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 const pyStr = rStr;
 
@@ -118,7 +121,24 @@ function stataExplore(p) {
     case "histogram":    return `histogram ${p.col}, bins(${Number(p.bins) || 30})`;
     case "barchart":     return `graph bar (count), over(${p.col})`;
     case "spaghetti":    return `xtline ${p.col}, overlay i(${p.entityCol}) t(${p.timeCol})`;
-    case "timeseries":   return `* time series: ${p.agg ?? "mean"}(${p.yCol}) over ${p.timeCol}\ncollapse (${p.agg ?? "mean"}) ${p.yCol}, by(${p.timeCol}${p.groupCol ? ` ${p.groupCol}` : ""})\ntwoway line ${p.yCol} ${p.timeCol}`;
+    case "timeseries": {
+      // `twoway line y t` after a grouped collapse draws ONE polyline through
+      // every group in file order, which is not the chart the pin shows (R gets
+      // color = group, pandas unstacks). xtline overlays one line per group.
+      const agg = p.agg ?? "mean";
+      const head = `* time series: ${agg}(${p.yCol}) over ${p.timeCol}${p.groupCol ? ` by ${p.groupCol}` : ""}`;
+      if (!p.groupCol) {
+        return [head, `collapse (${agg}) ${p.yCol}, by(${p.timeCol})`, `sort ${p.timeCol}`,
+                `twoway line ${p.yCol} ${p.timeCol}`].join("\n");
+      }
+      return [head,
+        `collapse (${agg}) ${p.yCol}, by(${p.timeCol} ${p.groupCol})`,
+        `capture drop _lx_grp`,
+        `egen _lx_grp = group(${p.groupCol}), label`,
+        `xtset _lx_grp ${p.timeCol}`,
+        `xtline ${p.yCol}, overlay`,
+      ].join("\n");
+    }
     case "correlation":  return `correlate ${cols}`;
     case "acf_pacf":     return `ac ${p.yCol}\npac ${p.yCol}`;
     case "adf":          return `dfuller ${p.yCol}`;
@@ -127,15 +147,59 @@ function stataExplore(p) {
   }
 }
 
-export function transpileExploreStat(params = {}, language = "r", dfVar = "df") {
-  const code = language === "python" ? pyExplore(params, dfVar)
-             : language === "stata"  ? stataExplore(params)
-             :                         rExplore(params, dfVar);
-  if (!code) return null;
-  // The pin records the active QuickFilter — note it so the user re-applies it.
-  if (Array.isArray(params.filters) && params.filters.length) {
-    const note = language === "stata" ? "* " : language === "python" ? "# " : "# ";
-    return `${note}NOTE: this pin was taken under an active Explore filter — re-apply it before running.\n${code}`;
+// The Explore filter bar's conditions ({col, op, val}), as a predicate node.
+// Conditions the app itself treats as INERT are dropped so the script filters
+// exactly the rows the pin saw: `in` with nothing selected keeps every row, and
+// a half-typed numeric comparison does too (see matchCond in ExplorerModule).
+export function pinFilterNode(filters) {
+  const children = [];
+  for (const f of (Array.isArray(filters) ? filters : [])) {
+    if (!f?.col || !f?.op) continue;
+    const op = normalizeOp(f.op);
+    // The filter bar writes `val`; a logged/older pin can carry `value`.
+    const raw = f.val ?? f.value;
+    if (op === "in" || op === "nin") {
+      const values = Array.isArray(raw) ? raw
+        : String(raw ?? "").split(",").map(v => v.trim()).filter(Boolean);
+      if (!values.length) continue;
+      children.push({ type: "condition", col: f.col, op, values });
+      continue;
+    }
+    if (["gt", "lt", "gte", "lte"].includes(op) && !Number.isFinite(parseFloat(raw))) continue;
+    children.push({ type: "condition", col: f.col, op, value: raw });
   }
-  return code;
+  if (!children.length) return null;
+  return children.length === 1 ? children[0] : { type: "and", children };
+}
+
+export function transpileExploreStat(params = {}, language = "r", dfVar = "df") {
+  // A filtered pin works on its own copy of the data, so the block cannot change
+  // what the next one sees. In Stata that means `keep if` — the caller runs pins
+  // inside preserve/restore (services/export/unifiedScript.js).
+  let df = dfVar;
+  let pre = [];
+  const node = pinFilterNode(params.filters);
+  if (node) {
+    try {
+      if (language === "stata") {
+        pre = [`keep if ${predicateToStata(node)}`];
+      } else if (language === "python") {
+        df = "_pin_d";
+        pre = [`_pin_d = ${dfVar}[${predicateToPython(node, { df: dfVar })}]`];
+      } else {
+        df = ".pin_d";
+        pre = [`.pin_d <- dplyr::filter(${dfVar}, ${predicateToR(node)})`];
+      }
+    } catch (e) {
+      // An operator no compiler can express must not silently widen the sample.
+      const cm = language === "stata" ? "*" : "#";
+      df = dfVar;
+      pre = [`${cm} NOTE: this pin's Explore filter could not be translated (${e.message}) — re-apply it before running.`];
+    }
+  }
+  const code = language === "python" ? pyExplore(params, df)
+             : language === "stata"  ? stataExplore(params)
+             :                         rExplore(params, df);
+  if (!code) return null;
+  return [...pre, code].join("\n");
 }

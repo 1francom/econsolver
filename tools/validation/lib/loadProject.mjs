@@ -114,6 +114,10 @@ export async function loadProjectUnit(unit, { dir = path.join(VAL, unit) } = {})
       filename: meta.filename,
       file: src,
       loadOpts: meta.loadOpts ?? null,
+      // Which dataset it came from. A derived dataset with no lineage record
+      // needs it, so the emitted script carries the NOTE saying it cannot be
+      // rebuilt (the app passes the same field from its registry).
+      origin: meta.origin ?? null,
       rawData: parsed,
     });
   }

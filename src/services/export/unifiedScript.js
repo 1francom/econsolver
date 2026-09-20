@@ -150,7 +150,12 @@ export function buildUnifiedScript({ lang, datasets = {}, globalPipeline = [], i
   // ── 1. Data ────────────────────────────────────────────────────────────────
   out.push(section(lang, "1. Data"));
   const ws = generateWorkspaceScript({ language: lang, datasets, globalPipeline });
-  out.push(ws.perDataset);
+  // The workspace script opens with its own `version 17` / `set more off`; this
+  // script already set them (plus `clear all`), so the repeat is dropped.
+  const NL = String.fromCharCode(10);
+  out.push(lang === "stata"
+    ? ws.perDataset.split(NL).filter(l => !/^(version 17|set more off)$/.test(l.trim())).join(NL)
+    : ws.perDataset);
   if (ws.crossDataset?.trim()) out.push(ws.crossDataset);
   out.push("");
 

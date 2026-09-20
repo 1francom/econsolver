@@ -68,6 +68,50 @@ check("T5 an item whose dataset is not in the project says so", () => {
   assert.match(s, /NOTE: the dataset of this block \(gone\.csv\) is not in this project/);
 });
 
+check("T7 a derived dataset with no lineage record is flagged, one with lineage is not", () => {
+  // `origin` set + no G-step building it = saved before lineage was recorded:
+  // nothing can rebuild it from raw data, and the script must say so above the
+  // load line instead of quietly reading a file that does not exist.
+  const orphan = { ...datasets, nw: { id: "nw", name: "no_world", filename: "no_world", origin: "raw", pipeline: [] } };
+  for (const lang of ["r", "stata", "python"]) {
+    const s = buildUnifiedScript({ lang, datasets: orphan, globalPipeline, items: [] });
+    assert.match(s, /NOTE: no_world was derived inside Litux before its lineage was recorded/, lang);
+    // `subset_2014` IS built by a G-step, so it must not be flagged.
+    assert.doesNotMatch(s, /NOTE: subset_2014 was derived/, lang);
+  }
+});
+
+check("T8 Stata setup is not repeated once the workspace section is inlined", () => {
+  const s = build("stata");
+  for (const line of ["clear all", "version 17", "set more off"]) {
+    assert.equal((s.match(new RegExp(`^${line}$`, "gm")) ?? []).length, 1, line);
+  }
+});
+
+check("T9 a pin taken under an Explore filter applies it, on its own copy", () => {
+  const filtered = [{ kind: "explore", label: "mean y, treated", dataset: "raw",
+    params: { kind: "timeseries", yCol: "y", timeCol: "year", groupCol: "g", agg: "mean",
+      filters: [{ col: "y", op: "gt", val: "0" }, { col: "g", op: "in", val: "a, b" },
+                { col: "z", op: "gt", val: "" }] } }];
+  const mk = (lang) => buildUnifiedScript({ lang, datasets, globalPipeline, items: filtered });
+  // Stata filters in place — the caller wraps pins in preserve/restore.
+  assert.match(mk("stata"), /preserve\n(?:.*\n)*?keep if \(\(!missing\(y\) & y > 0\) & \(g == "a" \| g == "b"\)\)\n(?:.*\n)*?restore/);
+  // R/Python must not overwrite the shared frame.
+  assert.match(mk("r"), /\.pin_d <- dplyr::filter\(df_panel, /);
+  assert.match(mk("python"), /_pin_d = df_panel\[/);
+  // A half-typed numeric condition is inert in the app, so it must not appear.
+  for (const lang of ["r", "stata", "python"]) assert.doesNotMatch(mk(lang), /\bz\b/, lang);
+});
+
+check("T10 a grouped Stata time series draws one line per group", () => {
+  const s = buildUnifiedScript({ lang: "stata", datasets, globalPipeline,
+    items: [{ kind: "explore", label: "ts", dataset: "raw",
+      params: { kind: "timeseries", yCol: "y", timeCol: "year", groupCol: "g", agg: "mean" } }] });
+  // `twoway line y year` after a grouped collapse is ONE polyline through every group.
+  assert.match(s, /egen _lx_grp = group\(g\), label\nxtset _lx_grp year\nxtline y, overlay/);
+  assert.doesNotMatch(s, /twoway line y year/);
+});
+
 check("T6 datasets resolve by id, name or filename", () => {
   assert.equal(resolveDataset(datasets, "sub")?.id, "sub");
   assert.equal(resolveDataset(datasets, "panel.csv")?.id, "raw");
