@@ -3327,7 +3327,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "n",       value: r.n,                              color: C.text },
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} factorMap={r.factorMap} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel={r.testStatLabel} irr={r.IRR} factorMap={r.factorMap} />
                 <PlotSelector accentColor={C.violet} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
                     node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poisson" filename="poisson_coefficients.svg" /> },
@@ -3365,7 +3365,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     : `AIC/BIC penalty includes entity FEs (k = ${r.k} regressors + ${r.nUnits ?? Object.keys(r.alphas ?? {}).length} entity FEs — comparable to R LSDV AIC)`}
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} factorMap={r.factorMap} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel={r.testStatLabel} irr={r.IRR} factorMap={r.factorMap} />
                 {isNegBin && (
                   <div style={{ marginTop: "1rem", marginBottom: "1rem", padding: "0.85rem 1rem", background: C.surface2, border: `1px solid ${C.violet}40`, borderLeft: `3px solid ${C.violet}`, borderRadius: 4 }}>
                     <div style={{ fontSize: T.caption.fontSize, color: C.violet, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6, fontFamily: T.code.fontFamily }}>

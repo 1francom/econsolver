@@ -5,7 +5,7 @@
 // AIService, and the export scripts — adding future estimators (GMM, DML, …) requires
 // only a new wrapXxx() sub-function here, zero changes elsewhere.
 //
-// No React. No side effects. No external imports.
+// No React. No side effects. Only pure-math imports (calcEngine quantiles).
 //
 // EstimationResult shape:
 //   id           string        — crypto.randomUUID()
@@ -79,6 +79,8 @@
 //   warnings     string[]         — engine-emitted warnings (collinearity dropped, weak IV, non-convergence, …)
 //   formula      string|null      — human-readable spec, e.g. "wage ~ educ + exper | entity"
 
+import { qt, qnorm } from "./calcEngine.js";
+
 // ─── ESTIMATOR METADATA (id, label, color) ───────────────────────────────────
 // Duplicated from EstimatorSidebar.jsx to avoid a circular dependency.
 // Keep in sync with MODELS array in EstimatorSidebar.jsx.
@@ -139,27 +141,16 @@ function clean(arr) {
 // Two-tailed t critical value at α=0.05. Linear-interpolated lookup table; falls
 // back to 1.96 for df>200 or unknown. Used only for ci95 fallback when the engine
 // does not emit one directly.
+// Exact t quantile (matches R's qt / Stata's invttail to ~1e-10). The old
+// lookup table returned 1.96 above df = 200 and interpolated linearly below.
 function tCrit95(df) {
-  if (df == null || df <= 0 || df > 200) return 1.96;
-  const T = [
-    [1,12.706],[2,4.303],[3,3.182],[4,2.776],[5,2.571],
-    [6,2.447],[7,2.365],[8,2.306],[9,2.262],[10,2.228],
-    [12,2.179],[15,2.131],[20,2.086],[25,2.060],[30,2.042],
-    [40,2.021],[60,2.000],[80,1.990],[120,1.980],[200,1.972],
-  ];
-  for (let i=0; i<T.length; i++) {
-    if (df <= T[i][0]) {
-      if (i === 0) return T[0][1];
-      const [d1,c1] = T[i-1], [d2,c2] = T[i];
-      return c1 + (c2-c1) * (df-d1) / (d2-d1);
-    }
-  }
-  return 1.96;
+  if (df == null || !Number.isFinite(df) || df <= 0) return qnorm(0.975);
+  return qt(0.975, df);
 }
 
 function buildCI95(beta, se, df, label) {
   if (!beta?.length || !se?.length) return null;
-  const crit = label === "z" ? 1.96 : tCrit95(df);
+  const crit = label === "z" ? qnorm(0.975) : tCrit95(df);
   const lo = beta.map((b,i) => Number.isFinite(b) && Number.isFinite(se[i]) ? b - crit*se[i] : NaN);
   const hi = beta.map((b,i) => Number.isFinite(b) && Number.isFinite(se[i]) ? b + crit*se[i] : NaN);
   return { lo, hi };

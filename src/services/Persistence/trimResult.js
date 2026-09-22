@@ -19,7 +19,7 @@ export function trimResult(r) {
   if (!r || typeof r !== "object") return null;
   const {
     id, type, label, modelLabel, datasetId, spec, yVar, xVars, zVars, wVars, varNames,
-    beta, se, pVals, tStats, testStats, R2, adjR2, R2Within, R2Between, units, n, df, Fstat, Fpval, absorbedRegressors,
+    beta, se, pVals, tStats, testStats, testStatLabel, R2, adjR2, R2Within, R2Between, units, n, df, Fstat, Fpval, absorbedRegressors,
     att, attSE, attP, late, lateSE, lateP, seType, kernel, bandwidth, cutoff,
     runningVar, treatVar, postVar, entityCol, timeCol,
     firstStages, jStat, jDf, jPval, kappa, factorMap,
@@ -31,7 +31,13 @@ export function trimResult(r) {
     label: label ?? modelLabel,
     spec: spec ?? { yVar, xVars, zVars, wVars, entityCol, timeCol, postVar, treatVar, runningVar, cutoff, bandwidth, kernel },
     varNames, beta, se, pVals,
+    // Both spellings: EstimationResult carries `testStats` and nearly every
+    // result panel reads it, while a few (IV-Poisson, Fuzzy RDD) read the
+    // engine's `tStats`. Keeping only one left restored pins with an empty
+    // t column until the model was re-estimated.
     tStats: tStats ?? testStats,
+    testStats: testStats ?? tStats,
+    testStatLabel,
     R2, adjR2, R2Within, R2Between, units, n, df, Fstat, Fpval, absorbedRegressors,
     att, attSE, attP, late, lateSE, lateP, seType,
     ...(Array.isArray(firstStages)

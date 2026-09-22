@@ -14,6 +14,7 @@ import { downloadReplicationBundle } from "../../services/export/replicationBund
 import { isLogVarName } from "../../core/validation/logVarDetection.js";
 import { buildCoefGroups, visibleCoefNames } from "./coefGroups.js";
 import { stripGroundRect } from "../../services/export/plotExporter.js";
+import { qt, qnorm } from "../../math/calcEngine.js";
 
 export function Lbl({ children, color }) {
   const { C, T } = useTheme();
@@ -308,22 +309,14 @@ export function ForestPlot({
 }
 
 // ─── COEFFICIENT TABLE ────────────────────────────────────────────────────────
+// Exact t quantile, as R's confint.lm and Stata's regress report it. The old
+// lookup table returned 1.96 for every df >= 120 and interpolated linearly
+// below that, so intervals sat visibly off Stata (1.9647 at df = 500).
+// z-statistic models (logit/probit/Poisson) use the normal quantile, as
+// Stata and R do for them.
 function ciMultiplier(df) {
-  if (!df || df >= 120) return 1.96;
-  const table = {
-    1:12.706,2:4.303,3:3.182,4:2.776,5:2.571,6:2.447,7:2.365,
-    8:2.306,9:2.262,10:2.228,15:2.131,20:2.086,25:2.060,30:2.042,
-    40:2.021,60:2.000,80:1.990,100:1.984,120:1.980,
-  };
-  const keys = Object.keys(table).map(Number).sort((a, b) => a - b);
-  for (let k = keys.length - 1; k >= 0; k--) {
-    if (df >= keys[k]) {
-      const lo = keys[k], hi = keys[k + 1];
-      if (!hi) return table[lo];
-      return table[lo] + ((df - lo) / (hi - lo)) * (table[hi] - table[lo]);
-    }
-  }
-  return 1.96;
+  if (!df || !Number.isFinite(df) || df <= 0) return qnorm(0.975);
+  return qt(0.975, df);
 }
 
 export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [], binaryVars = [], irr = null, factorMap = null }) {
@@ -332,7 +325,8 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
   const [open, setOpen] = useState(null);
   const [copied, setCopied] = useState(null);
   const [showIrr, setShowIrr] = useState(false);
-  const z    = ciMultiplier(df);
+  const ciDf = statLabel === "z" ? null : df;
+  const z    = ciMultiplier(ciDf);
   const irrMode = showIrr && irr?.length > 0;
 
   function toLatex() {
@@ -754,7 +748,7 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
       }}>
         <span>● significant at 5% · SE in parentheses</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span>95% CI = β̂ ± {z.toFixed(3)} × SE{df ? ` (t-dist, df=${df})` : " (z≈1.96)"}</span>
+          <span>95% CI = β̂ ± {z.toFixed(3)} × SE{ciDf ? ` (t-dist, df=${ciDf})` : " (normal)"}</span>
           {(["latex", "md"]).map(fmt => (
             <button key={fmt} onClick={() => copyFmt(fmt)} style={{
               background: "none", border: `1px solid ${C.border}`, borderRadius: 3,
