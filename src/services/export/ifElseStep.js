@@ -4,8 +4,10 @@
 //
 //   nn = cond ? trueVal : falseVal, where a branch value that NAMES A COLUMN
 //   takes that column's value in the row, and anything else is a literal
-//   (typed numbers become numbers). A condition that errors or is missing
-//   takes the FALSE branch.
+//   (typed numbers become numbers). A condition that is NA gives NA, as
+//   dplyr::if_else does — the app's row expressions follow R's missing-value
+//   rules (pipeline/rowExpr.js), and the condition is emitted from the same
+//   tree (rowExprExport.js). A condition that ERRORS takes the FALSE branch.
 //
 // Every copy emitted the branch as a literal, so PS5's
 // `if_else(year == 2015, logdist, 0)` exported as the STRING "logdist": in R a
@@ -16,6 +18,7 @@
 
 import { coerceLiteral } from "../../pipeline/literals.js";
 import { jsExprToR, jsExprToPython, jsExprToStata } from "../../pipeline/stepTranslators.js";
+import { rowExprR, rowCondPy, rowExprSt, stataAssignLines } from "./rowExprExport.js";
 
 const dq = (v) => String(v ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 // Could this value be a column name? Numbers and blanks cannot.
@@ -33,29 +36,41 @@ const pyLit = (v) => {
   return typeof c === "number" ? String(c) : `"${dq(c)}"`;
 };
 
+const tryOr = (f, g) => { try { return f(); } catch { return g(); } };
+
 export function ifElseR(step, df = "df") {
-  const cond = jsExprToR(step.cond);
+  const cond = tryOr(() => rowExprR(step.cond), () => jsExprToR(step.cond));
   if (!cond) throw new Error("condition cannot be translated");
   const val = (v) => maybeColumn(v)
     ? `(if (${JSON.stringify(v)} %in% names(${df})) ${df}[[${JSON.stringify(v)}]] else ${rLit(v)})`
     : rLit(v);
   // Base ifelse, not dplyr::if_else: the branches may legitimately differ in
-  // type (a column vs a literal), and a missing condition must take the FALSE
-  // branch, as in the app — hence the is.na guard.
-  return `${df} <- ${df} |> dplyr::mutate(${rName(step.nn)} = { .c <- (${cond}); ifelse(!is.na(.c) & .c, ${val(step.trueVal)}, ${val(step.falseVal)}) })`;
+  // type (a column vs a literal). A missing condition gives NA, as in the app.
+  return `${df} <- ${df} |> dplyr::mutate(${rName(step.nn)} = ifelse(${cond}, ${val(step.trueVal)}, ${val(step.falseVal)}))`;
 }
 
 export function ifElsePython(step, df = "df") {
-  const cond = jsExprToPython(step.cond, df);
-  if (!cond) throw new Error("condition cannot be translated");
   const val = (v) => maybeColumn(v)
     ? `(${df}[${JSON.stringify(v)}] if ${JSON.stringify(v)} in ${df}.columns else ${pyLit(v)})`
     : pyLit(v);
+  let mask;
+  try { mask = rowCondPy(step.cond, df); } catch { mask = null; }
+  if (mask) {
+    // <NA> condition → NA, as in the app.
+    return [
+      `_lx_c = ${mask}`,
+      `${df}[${JSON.stringify(step.nn)}] = pd.Series(${val(step.trueVal)}, index=${df}.index).where(_lx_c.fillna(False).astype(bool), ${val(step.falseVal)}).mask(_lx_c.isna())`,
+    ].join("\n");
+  }
+  const cond = jsExprToPython(step.cond, df);
+  if (!cond) throw new Error("condition cannot be translated");
   return `${df}[${JSON.stringify(step.nn)}] = np.where(pd.Series(${cond}, index=${df}.index).fillna(False).astype(bool), ${val(step.trueVal)}, ${val(step.falseVal)})`;
 }
 
 export function ifElseStata(step) {
-  const cond = jsExprToStata(step.cond);
+  let lowered = null;
+  try { lowered = rowExprSt(step.cond); } catch { /* text fallback below */ }
+  const cond = lowered ? lowered.v : jsExprToStata(step.cond);
   if (!cond) throw new Error("condition cannot be translated");
   const nn = String(step.nn).replace(/[^A-Za-z0-9_]/g, "_");
   const lines = [`capture drop ${nn}`];
@@ -74,7 +89,12 @@ export function ifElseStata(step) {
   };
   const tv = val(step.trueVal, "tv");
   const fv = val(step.falseVal, "fv");
-  // cond()'s 4th argument is the missing-condition case → the FALSE branch.
+  if (lowered) {
+    // Missing wherever the condition is NA (the lowering's `m`), as in the app.
+    lines.push(...stataAssignLines(step.nn, { v: `cond(${cond}, ${tv}, ${fv})`, m: lowered.m }));
+    return lines.join("\n");
+  }
+  // Text fallback: cond()'s 4th argument is the missing-condition case.
   lines.push(`gen ${nn} = cond(${cond}, ${tv}, ${fv}, ${fv})`);
   return lines.join("\n");
 }

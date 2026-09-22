@@ -46,8 +46,9 @@ check("T3 Stata aggregates the argument, not a by-column", () => {
 });
 
 check("T4 a row expression is parenthesised for pandas precedence", () => {
-  // `a != 0 & b == 1` in pandas groups as `a != (0 & b) == 1`.
-  assert.match(groupedMutatePython(ps5), /\(\(df\["trarrprop"\] != 0\) & \(df\["year"\] == 2015\)\)/);
+  // `a != 0 & b == 1` in pandas groups as `a != (0 & b) == 1`. Columns are read
+  // as nullable dtypes, so a missing trarrprop gives <NA>, not TRUE.
+  assert.match(groupedMutatePython(ps5), /\(\(df\["trarrprop"\]\.convert_dtypes\(\) != 0\) & \(df\["year"\]\.convert_dtypes\(\) == 2015\)\)/);
   assert.match(groupedMutateStata(ps5), /max\(_lx_k & !missing\(_lx_t0\) & _lx_t0 != 0\)/);
 });
 
@@ -75,13 +76,16 @@ check("T8 an if_else branch naming a column is resolved at run time", () => {
   assert.match(ifElsePython(ife), /\(df\["logdist"\] if "logdist" in df\.columns else "logdist"\)/);
   const st = ifElseStata(ife);
   assert.match(st, /capture confirm variable logdist/);
-  assert.match(st, /gen logdist_post = cond\(year == 2015, `_lx_tv', 0, 0\)/);
+  assert.match(st, /generate double _lx_v = cond\(\(year == 2015\), `_lx_tv', 0\)/);
 });
 
-check("T9 numeric literals stay numbers, missing condition takes the FALSE branch", () => {
+check("T9 numeric literals stay numbers; a missing condition gives missing (R's rule)", () => {
   const post = { type: "if_else", nn: "post", cond: "year == 2014", trueVal: "0", falseVal: "1" };
-  assert.match(ifElseR(post), /ifelse\(!is\.na\(\.c\) & \.c, 0, 1\)/);
-  assert.match(ifElseStata(post), /cond\(year == 2014, 0, 1, 1\)/);
+  assert.match(ifElseR(post), /ifelse\(\(year == 2014\), 0, 1\)/);
+  const st = ifElseStata(post);
+  assert.match(st, /cond\(\(year == 2014\), 0, 1\)/);
+  assert.match(st, /replace _lx_v = \. if missing\(year\)/);
+  assert.match(ifElsePython(post), /\.mask\(_lx_c\.isna\(\)\)/);
 });
 
 check("T10 numeric-looking eq/neq compare numerically on a numeric column", () => {

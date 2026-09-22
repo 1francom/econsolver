@@ -19,7 +19,8 @@ import { geocodeRowsFromCache } from "../services/data/geocoding.js";
 import { PROTECTED_ROW_ID_COLS } from "../services/data/rowIdentity.js";
 import { assignVector, mulberry32 } from "../core/generate/vectorAssign.js";
 import { drawSamples } from "../math/dgpDraw.js";
-import { isSafeExpr, translateRInOperator } from "./exprGuard.js";
+import { isSafeExpr } from "./exprGuard.js";
+import { makeRowFn, compileRowExpr, NA_OPS, isNA } from "./rowExpr.js";
 import { evalPredicate, normalizeOp } from "./predicate.js";
 import { coerceLiteral } from "./literals.js";
 import { extractAggregateCalls, reduceAggregate } from "./groupExpr.js";
@@ -218,13 +219,13 @@ export function applyStep(rows, headers, s, context = {}) {
         // Rewrite R-style `%in%` to JS array membership before compiling — a
         // local shadow copy, never mutating the caller's stored step (which
         // must keep its original R-like text for replication-script export).
-        s = { ...s, expr: translateRInOperator(s.expr) };
+        // Missing values follow R (see rowExpr.js); a row whose condition is
+        // NA is dropped, as dplyr::filter drops it.
         if (!isSafeExpr(s.expr)) break; // SECURITY: reject denylisted identifiers on the sync path
         const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
-        // eslint-disable-next-line no-new-func
-        let filterFn; try { filterFn = new Function(...safeH, `"use strict"; return !!(${s.expr});`); } catch { break; }
+        let filterFn; try { filterFn = makeRowFn(s.expr, safeH); } catch { break; }
         R = rows.filter(r => {
-          try { return filterFn(...safeH.map(h => r[h] ?? null)); } catch { return true; }
+          try { return !!filterFn(...safeH.map(h => r[h] ?? null)); } catch { return true; }
         });
       } else if (s.predicate) {
         R = rows.filter(r => evalPredicate(s.predicate, r));
@@ -964,8 +965,8 @@ export function applyStep(rows, headers, s, context = {}) {
 
     case "mutate": {
       const helpers = {
-        ifelse:   (c, t, f) => c ? t : f,
-        between:  (x, lo, hi) => (typeof x === "number" && x >= lo && x <= hi) ? 1 : 0,
+        ifelse:   (c, t, f) => isNA(c) ? null : (c ? t : f),
+        between:  (x, lo, hi) => typeof x !== "number" || Number.isNaN(x) ? null : (x >= lo && x <= hi) ? 1 : 0,
         log:      (x) => (typeof x === "number" && x > 0) ? Math.log(x) : null,
         log2:     (x) => (typeof x === "number" && x > 0) ? Math.log2(x) : null,
         log10:    (x) => (typeof x === "number" && x > 0) ? Math.log10(x) : null,
@@ -993,13 +994,12 @@ export function applyStep(rows, headers, s, context = {}) {
         as_integer: (x) => { if (x === null || x === undefined) return null; const n = Number(x); return isFinite(n) ? Math.trunc(n) : null; },
         as_factor:  (x) => (x === null || x === undefined) ? null : String(x),
       };
-      // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
-      s = { ...s, expr: translateRInOperator(s.expr) };
+      // Missing values follow R — see rowExpr.js (which also handles %in%).
       const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       const pNames = [...Object.keys(helpers), "row", ...safeH];
       if (!isSafeExpr(s.expr)) break; // SECURITY: reject denylisted identifiers on the sync path
       let fn;
-      try { fn = new Function(...pNames, `"use strict";return (${s.expr});`); } catch { break; }
+      try { fn = makeRowFn(s.expr, pNames); } catch { break; }
       R = rows.map(r => {
         const pVals = [...Object.values(helpers), r, ...safeH.map(h => r[h] ?? null)];
         let val = null;
@@ -1018,12 +1018,10 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.trueVal:  literal value or column name for true branch
       // s.falseVal: literal value or column name for false branch
       // s.nn:       output column name
-      // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
-      s = { ...s, cond: translateRInOperator(s.cond) };
+      // A condition that is NA gives NA, as dplyr::if_else does (rowExpr.js).
       const safeH_ife = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       if (!isSafeExpr(s.cond)) break; // SECURITY: reject denylisted identifiers on the sync path
-      // eslint-disable-next-line no-new-func
-      let ifeFn; try { ifeFn = new Function(...safeH_ife, `"use strict"; return !!(${s.cond});`); } catch { break; }
+      let ifeFn; try { ifeFn = makeRowFn(s.cond, safeH_ife); } catch { break; }
       R = rows.map(r => {
         let result = false;
         try { result = ifeFn(...safeH_ife.map(h => r[h] ?? null)); } catch {}
@@ -1034,7 +1032,7 @@ export function applyStep(rows, headers, s, context = {}) {
         // so a column named e.g. "2020" is not turned into a number.
         const tv = H.includes(s.trueVal)  ? r[s.trueVal]  : coerceLiteral(s.trueVal);
         const fv = H.includes(s.falseVal) ? r[s.falseVal] : coerceLiteral(s.falseVal);
-        return { ...r, [s.nn]: result ? tv : fv };
+        return { ...r, [s.nn]: isNA(result) ? null : result ? tv : fv };
       });
       if (!H.includes(s.nn)) H = [...H, s.nn];
       break;
@@ -1044,13 +1042,11 @@ export function applyStep(rows, headers, s, context = {}) {
       // s.cases:      [{ cond: string, val: string|number }, ...]
       // s.defaultVal: fallback value when no condition matches
       // s.nn:         output column name
-      // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
-      s = { ...s, cases: (s.cases ?? []).map(c => ({ ...c, cond: translateRInOperator(c.cond) })) };
+      // An NA condition does not match — dplyr::case_when treats it as FALSE.
       const safeH_cw = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
       if ((s.cases ?? []).some(c => !isSafeExpr(c.cond))) break; // SECURITY: reject denylisted identifiers
       const caseFns = (s.cases ?? []).map(c => {
-        // eslint-disable-next-line no-new-func
-        try { return new Function(...safeH_cw, `"use strict"; return !!(${c.cond});`); }
+        try { return makeRowFn(c.cond, safeH_cw); }
         catch { return null; }
       });
       // Case values come from text inputs — coerce numeric-looking ones once,
@@ -1079,14 +1075,11 @@ export function applyStep(rows, headers, s, context = {}) {
       const values = Array.isArray(s.values) ? s.values.map(coerceLiteral) : [];
       let evalRule;
       if (s.mode === "conditional") {
-        // Rewrite R-style `%in%` to JS array membership — local shadow copy only.
-        s = { ...s, rules: (s.rules ?? []).map(rule => ({ ...rule, expr: translateRInOperator(rule.expr) })) };
         const safeH = H.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
         // compile one predicate per rule - identical to the existing case_when case
         const ruleFns = (s.rules ?? []).map(rule => {
           if (!isSafeExpr(rule.expr)) return null; // SECURITY: reject denylisted identifiers
-          // eslint-disable-next-line no-new-func
-          try { return new Function(...safeH, `"use strict"; return !!(${rule.expr});`); }
+          try { return makeRowFn(rule.expr, safeH); }
           catch { return null; }
         });
         // A rule (or the else branch) may draw from a distribution instead of
@@ -1330,7 +1323,7 @@ export function applyStep(rows, headers, s, context = {}) {
           allHeaders.forEach(h => { colArrays[h] = filtRows.map(r => r[h]); });
           const gh = makeGH(filtRows);
           const ROW_H = {
-            ifelse:(t,a,b)=>t?a:b, between:(v,lo,hi)=>v>=lo&&v<=hi,
+            ifelse:(t,a,b)=>isNA(t)?null:t?a:b, between:(v,lo,hi)=>isNA(v)?null:v>=lo&&v<=hi,
             log:Math.log, log2:Math.log2, log10:Math.log10, sqrt:Math.sqrt,
             exp:Math.exp, abs:Math.abs, round:Math.round, floor:Math.floor,
             ceil:Math.ceil, sign:Math.sign,
@@ -1362,13 +1355,13 @@ export function applyStep(rows, headers, s, context = {}) {
             const hoisted = aggCalls.map(c =>
               `const ${c.placeholder} = __reduce(${JSON.stringify(c.name)}, __rows.map(__r => {` +
               (scalarCols.length ? ` const { ${scalarCols.join(", ")} } = __r;` : "") +
-              ` return (${c.inner}); }));`
+              ` return (${compileRowExpr(c.inner) ?? c.inner}); }));`
             ).join("\n");
             const evalFn = new Function( // eslint-disable-line no-new-func
-              ...Object.keys(colArrays), ...Object.keys(gh), ...Object.keys(ROW_H), "__rows", "__reduce",
-              `"use strict";\n${hoisted}\nreturn (${outerExpr});`
+              ...Object.keys(colArrays), ...Object.keys(gh), ...Object.keys(ROW_H), "__rows", "__reduce", "__na",
+              `"use strict";\n${hoisted}\nreturn (${compileRowExpr(outerExpr) ?? outerExpr});`
             );
-            groupVal = evalFn(...Object.values(colArrays), ...Object.values(gh), ...Object.values(ROW_H), filtRows, reduceAggregate);
+            groupVal = evalFn(...Object.values(colArrays), ...Object.values(gh), ...Object.values(ROW_H), filtRows, reduceAggregate, NA_OPS);
           } catch { groupVal = null; }
           if (typeof groupVal === "boolean") groupVal = groupVal ? 1 : 0;
           grp.forEach(r => rowValsExpr.set(r, groupVal));

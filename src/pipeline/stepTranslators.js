@@ -28,6 +28,7 @@ import { distExprR, distExprPy, distExprStata, stataCategoricalLines, RNG_NOTE }
 import { dummyR, dummyStata, dummyPython } from "../services/export/dummyStep.js";
 import { safeGroupedMutate } from "../services/export/groupedMutateExport.js";
 import { safeIfElse } from "../services/export/ifElseStep.js";
+import { mutateStep, filterExprStep, caseWhenStep } from "../services/export/rowExprExport.js";
 import { injectColumnR, injectColumnStata, injectColumnPython } from "../services/export/injectColumnStep.js";
 
 // ─── SHARED HELPERS ──────────────────────────────────────────────────────────
@@ -87,7 +88,7 @@ function splitTopLevel(str, sep = ",") {
 // ─── R HELPERS ───────────────────────────────────────────────────────────────
 
 /** Wrap an identifier in backticks if it contains spaces / special chars */
-function rName(c) {
+export function rName(c) {
   return /^[A-Za-z_][A-Za-z0-9_.]*$/.test(c) ? c : `\`${c}\``;
 }
 function rStr(s) { return `"${String(s).replace(/"/g, '\\"')}"`;  }
@@ -271,7 +272,7 @@ export function jsExprToStata(expr) {
 // The spelling Stata's strtoname() gives a header — the one the load line
 // renames imported variables to (see loadLine STATA_NAME_FIX). Unicode
 // letters are legal in Stata 14+ names and are kept.
-function stVar(c) { return String(c ?? "").replace(/[^\p{L}\p{N}_]/gu, "_").replace(/^(\p{N})/u, "_$1").slice(0, 32); }
+export function stVar(c) { return String(c ?? "").replace(/[^\p{L}\p{N}_]/gu, "_").replace(/^(\p{N})/u, "_$1").slice(0, 32); }
 
 // ─── PYTHON HELPERS ───────────────────────────────────────────────────────────
 
@@ -428,6 +429,7 @@ export function toR(step, df = "df", allDatasets = {}) {
       // FilterBuilder emits. The hand-written opMap this replaced read only
       // step.op — undefined for a tree — and defaulted to TRUE, so every
       // compound filter exported as "keep every row".
+      if (step.expr) { try { return filterExprStep("r", step.expr, df); } catch { /* fallback */ } }
       if (step.expr) { const e = jsExprToR(step.expr); if (!e) throw new Error(`formula filter cannot be translated: ${step.expr}`); return `${df} <- ${df} |> filter(${e})`; }
       return `${df} <- ${df} |> filter(${predicateToR(filterStepToNode(step), { name: rName })})`;
 
@@ -651,6 +653,9 @@ export function toR(step, df = "df", allDatasets = {}) {
     }
 
     case "mutate": {
+      // Row expressions go through rowExprExport (the app's tree, R's NA rules);
+      // the text translation below is only the fallback for what it cannot parse.
+      try { return mutateStep("r", step, df); } catch { /* fallback */ }
       const rExpr = jsExprToR(step.expr);
       if (rExpr) {
         return `${df} <- ${df} |> mutate(${nn} = ${rExpr})`;
@@ -881,6 +886,7 @@ export function toR(step, df = "df", allDatasets = {}) {
       return safeIfElse("r", step, df);
 
     case "case_when": {
+      try { return caseWhenStep("r", step, df); } catch { /* fallback */ }
       const cwOut  = rName(step.nn);
       const cwBrs  = (step.cases ?? [])
         .map(c => { const cc = jsExprToR(c.cond); return cc ? `    ${cc} ~ ${rValue(coerceLiteral(c.val))}` : null; })
@@ -966,6 +972,7 @@ export function toStata(step, df = "df", allDatasets = {}) {
     case "filter":
       // See the R case: the opMap this replaced defaulted to `1`, so a compound
       // filter exported as `keep if 1` — every row.
+      if (step.expr) { try { return filterExprStep("stata", step.expr, df); } catch { /* fallback */ } }
       if (step.expr) { const e = jsExprToStata(step.expr); if (!e) throw new Error(`formula filter cannot be translated: ${step.expr}`); return `keep if ${e}`; }
       return `keep if ${predicateToStata(filterStepToNode(step), { name: stVar })}`;
 
@@ -1198,6 +1205,9 @@ export function toStata(step, df = "df", allDatasets = {}) {
     }
 
     case "mutate": {
+      // Row expressions go through rowExprExport (the app's tree, R's NA rules);
+      // the text translation below is only the fallback for what it cannot parse.
+      try { return mutateStep("stata", step, df); } catch { /* fallback */ }
       const stExpr = jsExprToStata(step.expr);
       if (stExpr) return `generate ${o} = ${stExpr}`;
       return [
@@ -1518,6 +1528,7 @@ export function toStata(step, df = "df", allDatasets = {}) {
       return safeIfElse("stata", step);
 
     case "case_when": {
+      try { return caseWhenStep("stata", step, df); } catch { /* fallback */ }
       const stCwOut = stVar(step.nn);
       const stCwBrs = (step.cases ?? [])
         .map(c => { const cc = jsExprToStata(c.cond); return cc ? `replace ${stCwOut} = ${stValue(coerceLiteral(c.val))} if ${cc}` : null; })
@@ -1592,6 +1603,7 @@ export function toPython(step, df = "df", allDatasets = {}) {
     case "filter": {
       // See the R case: the opMap this replaced defaulted to `True`, so a
       // compound filter exported as `df[True]` — every row.
+      if (step.expr) { try { return filterExprStep("python", step.expr, df); } catch { /* fallback */ } }
       if (step.expr) { const e = jsExprToPython(step.expr, df); if (!e) throw new Error(`formula filter cannot be translated: ${step.expr}`); return `${df} = ${df}[pd.Series(${e}, index=${df}.index).fillna(False).astype(bool)]`; }
       return `${df} = ${df}[${predicateToPython(filterStepToNode(step), { df })}]`;
     }
@@ -1779,6 +1791,9 @@ export function toPython(step, df = "df", allDatasets = {}) {
     }
 
     case "mutate": {
+      // Row expressions go through rowExprExport (the app's tree, R's NA rules);
+      // the text translation below is only the fallback for what it cannot parse.
+      try { return mutateStep("python", step, df); } catch { /* fallback */ }
       const pyExpr = jsExprToPython(step.expr, df);
       if (pyExpr) return `${df}[${o}] = ${pyExpr}`;
       return [
@@ -2018,6 +2033,7 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return safeIfElse("python", step, df);
 
     case "case_when": {
+      try { return caseWhenStep("python", step, df); } catch { /* fallback */ }
       const pyCwOut     = pyStr(step.nn);
       const pyCwConds   = [], pyCwChoices = [];
       for (const c of (step.cases ?? [])) {

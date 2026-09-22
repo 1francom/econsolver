@@ -23,7 +23,8 @@
 "use strict";
 
 import { drawSamples } from "../math/dgpDraw.js";
-import { assertSafeExpr, translateRInOperator } from "../pipeline/exprGuard.js";
+import { assertSafeExpr } from "../pipeline/exprGuard.js";
+import { makeRowFn, isNA } from "../pipeline/rowExpr.js";
 import { HELPERS } from "../pipeline/expressionHelpers.js";
 
 // ── SECURITY: scrub exfiltration / escape globals from the worker scope ────────
@@ -39,13 +40,9 @@ for (const k of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importS
 // ── Helpers injected into mutate expressions ──────────────────────────────────
 // ── eval_col ──────────────────────────────────────────────────────────────────
 function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, cases, defaultVal, rules, elseValue }) {
-  // ai_tr expressions are hand-written JS (value, rowIndex) transforms, not
-  // R-style conditions — never rewrite those.
-  if (mode !== "ai_tr") {
-    expr  = translateRInOperator(expr);
-    cases = cases?.map(c => ({ ...c, cond: translateRInOperator(c.cond) }));
-    rules = rules?.map(r => ({ ...r, expr: translateRInOperator(r.expr) }));
-  }
+  // Row expressions (every mode but ai_tr, which is a hand-written JS
+  // transform) go through rowExpr.js: missing values follow R, and %in% is
+  // handled there. Same compiler as the synchronous runner.
 
   if (mode === "ai_tr") {
     // ai_tr: full arrow-fn or body expression operating on a single column value
@@ -64,8 +61,8 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
     if (!rows || rows.length === 0) return { mask: [] };
     assertSafeExpr(expr);
     const fH = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
-    const fFn = Function(...fH, `"use strict"; return !!(${expr});`);
-    return { mask: rows.map(r => { try { return fFn(...fH.map(h => r[h] ?? null)); } catch { return true; } }) };
+    const fFn = makeRowFn(expr, fH);
+    return { mask: rows.map(r => { try { return !!fFn(...fH.map(h => r[h] ?? null)); } catch { return true; } }) };
   }
 
   // if_else: cond expr → trueVal/falseVal per row
@@ -74,14 +71,14 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
     if (!rows || rows.length === 0) return { newColValues: [] };
     assertSafeExpr(expr);
     const iH  = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
-    const iFn = Function(...iH, `"use strict"; return !!(${expr});`);
+    const iFn = makeRowFn(expr, iH);
     const allH = Object.keys(rows[0]);
     const newColValues = rows.map(r => {
       let ok = false;
       try { ok = iFn(...iH.map(h => r[h] ?? null)); } catch {}
       const tv = allH.includes(trueVal)  ? r[trueVal]  : trueVal;
       const fv = allH.includes(falseVal) ? r[falseVal] : falseVal;
-      return ok ? tv : fv;
+      return isNA(ok) ? null : ok ? tv : fv;
     });
     return { newColValues };
   }
@@ -92,7 +89,7 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
     if (!rows || rows.length === 0) return { newColValues: [] };
     (cases ?? []).forEach(c => assertSafeExpr(c.cond));
     const cwH  = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
-    const fns  = (cases ?? []).map(c => { try { return Function(...cwH, `"use strict"; return !!(${c.cond});`); } catch { return null; } });
+    const fns  = (cases ?? []).map(c => { try { return makeRowFn(c.cond, cwH); } catch { return null; } });
     const newColValues = rows.map(r => {
       const args = cwH.map(h => r[h] ?? null);
       for (let i = 0; i < (cases ?? []).length; i++) {
@@ -109,7 +106,7 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
     if (!rows || rows.length === 0) return { newColValues: [] };
     (rules ?? []).forEach(rule => assertSafeExpr(rule.expr));
     const vH  = Object.keys(rows[0]).filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
-    const fns = (rules ?? []).map(rule => { try { return Function(...vH, `"use strict"; return !!(${rule.expr});`); } catch { return null; } });
+    const fns = (rules ?? []).map(rule => { try { return makeRowFn(rule.expr, vH); } catch { return null; } });
     const newColValues = rows.map(r => {
       const args = vH.map(h => r[h] ?? null);
       for (let i = 0; i < (rules ?? []).length; i++) {
@@ -127,7 +124,7 @@ function evalCol({ mode, expr, colValues, rows, col, newCol, trueVal, falseVal, 
   const headers = Object.keys(rows[0]);
   const safeH   = headers.filter(h => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(h));
   const pNames  = [...Object.keys(HELPERS), "row", ...safeH];
-  const fn = Function(...pNames, `"use strict";return (${expr});`);
+  const fn = makeRowFn(expr, pNames);
   const newColValues = rows.map(r => {
     const pVals = [...Object.values(HELPERS), r, ...safeH.map(h => r[h] ?? null)];
     try {

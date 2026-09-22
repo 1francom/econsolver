@@ -998,6 +998,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Country code: convert a country name/ISO2/ISO3 to ISO2, ISO3, name, or continent — equivalent to R's countrycode()",
             "Mutate: a custom expression, e.g. col_a / col_b * 100",
             "if_else and case_when for conditional columns",
+            "Missing values follow R in every expression: x > 0 is missing where x is, FALSE & NA is FALSE, TRUE | NA is TRUE — a filter drops those rows, if_else gives missing, case_when moves on. Wrap with is.na() to decide yourself. The R, Stata and Python exports reproduce it",
             "Grouped mutate: compute within groups without collapsing rows",
           ]},
           { heading: "Workbench — reshape & merge", items: [

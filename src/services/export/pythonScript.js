@@ -16,6 +16,7 @@ import { buildPyLoadLine } from "./loadLine.js";
 import { dummyPython } from "./dummyStep.js";
 import { safeGroupedMutate } from "./groupedMutateExport.js";
 import { safeIfElse } from "./ifElseStep.js";
+import { mutateStep, filterExprStep, caseWhenStep } from "./rowExprExport.js";
 import { injectColumnPython } from "./injectColumnStep.js";
 
 export function generatePythonScript(config = {}) {
@@ -335,6 +336,7 @@ function transpileStep(step, allDatasets = {}) {
     }
     case "mutate": {
       const nn     = step.nn ?? "newcol";
+      try { return mutateStep("python", step, "df"); } catch { /* fallback */ }
       const pyExpr = jsExprToPython(step.expr, "df");
       if (pyExpr) return `df[${pyStr(nn)}] = ${pyExpr}`;
       return [
@@ -453,6 +455,7 @@ function transpileStep(step, allDatasets = {}) {
     case "if_else":
       return safeIfElse("python", step, "df");
     case "case_when": {
+      try { return caseWhenStep("python", step, "df"); } catch { /* fallback */ }
       const out = pyStr(step.nn);
       const conds = [], choices = [];
       for (const c of (step.cases ?? [])) {

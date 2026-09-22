@@ -29,6 +29,7 @@
 
 import { predicateToR, predicateToPython, predicateToStata } from "../../pipeline/predicateExport.js";
 import { AGG_FNS } from "../../pipeline/groupExpr.js";
+import { rowAstPy, rowAstSt, pyAssignLines, stataAssignLines } from "./rowExprExport.js";
 
 // ─── parser ───────────────────────────────────────────────────────────────────
 
@@ -272,6 +273,30 @@ export function groupedMutateR(step, df = "df") {
   ].join("\n");
 }
 
+// ─── missing values in Python and Stata ──────────────────────────────────────
+// The app evaluates a row argument with R's missing-value rules (rowExpr.js):
+// `trarrprop != 0 & year == 2015` is NA — not TRUE — where trarrprop is
+// missing, and the aggregate then skips it. pandas' float64 and Stata's
+// missing-as-+∞ both said TRUE, so any() counted the row. Arguments and the
+// outer expression are therefore emitted through rowExprExport's lowering;
+// this converts this module's tree to that one.
+
+function toRowAst(n, lang, df) {
+  switch (n.t) {
+    case "bin":
+      if (n.op === "&") return { t: "and", l: toRowAst(n.l, lang, df), r: toRowAst(n.r, lang, df) };
+      if (n.op === "|") return { t: "or",  l: toRowAst(n.l, lang, df), r: toRowAst(n.r, lang, df) };
+      return { ...n, l: toRowAst(n.l, lang, df), r: toRowAst(n.r, lang, df) };
+    case "not": case "neg": return { ...n, e: toRowAst(n.e, lang, df) };
+    case "call": return { ...n, args: n.args.map(a => toRowAst(a, lang, df)) };
+    case "agg":  return { t: "raw", py: `_a${n.id}.convert_dtypes()`, st: { v: `_lx_a${n.id}`, m: `missing(_lx_a${n.id})` } };
+    case "pred": return lang === "python"
+      ? { t: "raw", logical: true, py: `pd.Series(${predicateToPython(n.node, { df })}, index=${df}.index, dtype="boolean")` }
+      : { t: "raw", logical: true, st: { v: `(${predicateToStata(n.node, { name: stVar })})`, m: "0" } };
+    default: return n;
+  }
+}
+
 // ─── Python (pandas) ─────────────────────────────────────────────────────────
 // Vectorised over the whole frame: the argument of each aggregate becomes a
 // column, is masked, and is reduced with groupby().transform(), which already
@@ -316,12 +341,12 @@ export function groupedMutatePython(step, df = "df") {
   ];
   plan.aggs.forEach((a, i) => {
     if (a.name === "count") { lines.push(`_a${i} = ${g("_k")}.transform("sum")`); return; }
-    lines.push(`_t = pd.Series(${emitExpr(a.arg, L)}, index=${df}.index)`);
+    lines.push(`_t = pd.Series(${rowAstPy(toRowAst(a.arg, "python", df), df)}, index=${df}.index)`);
     switch (a.name) {
       case "any":
-        lines.push(`_a${i} = ${g("(_t.fillna(0).astype(bool) & _k)")}.transform("max").astype(int)`); break;
+        lines.push(`_a${i} = ${g("(_t.fillna(False).astype(bool) & _k)")}.transform("max").astype(int)`); break;
       case "all":
-        lines.push(`_a${i} = (${g("(~_k | _t.fillna(0).astype(bool))")}.transform("min") & ${g("_k")}.transform("max")).astype(int)`); break;
+        lines.push(`_a${i} = (${g("(~_k | _t.fillna(False).astype(bool))")}.transform("min") & ${g("_k")}.transform("max")).astype(int)`); break;
       case "sum": case "mean": case "min": case "max":
         lines.push(`_a${i} = ${g(`pd.to_numeric(_t, errors="coerce").astype(float).where(_k)`)}.transform("${a.name}")`); break;
       case "first": case "last":
@@ -331,8 +356,7 @@ export function groupedMutatePython(step, df = "df") {
       default: throw new Error(`unsupported aggregate ${a.name}`);
     }
   });
-  lines.push(`_v = pd.Series(${emitExpr(plan.outer, L)}, index=${df}.index)`);
-  lines.push(`${df}[${pyStr(plan.newCol)}] = _v.astype(int) if _v.dtype == bool else _v`);
+  lines.push(...pyAssignLines(plan.newCol, rowAstPy(toRowAst(plan.outer, "python", df), df), df));
   return lines.join("\n");
 }
 
@@ -382,7 +406,9 @@ export function groupedMutateStata(step) {
     const A = `_lx_a${i}`;
     if (a.name === "count") { lines.push(`gen double ${A} = _lx_nk`); return; }
     const t = `_lx_t${i}`;
-    lines.push(`gen double ${t} = ${emitExpr(a.arg, ST_LANG)}`);
+    const low = rowAstSt(toRowAst(a.arg, "stata"));
+    lines.push(`gen double ${t} = ${low.v}`);
+    if (low.m !== "0") lines.push(`replace ${t} = . if ${low.m}`);
     switch (a.name) {
       case "any": lines.push(`bysort ${by}: egen double ${A} = max(_lx_k & !missing(${t}) & ${t} != 0)`); break;
       case "all":
@@ -399,7 +425,7 @@ export function groupedMutateStata(step) {
       default: throw new Error(`unsupported aggregate ${a.name}`);
     }
   });
-  lines.push(`gen double ${out} = ${emitExpr(plan.outer, ST_LANG)}`);
+  lines.push(...stataAssignLines(plan.newCol, rowAstSt(toRowAst(plan.outer, "stata"))));
   lines.push(`sort _lx_o`);
   lines.push(`drop _lx_*`);
   return lines.join("\n");

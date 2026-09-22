@@ -42,6 +42,7 @@ import { buildRLoadLine } from "./loadLine.js";
 import { dummyR } from "./dummyStep.js";
 import { safeGroupedMutate } from "./groupedMutateExport.js";
 import { safeIfElse } from "./ifElseStep.js";
+import { mutateStep, filterExprStep, caseWhenStep } from "./rowExprExport.js";
 import { injectColumnR } from "./injectColumnStep.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -360,6 +361,7 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     }
 
     case "mutate": {
+      try { return mutateStep("r", step, dfVar); } catch { /* fallback */ }
       const rExpr = jsExprToR(step.expr);
       if (rExpr) return `${dfVar} <- ${dfVar} |> dplyr::mutate(${nn} = ${rExpr})`;
       return [
@@ -607,6 +609,7 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       return safeIfElse("r", step, dfVar);
 
     case "case_when": {
+      try { return caseWhenStep("r", step, dfVar); } catch { /* fallback */ }
       const out = rName(step.nn);
       const branches = (step.cases ?? [])
         .map(c => { const cc = jsExprToR(c.cond); return cc ? `    ${cc} ~ ${rValue(c.val)}` : null; })

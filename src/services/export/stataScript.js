@@ -17,6 +17,7 @@ import { buildStataLoadLine } from "./loadLine.js";
 import { dummyStata } from "./dummyStep.js";
 import { safeGroupedMutate } from "./groupedMutateExport.js";
 import { safeIfElse } from "./ifElseStep.js";
+import { mutateStep, filterExprStep, caseWhenStep } from "./rowExprExport.js";
 import { injectColumnStata } from "./injectColumnStep.js";
 
 export function generateStataScript(config = {}) {
@@ -308,6 +309,7 @@ function transpileStep(step, allDatasets = {}) {
     }
     case "mutate": {
       const nn     = step.nn ?? "newcol";
+      try { return mutateStep("stata", step); } catch { /* fallback */ }
       const stExpr = jsExprToStata(step.expr);
       if (stExpr) return `gen ${stVar(nn)} = ${stExpr}`;
       return [
@@ -459,6 +461,7 @@ function transpileStep(step, allDatasets = {}) {
     case "if_else":
       return safeIfElse("stata", step);
     case "case_when": {
+      try { return caseWhenStep("stata", step); } catch { /* fallback */ }
       const out = stVar(step.nn);
       const branches = (step.cases ?? [])
         .map(c => { const cc = jsExprToStata(c.cond); return cc ? `replace ${out} = ${stValue(c.val)} if ${cc}` : null; })
