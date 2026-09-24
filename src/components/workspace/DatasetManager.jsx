@@ -326,14 +326,13 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       const [cloud, local] = user ? await Promise.all([listCloudProjects(), listProjects()]) : [[], await listProjects()];
       setCloudProjects(cloud);
       setLocalProjects(local);
-      // Unlock prompt removed — users unlock manually via the sync panel when needed
-      if (user && cloud.length && hasSyncSession() && cloud.some(cp => !local.some(lp => lp.pid === cp.pid))) {
-        // Only prompt once per browser session — not on every project switch or window refocus
-        if (!sessionStorage.getItem("econ_restore_prompted")) {
-          sessionStorage.setItem("econ_restore_prompted", "1");
-          setRestoreOpen(true);
-        }
-      }
+      // No auto-prompt. The "once per browser session" sessionStorage guard did
+      // not hold: the flag is per TAB, and restoring one project leaves the
+      // others missing locally forever, so the modal reappeared on every new
+      // tab and every reload. Cloud projects that are not on this device are
+      // surfaced as a button in the sync panel instead — the user opens it when
+      // they want it. (Same reasoning as the unlock modal: a prompt nobody
+      // asked for, in front of the work.)
     } catch {
       if (user) setSyncState("offline");
     }
@@ -436,7 +435,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       setUnlockPass("");
       setUnlockRecovery("");
       setUnlocked(true);
-      if (cloudMissingLocally.length) setRestoreOpen(true);
+      // Unlocking is not a request to restore anything — the sync panel's
+      // "Restore N from cloud" button is the way in.
     }
   }
 
@@ -661,6 +661,26 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                 }}>
                   {syncLabel()}
                 </span>
+              )}
+              {/* The only way into the restore modal now that it no longer
+                  opens itself. Shown only when there is something to restore. */}
+              {user && cloudMissingLocally.length > 0 && (
+                <button
+                  onClick={() => setRestoreOpen(true)}
+                  title={`${cloudMissingLocally.length} cloud project${cloudMissingLocally.length === 1 ? "" : "s"} not on this device`}
+                  style={{
+                    padding: "0.24rem 0.52rem",
+                    background: "transparent",
+                    border: `1px solid ${C.border2}`,
+                    borderRadius: 3,
+                    color: C.textDim,
+                    cursor: "pointer",
+                    fontFamily: T.code.fontFamily,
+                    fontSize: T.caption.fontSize,
+                  }}
+                >
+                  Restore {cloudMissingLocally.length} from cloud
+                </button>
               )}
               {!syncMeta.published ? (
                 <button
