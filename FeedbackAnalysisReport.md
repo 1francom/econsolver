@@ -263,7 +263,57 @@
 
 ---
 
-## Suggested action order
+### · Clean · 2026-07-19
+**Feedback:** Add a function for Country Codes — iso2/iso3/country-name crosswalk transform
+**File:** `src/components/wrangling/FeatureTab.jsx`, `src/pipeline/runner.js`, `src/pipeline/registry.js`
+**Suggestion:** Add a `country_code` step type: input column (country name or iso2), output column, direction (name→iso2, name→iso3, iso2→iso3, etc.). The lookup table (~250 rows, ~8KB) can be embedded as a static JSON in `src/math/countryLookup.json` or inlined as a const in a helper. Wire through the registry and runner. The `FeatureTab.jsx` UI panel can reuse the existing `add_column` skeleton. For fuzzy matching (name→code) reuse `fuzzyGroups` from `wrangling/utils.js` with a strict similarity threshold.
+**Invariants:** step must replay on `rawData` (non-destructive); persist step params via `registry.js`; lookup table in `src/math/` only (no React there).
+
+---
+
+### · Explore · 2026-07-11
+**Feedback:** Add more labels in tables or boxes when plotting by color
+**File:** `src/components/PlotBuilder.jsx`
+**Suggestion:** When `aes.color` is set and the geom is `point` or `line`, Observable Plot renders a color legend via `Plot.legend`. Add a toggle to also draw inline labels at the end of each line (for `line` geom, the last data point) or as `Plot.text` marks placed at the centroid of each color group (for `point` scatter). This is a common ggplot2 `ggrepel`-style enhancement. Keep it opt-in via a "Show labels" toggle in the Labels panel to avoid clutter in dense plots.
+**Invariants:** inline styles via `C`.
+
+---
+
+### · Explore / Model · Various
+**Feedback (grouped):** (a) Filter with `%in% c(...)` R-style syntax (2026-05-19); (b) RDD `summary(rdrobust)`-style table (2026-05-21); (c) Spatial filters for plots (2026-05-30); (d) Editable LaTeX table variable names (2026-06-06); (e) Cross-module session list management (2026-07-19); (f) 3D plots (2026-07-05)
+**File:** Various — see Deferred Bugs table above + `src/components/PlotBuilder.jsx` for 3D
+**Suggestion:** (a), (b), (c), (d) are already tracked as "fix-later" in BugTriage. (e) needs a design decision before implementation — session-scoped context in `sessionState.jsx` is the natural home. (f) 3D plots require a third-party library (Plotly or Three.js) or Observable Plot 0.7+ — scope as a post-MVP enhancement.
+**Invariants:** (f) would require adding a new CDN dependency — add to `vercel.json` `connect-src` AND `script-src` per the CSP bug documented in CLAUDE.md.
+
+---
+
+## UX / Design
+
+### · UX · 2026-07-17
+**Feedback:** Save progress of uncompleted work in transformation subsections
+**File:** `src/components/wrangling/FeatureTab.jsx`
+**Suggestion:** (See Bug section above — duplicate entry; handled there.)
+**Invariants:** sessionStorage keyed by `pid + stepType`; not IDB.
+
+---
+
+### · UX · General · 2026-07-19
+**Feedback:** Think about how to construct lists, save them and use them during the session when filtering or constructing variables
+**File:** `src/services/session/sessionState.jsx`, `src/components/wrangling/CleanTab.jsx`
+**Suggestion:** A session-scoped list store is a design-first decision. The natural home is `SessionStateProvider` (already in `sessionState.jsx`) — add a `lists` map `{name → string[]}`. Expose a "Save as list" button next to the distinct-values panel (already shipped 2026-07-30). In `FilterBuilder`, add a `$in list` operator that pulls from the stored lists. No IDB write needed for session-only lists; an IDB `session_lists` store would be needed for persistence across reloads.
+**Invariants:** persistence via `indexedDB.js` if cross-session; `sessionState.jsx` is React context, never used in `src/math/`.
+
+---
+
+## Performance
+
+### [high] · Data · 2026-05-08
+**Feedback:** Big datasets generate crashes (~21 MB, 900k rows)
+**File:** `src/DataStudio.jsx` (parseFile branches), `src/services/data/duckdb.js`
+**Suggestion:** BugTriage routes this to "Fase X4 — code-complete; browser benchmark pending Franco." The DuckDB performance strategy in CLAUDE.md lists: (1) OPFS Parquet cache for large CSV, (2) `SELECT` only needed columns, (3) 200–500 row display limit, (4) precompute column stats in SQL. Browser benchmarking is the outstanding task — Franco should open a 21MB CSV, navigate all 7 tabs, and confirm no crash. If a crash persists, the likely culprits are: (a) a tab that still calls `SELECT *` materialising 900k rows in JS (check `duckdbRunner.js` step handlers), or (b) React re-rendering with the full `rawData` array in state (check DataStudio's `useEffect` dependencies).
+**Invariants:** full dataset is always available to `runner.js` / `duckdbRunner.js`; display layer caps at 500 rows; never truncate `rawData`.
+
+---
 
 1. **Browser-validate 4 code-complete items (OLS diagnostics, coef freeze, Heatmap, PlotBuilder resize)** — these are now 3+ months old; either mark them ✓ in ClaudeFB.md/BugTriage.md or re-open with a specific repro. Clearing these unblocks significant backlog tidying.
 2. **Fix Stata workbench completeness** (`stataScript.js`) — Stata is the primary replication tool for LMU academic users; a broken workbench directly undermines the institutional licensing pitch.
