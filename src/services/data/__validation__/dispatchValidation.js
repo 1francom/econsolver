@@ -1,7 +1,6 @@
 // ─── ECON STUDIO · src/services/data/__validation__/dispatchValidation.js ──────
-// Assertion harness for the Fase 0 dispatch system. Mirrors the pattern in
-// src/math/__validation__/engineValidation.js: plain JS, prints pass/fail to
-// console, returns boolean. Run via dispatchValidation.runner.js or import
+// Assertion harness for the Fase 0 dispatch system: plain JS, prints pass/fail
+// to console, returns boolean. Run via dispatchValidation.runner.js or import
 // directly in browser DevTools.
 
 import * as cfg from "../dispatchConfig.js";

@@ -31,7 +31,7 @@ import { PlotCanvas } from "../PlotBuilder.jsx";
 import { getPlotHistory, getMapHistory, getExplorePins } from "../../services/Persistence/plotHistory.js";
 import { getArtifactOrder, makeArtifactId, orderArtifacts } from "../../services/Persistence/artifactOrder.js";
 import { readPanelPref, writePanelPref } from "./panelPrefs.js";
-import { KIND_ICON } from "../explore/ExplorePinBar.jsx";
+import { KIND_ICON, describeFilters } from "../explore/ExplorePinBar.jsx";
 
 const PANEL_WIDTH = 460;
 const BODY_HEIGHT = 360;
@@ -224,6 +224,9 @@ export default function ArtifactViewerPanel({ pid, datasets = [], outputs = {}, 
                 fontSize: T.caption.fontSize, color: C.textMuted, lineHeight: 1.5,
               }}>
                 {KIND_ICON[current.entry.kind] ?? "⬡"} {current.entry.label}
+                <div style={{ marginTop: 4, color: current.entry.filters?.length ? C.gold : C.textMuted }}>
+                  Rows: {describeFilters(current.entry.filters)}
+                </div>
                 <div style={{ marginTop: 4 }}>
                   Pinned from Explore. Use <span style={{ color: C.textDim }}>open</span> to view
                   it there — this panel does not re-render Explore's descriptive plots and tables

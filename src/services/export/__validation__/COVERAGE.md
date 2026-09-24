@@ -97,7 +97,7 @@
 
 ---
 
-## Known divergences (carry into seTolerances.js for Phase A)
+## Known divergences
 
 | Estimator         | Language    | Why                                                                                  |
 |-------------------|-------------|--------------------------------------------------------------------------------------|
@@ -107,7 +107,6 @@
 | HAC (DK-HAC)      | any         | `plm::vcovSCC` df adjustment vs in-house Driscoll-Kraay implementation               |
 | HC2 / HC3 panel   | any         | Leverage-based meat differs slightly across `clubSandwich`, `plm`, in-house          |
 
-(These five families are explicitly tolerated at 1e-3 on SE in `fase4bBenchmarks.json` already.)
 
 ---
 
@@ -127,5 +126,4 @@
 
 (none — all enumerated items resolved as of 2026-05-26)
 
-Phase A.1 (`seTolerances.js`) and Phase A.2 (`goldenFileHarness.js`) are both ✓ DONE.
-**Browser validation PENDING — Franco to run `window.__goldenHarness()` and `window.__validateExports()` by 2026-05-29.**
+2026-09-17: `seTolerances.js` and `goldenFileHarness.js` were removed with the other simulated-data R benchmarks. Numerical validation now runs against the real datasets in `validation/` (LMU Applied Econometrics tutorials + BA thesis).

@@ -51,6 +51,30 @@ export default function PanelResults({ result, panel, xVars, wVars, yVar, panelF
       </div>
       {active && (
         <>
+          {active.absorbedRegressors?.length > 0 && (
+            <div style={{
+              marginBottom: "0.9rem", padding: "0.6rem 0.85rem",
+              background: C.surface, border: `1px solid ${C.gold}40`,
+              borderLeft: `3px solid ${C.gold}`, borderRadius: 4,
+              fontSize: T.code.fontSize, color: C.textDim, lineHeight: 1.6,
+              fontFamily: T.body.fontFamily,
+            }}>
+              <span style={{ color: C.gold }}>
+                {active.absorbedRegressors.length === 1
+                  ? `"${active.absorbedRegressors[0]}" was dropped`
+                  : `${active.absorbedRegressors.length} regressors were dropped (${active.absorbedRegressors.join(", ")})`}
+              </span>
+              {" — the fixed effects already explain "}
+              {active.absorbedRegressors.length === 1 ? "it" : "them"}
+              {" completely, so there is no variation left to estimate a coefficient from. "}
+              {"This is Stata's \"(omitted)\". R's feols does not drop "}
+              {active.absorbedRegressors.length === 1 ? "it" : "them"}
+              {": it prints a number with an enormous standard error, which says the same thing — but that column also distorts R², so the fit statistics above are the ones you want. "}
+              {"The exported script leaves "}
+              {active.absorbedRegressors.length === 1 ? "it" : "them"}
+              {" out too, so it reproduces exactly what you see here."}
+            </div>
+          )}
           <RegressionEquation
             varNames={["(Intercept)", ...(active.varNames || xVars)]}
             beta={[null, ...active.beta]}
@@ -80,7 +104,7 @@ export default function PanelResults({ result, panel, xVars, wVars, yVar, panelF
               { id: "yhat",   label: "Y vs Ŷ",
                 node: <YFittedPlot resid={active.resid} Yhat={active.Yhat} yLabel={yName} svgIdSuffix={`-${tab}`} /> },
               { id: "forest", label: "Coefficient plot",
-                node: <ForestPlot varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} svgId={`forest-${tab}`} filename={`${tab}_coefficients.svg`} /> },
+                node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={active.varNames || xVars} beta={active.beta} se={active.se} pVals={active.pVals} svgId={`forest-${tab}`} filename={`${tab}_coefficients.svg`} /> },
               { id: "resid",  label: "Residuals vs Fitted",
                 node: <ResidualVsFitted resid={active.resid} Yhat={active.Yhat} svgIdSuffix={`-${tab}-rv`} /> },
               { id: "qq",     label: "Q-Q",

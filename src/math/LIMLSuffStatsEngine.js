@@ -125,14 +125,12 @@ export function runLIMLFromSuffStats({
   const df = n - k;
   const s2 = SSR / Math.max(1, df);
 
-  let V;
-  if (meat) {
-    const scaleMeat = hcType === "HC1" ? n / Math.max(1, df) : 1;
-    const scaled = meat.map(row => row.map(v => v * scaleMeat));
-    V = matMul(matMul(XtPzXi, scaled), XtPzXi);
-  } else {
-    V = XtPzXi.map(row => row.map(v => v * s2));
-  }
+  // k-class covariance σ̂²(X′(I−κM_Z)X)⁻¹, matching runLIML and Stata.
+  // A robust meat must be built from the k-class scores (1−κ)x + κx̂; the SQL
+  // meat builders do not produce those yet, so the caller routes robust LIML
+  // to the JS engine and `meat` is refused here rather than mis-combined.
+  if (meat) return null;
+  const V = lhsInv.map(row => row.map(v => v * s2));
   const se = V.map((row, i) => {
     const d = row[i];
     return isFinite(d) && d >= 0 ? Math.sqrt(d) : NaN;

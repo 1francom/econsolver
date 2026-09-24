@@ -215,14 +215,18 @@ export function parseModelFile(text, vocab = {}) {
 
 // ── plots.json ───────────────────────────────────────────────────────────────
 
-export function buildPlotsFile(entries = []) {
+// keepDataset: the PROJECT export keeps which dataset each plot was drawn from
+// (the unified script binds every plot to it). A standalone plots file strips
+// it, because it is meant to be applied to whatever dataset imports it.
+export function buildPlotsFile(entries = [], { keepDataset = false } = {}) {
   const list = Array.isArray(entries) ? entries : [];
+  const strip = keepDataset ? PLOT_STRIP_DEEP.filter(k => k !== "datasetId" && k !== "datasetName") : PLOT_STRIP_DEEP;
   return {
     version: CURRENT_VERSION,
     kind: PLOTS_KIND,
     exportedAt: new Date().toISOString(),
     plots: list.map(e => {
-      const out = deepStripKeys(e, PLOT_STRIP_DEEP);
+      const out = deepStripKeys(e, strip);
       if (out && typeof out === "object") for (const k of PLOT_STRIP_TOP) delete out[k];
       return out;
     }),

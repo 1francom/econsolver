@@ -56,7 +56,7 @@ function _dispatchEstimation(dataRows, ctx, meta = {}) {
   const y = yVar[0];
   if (!y) return { error: "Select a dependent variable (Y)." };
   // ── Interaction + factor expansion (outside try to avoid TDZ) ──────────────
-  const { rows: ixRows, xVars: ixX, wVars: ixW } =
+  const { rows: ixRows, xVars: ixX, wVars: ixW, factorMap: fmIx } =
     expandInteractions(dataRows, xVars, wVars, interactionTerms, factorVars, factorRefs);
   // Through-the-origin: R gives the FIRST factor in formula order full dummy
   // coding and only then switches to contrasts. X is scanned before W, so the
@@ -67,7 +67,8 @@ function _dispatchEstimation(dataRows, ctx, meta = {}) {
     applyFactors(ixRows, ixX, factorVars, factorRefs, { fullFirstFactor: noIntercept });
   const { rows: expRows, vars: expW, factorMap: fmW } =
     applyFactors(_r1, ixW, factorVars, factorRefs, { fullFirstFactor: noIntercept && !fullUsedX });
-  const factorMap = { ...(fmX ?? {}), ...(fmW ?? {}) };
+  // Interaction-only factors contribute their levels too (see expandInteractions).
+  const factorMap = { ...(fmIx ?? {}), ...(fmX ?? {}), ...(fmW ?? {}) };
   meta.factorMap = factorMap;
   dataRows = expRows; // parameter reassignment: safe in JS
 
@@ -142,7 +143,31 @@ function _dispatchEstimation(dataRows, ctx, meta = {}) {
         ? runFE(dataRows, y, allX, ec, tc, seOpts)
         : runFEMulti(dataRows, y, allX, feCols, seOpts);
       if (!feRaw || feRaw.error) return { error: feRaw?.error ?? "Fixed Effects estimation failed." };
-      const panelSpec = { yVar: y, xVars: allX, wVars: expW, entityCol: ec, timeCol: tc, feCols };
+      // runFEMulti drops regressors the FE absorbed. Take them out of the SPEC too,
+      // so every export path — single model, multi-model, subset, Report — emits the
+      // formula that was actually fitted. Filtering here rather than threading a new
+      // spec field keeps all three exporters correct with no per-call-site plumbing,
+      // which is exactly where those whitelists have drifted before.
+      const dropped = feRaw.absorbedRegressors ?? [];
+      const keep = v => !dropped.includes(v);
+      const panelSpec = {
+        yVar: y,
+        xVars: dropped.length ? allX.filter(keep) : allX,
+        wVars: dropped.length ? expW.filter(keep) : expW,
+        entityCol: ec, timeCol: tc, feCols,
+        // The exporters build the formula from the PRE-EXPANSION lists plus
+        // interactionTerms/factorVars, exactly as the OLS branch does. Without
+        // them the panel branches fell back to the expanded column names and
+        // pushed those through each language's identifier sanitiser, emitting
+        // `female_ggi` — a column that exists only inside Litux. These four must
+        // travel TOGETHER: a raw list with no interactionTerms silently drops
+        // every interaction from the exported formula.
+        xVarsRaw: (xVars ?? []).filter(keep),
+        wVarsRaw: (wVars ?? []).filter(keep),
+        interactionTerms,
+        factorVars: [...(factorVars ?? [])],
+        factorRefs,
+      };
       const feRes = wrapResult("FE", feRaw, panelSpec);
       return { result: { type: "FE", fe: feRes, fd: null }, panelFE: feRes, panelFD: null };
 

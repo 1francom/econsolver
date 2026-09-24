@@ -624,7 +624,7 @@ function geoLoadLines(layers, datasets) {
     const filename = dataset?.filename;
     lines.push(`# Load ${dfVar}${filename ? ` from ${rString(filename)}` : ` for dataset ${rString(name)}`}`);
     if (filename) {
-      lines.push(buildRLoadLine(filename, dataset?.loadOpts ?? null).replace(/^df\b/, dfVar));
+      lines.push(buildRLoadLine(filename, dataset?.loadOpts ?? null).replace(/^df\b/m, dfVar));
     }
   });
 
@@ -1125,7 +1125,7 @@ function geoPyLoadLines(layers, datasets) {
     lines.push(`# Load ${dfVar}${filename ? ` from ${pyString(filename)}` : ` for dataset ${pyString(name)}`}`);
     if (filename) {
       lines.push(buildPyLoadLine(filename, dataset?.loadOpts ?? null)
-        .replace(/^df\b/, dfVar)
+        .replace(/^df\b/m, dfVar)
         .replace(/\bgeopandas\./g, "gpd."));
     }
   });

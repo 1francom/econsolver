@@ -10,6 +10,8 @@
 
 import { toDfVar } from "./exporter.js";
 import { predicateToR, predicateToPython, predicateToStata, filterStepToNode } from "./predicateExport.js";
+// stataJoin.js imports nothing, so this does not close a cycle with stataScript.js.
+import { UNMATCHED_BY_HOW, stataMasterVarlist, stataSuffixHomonyms } from "../services/export/stataJoin.js";
 
 // A `where` clause carrying a compound predicate TREE (what the Data Viewer's
 // stacked filters emit) is compiled by the shared exporters. Without this the
@@ -23,6 +25,11 @@ import { coerceLiteral } from "./literals.js";
 // Distribution emitters shared with the Simulate tab (src/math/dgpScript.js),
 // so a distribution can never be drawable in the app but unexportable here.
 import { distExprR, distExprPy, distExprStata, stataCategoricalLines, RNG_NOTE } from "../math/dgpScript.js";
+import { dummyR, dummyStata, dummyPython } from "../services/export/dummyStep.js";
+import { safeGroupedMutate } from "../services/export/groupedMutateExport.js";
+import { safeIfElse } from "../services/export/ifElseStep.js";
+import { mutateStep, filterExprStep, caseWhenStep } from "../services/export/rowExprExport.js";
+import { injectColumnR, injectColumnStata, injectColumnPython } from "../services/export/injectColumnStep.js";
 
 // ─── SHARED HELPERS ──────────────────────────────────────────────────────────
 
@@ -49,7 +56,7 @@ export function pyRightLoad(id, allDatasets) {
   const file = ds?.filename;
   if (!file) return `pd.read_csv("<path_to_${name}.csv>")`;
   const fl = file.toLowerCase();
-  if (fl.endsWith(".dta"))               return `pd.read_stata("${file}")`;
+  if (fl.endsWith(".dta"))               return `pd.read_stata("${file}", convert_categoricals=False)`;
   if (fl.endsWith(".xlsx") || fl.endsWith(".xls")) return `pd.read_excel("${file}")`;
   return `pd.read_csv("${file}")`;
 }
@@ -58,10 +65,10 @@ export function stataRightLoad(id, allDatasets) {
   const ds   = allDatasets?.[id];
   const name = (ds?.name ?? id).replace(/\s+/g, "_");
   const file = ds?.filename;
-  if (!file) return `import delimited "<path_to_${name}.csv>", clear`;
+  if (!file) return `import delimited "<path_to_${name}.csv>", case(preserve) asdouble clear`;
   const fl = file.toLowerCase();
   if (fl.endsWith(".dta")) return `use "${file}", clear`;
-  return `import delimited "${file}", clear`;
+  return `import delimited "${file}", case(preserve) asdouble clear`;
 }
 
 // Split a comma-separated argument list, respecting nested parentheses/brackets.
@@ -81,7 +88,7 @@ function splitTopLevel(str, sep = ",") {
 // ─── R HELPERS ───────────────────────────────────────────────────────────────
 
 /** Wrap an identifier in backticks if it contains spaces / special chars */
-function rName(c) {
+export function rName(c) {
   return /^[A-Za-z_][A-Za-z0-9_.]*$/.test(c) ? c : `\`${c}\``;
 }
 function rStr(s) { return `"${String(s).replace(/"/g, '\\"')}"`;  }
@@ -262,7 +269,10 @@ export function jsExprToStata(expr) {
 
 /** Stata variable names: strip backticks, quote with spaces (we can't actually
  *  have spaces in Stata varnames, so we just pass through and let the user fix) */
-function stVar(c) { return c.replace(/`/g, ""); }
+// The spelling Stata's strtoname() gives a header — the one the load line
+// renames imported variables to (see loadLine STATA_NAME_FIX). Unicode
+// letters are legal in Stata 14+ names and are kept.
+export function stVar(c) { return String(c ?? "").replace(/[^\p{L}\p{N}_]/gu, "_").replace(/^(\p{N})/u, "_$1").slice(0, 32); }
 
 // ─── PYTHON HELPERS ───────────────────────────────────────────────────────────
 
@@ -419,6 +429,8 @@ export function toR(step, df = "df", allDatasets = {}) {
       // FilterBuilder emits. The hand-written opMap this replaced read only
       // step.op — undefined for a tree — and defaulted to TRUE, so every
       // compound filter exported as "keep every row".
+      if (step.expr) { try { return filterExprStep("r", step.expr, df); } catch { /* fallback */ } }
+      if (step.expr) { const e = jsExprToR(step.expr); if (!e) throw new Error(`formula filter cannot be translated: ${step.expr}`); return `${df} <- ${df} |> filter(${e})`; }
       return `${df} <- ${df} |> filter(${predicateToR(filterStepToNode(step), { name: rName })})`;
 
     case "drop_na": {
@@ -564,10 +576,7 @@ export function toR(step, df = "df", allDatasets = {}) {
     }
 
     case "dummy":
-      return [
-        `# One-hot encode ${step.col} (prefix: "${step.pfx}")`,
-        `${df} <- fastDummies::dummy_cols(${df}, select_columns = ${rStr(step.col)}, remove_first_dummy = FALSE, remove_selected_columns = FALSE)`,
-      ].join("\n");
+      return dummyR(step, df);
 
     case "lag": {
       const ec = step.ec ? rName(step.ec) : null;
@@ -644,6 +653,9 @@ export function toR(step, df = "df", allDatasets = {}) {
     }
 
     case "mutate": {
+      // Row expressions go through rowExprExport (the app's tree, R's NA rules);
+      // the text translation below is only the fallback for what it cannot parse.
+      try { return mutateStep("r", step, df); } catch { /* fallback */ }
       const rExpr = jsExprToR(step.expr);
       if (rExpr) {
         return `${df} <- ${df} |> mutate(${nn} = ${rExpr})`;
@@ -859,13 +871,8 @@ export function toR(step, df = "df", allDatasets = {}) {
     case "patch":
       return `# manual cell edit (${step.col ?? "column"} @ row ${step.ri ?? step.rowId ?? "?"}) — not replayable on the raw file; load the exported *_cleaned.csv instead`;
 
-    case "inject_column": {
-      const icVals = (step.values ?? []).map(v => (v == null ? "NA" : Number(v).toFixed(8))).join(", ");
-      return [
-        `# inject_column: "${step.colName}" — extracted from model output`,
-        `${df}[["${rName(step.colName)}"]] <- c(${icVals})`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnR(step, df);
 
     case "clean_strings": {
       const csFn = { lower: "tolower", upper: "toupper", title: "stringr::str_to_title" }[step.case];
@@ -875,14 +882,11 @@ export function toR(step, df = "df", allDatasets = {}) {
       return `${df} <- ${df} |> mutate(${col} = ${csIn})`;
     }
 
-    case "if_else": {
-      const ieCond = jsExprToR(step.cond);
-      const ieOut  = rName(step.nn);
-      if (!ieCond) return `# if_else: ${step.nn} = if (${step.cond}) ... — translate condition to R manually`;
-      return `${df} <- ${df} |> mutate(${ieOut} = dplyr::if_else(${ieCond}, ${rValue(coerceLiteral(step.trueVal))}, ${rValue(coerceLiteral(step.falseVal))}))`;
-    }
+    case "if_else":
+      return safeIfElse("r", step, df);
 
     case "case_when": {
+      try { return caseWhenStep("r", step, df); } catch { /* fallback */ }
       const cwOut  = rName(step.nn);
       const cwBrs  = (step.cases ?? [])
         .map(c => { const cc = jsExprToR(c.cond); return cc ? `    ${cc} ~ ${rValue(coerceLiteral(c.val))}` : null; })
@@ -892,23 +896,8 @@ export function toR(step, df = "df", allDatasets = {}) {
         : `# case_when: no valid conditions — translate manually`;
     }
 
-    case "grouped_mutate": {
-      const gmBy  = (step.by ?? []).map(rName).join(", ");
-      const gmOut = rName(step.newCol || "grouped");
-      const gmFn  = step.fn ?? "mean";
-      if (!gmBy || !step.newCol) return `# grouped_mutate: incomplete config`;
-      if (gmFn === "expr" && step.expr) {
-        const gmExpr = jsExprToR(step.expr);
-        return gmExpr
-          ? `${df} <- ${df} |> group_by(${gmBy}) |> mutate(${gmOut} = ${gmExpr}) |> ungroup()`
-          : `# grouped_mutate (expr): translate "${step.expr}" to R manually`;
-      }
-      const gmRhs = step.col ? rFn(gmFn, step.col) : "n()";
-      return [
-        `# grouped_mutate: ${gmFn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `${df} <- ${df} |> group_by(${gmBy}) |> mutate(${gmOut} = ${gmRhs}) |> ungroup()`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("r", step, df);
 
     case "pivot_wider": {
       const pwIds  = (step.idCols ?? []).map(rName).join(", ");
@@ -983,6 +972,8 @@ export function toStata(step, df = "df", allDatasets = {}) {
     case "filter":
       // See the R case: the opMap this replaced defaulted to `1`, so a compound
       // filter exported as `keep if 1` — every row.
+      if (step.expr) { try { return filterExprStep("stata", step.expr, df); } catch { /* fallback */ } }
+      if (step.expr) { const e = jsExprToStata(step.expr); if (!e) throw new Error(`formula filter cannot be translated: ${step.expr}`); return `keep if ${e}`; }
       return `keep if ${predicateToStata(filterStepToNode(step), { name: stVar })}`;
 
     case "drop_na": {
@@ -1135,10 +1126,7 @@ export function toStata(step, df = "df", allDatasets = {}) {
     }
 
     case "dummy":
-      return [
-        `* One-hot encode ${step.col} (prefix: ${step.pfx})`,
-        `tabulate ${v}, generate(${stVar(step.pfx ?? step.col)})`,
-      ].join("\n");
+      return dummyStata(step);
 
     case "lag": {
       const ec = step.ec ? stVar(step.ec) : null;
@@ -1217,6 +1205,9 @@ export function toStata(step, df = "df", allDatasets = {}) {
     }
 
     case "mutate": {
+      // Row expressions go through rowExprExport (the app's tree, R's NA rules);
+      // the text translation below is only the fallback for what it cannot parse.
+      try { return mutateStep("stata", step, df); } catch { /* fallback */ }
       const stExpr = jsExprToStata(step.expr);
       if (stExpr) return `generate ${o} = ${stExpr}`;
       return [
@@ -1274,20 +1265,25 @@ export function toStata(step, df = "df", allDatasets = {}) {
       return [
         `* Join dataset: "${rightName}"`,
         `* Save current data first`,
+        // Captured BEFORE preserve: the macro survives preserve/restore, the
+        // data does not, and the homonym rename below needs the master's names.
+        ...stataMasterVarlist(),
         `preserve`,
         `${stataRightLoad(step.rightId, allDatasets)}`,
-        `rename ${stVar(step.rightKey)} ${stVar(step.leftKey)}`,
+        stVar(step.rightKey) === stVar(step.leftKey)
+          ? null
+          : `rename ${stVar(step.rightKey)} ${stVar(step.leftKey)}`,
+        ...stataSuffixHomonyms([stVar(step.leftKey)], step.suffix ?? "_r"),
         `save _right_tmp.dta, replace`,
         `restore`,
-        `* 1:m — a key with several matches on the right produces several rows.`,
-        `* NOTE: this assumes the key is unique in the master. If BOTH sides repeat`,
-        `* it, Stata's merge cannot express the join — use joinby instead:`,
-        `*   joinby ${stVar(step.leftKey)} using _right_tmp.dta, unmatched(master)`,
-        `* UNVERIFIED against a real Stata run.`,
-        `merge 1:m ${stVar(step.leftKey)} using _right_tmp.dta`,
-        step.how === "inner" ? `keep if _merge == 3` : `drop if _merge == 2`,
-        `drop _merge`,
-      ].join("\n");
+        // joinby, not `merge 1:m`: verified on StataNow 19.5 that joinby matches
+        // dplyr's and Litux's row counts in every cardinality regime (200/200/60
+        // on master-repeats / using-repeats / both-repeat), while `merge 1:m`
+        // errors with r(459) as soon as the master key repeats. See
+        // services/export/stataJoin.js, the single owner of this decision.
+        `joinby ${stVar(step.leftKey)} using _right_tmp.dta, unmatched(${UNMATCHED_BY_HOW[step.how] ?? "master"})`,
+        `capture drop _merge`,
+      ].filter(Boolean).join("\n");
     }
 
     case "lookup": {
@@ -1419,7 +1415,8 @@ export function toStata(step, df = "df", allDatasets = {}) {
         `  gen long __row_order = _n`,
         `  save "__bind_cols_tmp.dta", replace`,
         `restore`,
-        `merge 1:1 __row_order using "__bind_cols_tmp.dta", keep(match) nogen suffixes("" "${step.suffix ?? "_r"}")`,
+        // No suffixes() — Stata's merge has no such option (r(198)).
+        `merge 1:1 __row_order using "__bind_cols_tmp.dta", keep(match) nogen`,
         `drop __row_order`,
         `erase "__bind_cols_tmp.dta"`,
       ].join("\n");
@@ -1527,14 +1524,11 @@ export function toStata(step, df = "df", allDatasets = {}) {
       return `replace ${stCsCol} = ${stCsIn}`;
     }
 
-    case "if_else": {
-      const stIeOut  = stVar(step.nn);
-      const stIeCond = jsExprToStata(step.cond);
-      if (!stIeCond) return `* if_else: ${step.nn} = cond(${step.cond}, ...) — translate condition to Stata manually`;
-      return `gen ${stIeOut} = cond(${stIeCond}, ${stValue(coerceLiteral(step.trueVal))}, ${stValue(coerceLiteral(step.falseVal))})`;
-    }
+    case "if_else":
+      return safeIfElse("stata", step);
 
     case "case_when": {
+      try { return caseWhenStep("stata", step, df); } catch { /* fallback */ }
       const stCwOut = stVar(step.nn);
       const stCwBrs = (step.cases ?? [])
         .map(c => { const cc = jsExprToStata(c.cond); return cc ? `replace ${stCwOut} = ${stValue(coerceLiteral(c.val))} if ${cc}` : null; })
@@ -1543,17 +1537,8 @@ export function toStata(step, df = "df", allDatasets = {}) {
       return [`gen ${stCwOut} = ${stValue(coerceLiteral(step.defaultVal))}`, ...stCwBrs].join("\n");
     }
 
-    case "grouped_mutate": {
-      const stGmBy   = (step.by ?? []).map(stVar).join(" ");
-      const stGmOut  = stVar(step.newCol || "grouped");
-      const stGmFn   = step.fn ?? "mean";
-      if (!stGmBy || !step.newCol) return `* grouped_mutate: incomplete config`;
-      const stGmEgen = stGmFn === "sd" ? "sd" : stGmFn === "count" ? "count" : stGmFn === "expr" ? "mean" : stGmFn;
-      return [
-        `* grouped_mutate: ${stGmFn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `bysort ${stGmBy}: egen ${stGmOut} = ${stGmEgen}(${stVar(step.col || (step.by ?? [])[0] || "")})`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("stata", step);
 
     case "balance_panel": {
       const stBpEnt  = stVar(step.entityCol);
@@ -1572,16 +1557,8 @@ export function toStata(step, df = "df", allDatasets = {}) {
     case "patch":
       return `* manual cell edit (${step.col ?? "column"} @ row ${step.ri ?? step.rowId ?? "?"}) — not replayable on the raw file; load the exported *_cleaned.csv instead`;
 
-    case "inject_column": {
-      const stIcVals    = (step.values ?? []).map(v => (v == null ? "." : Number(v).toFixed(8)));
-      const stIcMatName = String(step.colName ?? "").replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32);
-      return [
-        `* inject_column: "${step.colName}" — extracted from model output`,
-        `matrix ${stIcMatName} = (${stIcVals.join(" \\ ")})`,
-        `svmat ${stIcMatName}, name(${step.colName})`,
-        `rename ${step.colName}1 ${step.colName}`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnStata(step);
 
     case "geocode": {
       const stGcAddr = step.addressCol ?? "address";
@@ -1626,6 +1603,8 @@ export function toPython(step, df = "df", allDatasets = {}) {
     case "filter": {
       // See the R case: the opMap this replaced defaulted to `True`, so a
       // compound filter exported as `df[True]` — every row.
+      if (step.expr) { try { return filterExprStep("python", step.expr, df); } catch { /* fallback */ } }
+      if (step.expr) { const e = jsExprToPython(step.expr, df); if (!e) throw new Error(`formula filter cannot be translated: ${step.expr}`); return `${df} = ${df}[pd.Series(${e}, index=${df}.index).fillna(False).astype(bool)]`; }
       return `${df} = ${df}[${predicateToPython(filterStepToNode(step), { df })}]`;
     }
 
@@ -1752,10 +1731,8 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return `${df}[${o}] = (${df}[${c}] - ${mu}) / ${sd}`;
     }
 
-    case "dummy": {
-      const pfx = step.pfx ? pyStr(step.pfx) : pyStr(step.col);
-      return `${df} = pd.get_dummies(${df}, columns=[${c}], prefix=${pfx}, dtype=int)`;
-    }
+    case "dummy":
+      return dummyPython(step, df);
 
     case "lag": {
       const n  = step.n ?? 1;
@@ -1814,6 +1791,9 @@ export function toPython(step, df = "df", allDatasets = {}) {
     }
 
     case "mutate": {
+      // Row expressions go through rowExprExport (the app's tree, R's NA rules);
+      // the text translation below is only the fallback for what it cannot parse.
+      try { return mutateStep("python", step, df); } catch { /* fallback */ }
       const pyExpr = jsExprToPython(step.expr, df);
       if (pyExpr) return `${df}[${o}] = ${pyExpr}`;
       return [
@@ -2049,14 +2029,11 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return `${df}[${pyCsCol}] = ${pyCsExpr}`;
     }
 
-    case "if_else": {
-      const pyIeOut  = pyStr(step.nn);
-      const pyIeCond = jsExprToPython(step.cond, df);
-      if (!pyIeCond) return `# if_else: ${step.nn} = where(${step.cond}) — translate condition to Python manually`;
-      return `${df}[${pyIeOut}] = np.where(${pyIeCond}, ${pyValue(coerceLiteral(step.trueVal), "string")}, ${pyValue(coerceLiteral(step.falseVal), "string")})`;
-    }
+    case "if_else":
+      return safeIfElse("python", step, df);
 
     case "case_when": {
+      try { return caseWhenStep("python", step, df); } catch { /* fallback */ }
       const pyCwOut     = pyStr(step.nn);
       const pyCwConds   = [], pyCwChoices = [];
       for (const c of (step.cases ?? [])) {
@@ -2068,26 +2045,8 @@ export function toPython(step, df = "df", allDatasets = {}) {
       return `${df}[${pyCwOut}] = np.select([${pyCwConds.join(", ")}], [${pyCwChoices.join(", ")}], default=${pyValue(coerceLiteral(step.defaultVal), "string")})`;
     }
 
-    case "grouped_mutate": {
-      const pyGmBy  = step.by ?? [];
-      const pyGmOut = pyStr(step.newCol || "grouped");
-      const pyGmFn  = step.fn ?? "mean";
-      if (!pyGmBy.length || !step.newCol) return `# grouped_mutate: incomplete config`;
-      if (pyGmFn === "expr" && step.expr) {
-        const pyGmExpr = jsExprToPython(step.expr, df);
-        return pyGmExpr
-          ? `${df}[${pyGmOut}] = ${df}.groupby(${pyList(pyGmBy)}).apply(lambda g: ${pyGmExpr}).reset_index(level=${pyList(pyGmBy)}, drop=True)`
-          : `# grouped_mutate (expr): translate "${step.expr}" to Python manually`;
-      }
-      const pyGmAgg = pyGmFn === "sd" ? "std" : pyGmFn === "count" ? "size" : pyGmFn;
-      const pyGmGrp = step.col
-        ? `${df}.groupby(${pyList(pyGmBy)})[${pyStr(step.col)}]`
-        : `${df}.groupby(${pyList(pyGmBy)})[${pyStr(pyGmBy[0])}]`;
-      return [
-        `# grouped_mutate: ${pyGmFn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `${df}[${pyGmOut}] = ${pyGmGrp}.transform("${pyGmAgg}")`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("python", step, df);
 
     case "pivot_wider": {
       const pyPwIds  = pyList(step.idCols ?? []);
@@ -2116,13 +2075,8 @@ export function toPython(step, df = "df", allDatasets = {}) {
     case "patch":
       return `# manual cell edit (${step.col ?? "column"} @ row ${step.ri ?? step.rowId ?? "?"}) — not replayable on the raw file; load the exported *_cleaned.csv instead`;
 
-    case "inject_column": {
-      const pyIcVals = (step.values ?? []).map(v => (v == null ? "np.nan" : Number(v).toFixed(8))).join(", ");
-      return [
-        `# inject_column: "${step.colName}" — extracted from model output`,
-        `${df}["${step.colName}"] = np.array([${pyIcVals}])`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnPython(step, df);
 
     case "geocode": {
       const pyGcAddr = step.addressCol ?? "address";

@@ -127,6 +127,38 @@ export function runFEMulti(rows, yCol, xCols, feCols, seOpts = {}) {
   const allCols = [yCol, ...xCols];
   const { demeaned, nLevels } = demeanByFE(valid, feCols, allCols);
 
+  // A regressor that lies in the span of the FE dummies has nothing left after the
+  // projection, so its coefficient is not identified — whatever comes out is the
+  // residual noise of the alternating projection. Keeping it does not just produce
+  // a meaningless estimate with an astronomic SE (which is at least self-flagging);
+  // the degenerate column destabilises the whole fit, and R² can even go NEGATIVE.
+  // Measured on a PISA fixture with `female` absorbed by a CNT×female FE: within-R²
+  // -0.000573 with it, 0.001425 without — and 0.001425 is exactly what fixest
+  // reports, because its fit statistics are unaffected by the same column.
+  //
+  // So drop them, the way Stata marks a regressor "(omitted)", and report which.
+  // Adding a regressor can never lower R² in exact arithmetic; a drop that changes
+  // the fit statistics is the proof that the column was noise.
+  const ss = (arr, key) => {
+    let sum = 0;
+    for (const r of arr) sum += r[key];
+    const m = sum / arr.length;
+    let acc = 0;
+    for (const r of arr) acc += (r[key] - m) ** 2;
+    return acc;
+  };
+  const absorbed = [];
+  const keptX = xCols.filter(c => {
+    const ss0 = ss(valid, c);
+    if (ss0 < 1e-12) return true;                     // constant overall — a different problem, let OLS report it
+    if (ss(demeaned, `__dm_${c}`) / ss0 < 1e-12) { absorbed.push(c); return false; }
+    return true;
+  });
+  if (!keptX.length) {
+    return { error: `Every regressor (${xCols.join(", ")}) is fully absorbed by the fixed effects ${feCols.join(", ")} — projecting them out leaves nothing to estimate. Remove a fixed effect, or pick regressors that vary within it.` };
+  }
+  xCols = keptX;
+
   const dmY = `__dm_${yCol}`;
   const dmX = xCols.map(c => `__dm_${c}`);
   const res = runOLS(demeaned, dmY, dmX);
@@ -179,6 +211,10 @@ export function runFEMulti(rows, yCol, xCols, feCols, seOpts = {}) {
     tStats:   corrT.slice(1),
     pVals:    corrP.slice(1),
     varNames: xCols,
+    // Regressors removed because the FE absorbed them (Stata's "(omitted)").
+    // Surfaced so the UI can say so and the exported script can leave them out —
+    // a script that re-adds them would not reproduce the numbers shown.
+    absorbedRegressors: absorbed,
     R2_within,
     R2,
     adjR2,
@@ -498,7 +534,11 @@ export function runEventStudyMulti(
   // Original Event Study df: n − (ΣL_d − (D−1)) − regressors − 1  (= n − (Lu+Lt−1) −
   // regressors − 1 for the default 2-way case; intercept counted separately).
   const k_total  = regressors.length + 1; // include intercept
-  const df_fe    = valid.length - absorbedFE - regressors.length - 1;
+  // absorbedFE already contains the grand mean (ΣL − (D−1)), so the intercept
+  // must not be subtracted again. It was: df came out one short of fixest and
+  // reghdfe (342 vs 343 on a 40×10 panel, every SE 0.15% too large), and of
+  // runTWFEDiDMulti, whose `- 1` is the treatment column, not an intercept.
+  const df_fe    = valid.length - absorbedFE - regressors.length;
   if (df_fe <= 0)
     return { error: "Degrees of freedom ≤ 0 — reduce window or add more observations." };
   const s2_fe    = res.SSR / df_fe;

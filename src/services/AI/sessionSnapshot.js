@@ -265,7 +265,7 @@ export function loadOptsToScriptHint(loadOpts, language) {
   }
   if (lang === "python") {
     if (format === "excel") return `pd.read_excel(${f}${sheetName ? `, sheet_name="${sheetName}"` : ""})`;
-    if (format === "stata") return `pd.read_stata(${f})`;
+    if (format === "stata") return `pd.read_stata(${f}, convert_categoricals=False)`;
     if (format === "parquet") return `pd.read_parquet(${f})`;
     const args = [f];
     if (sepStr) args.push(`sep=${sepStr}`);
@@ -278,7 +278,7 @@ export function loadOptsToScriptHint(loadOpts, language) {
     const opts = [];
     if (sepStr) opts.push(`delimiter(${delimiter === "\t" ? "tab" : sepStr})`);
     if (encoding && encoding !== "utf-8") opts.push(`encoding("${encoding}")`);
-    opts.push("clear");
+    opts.push("case(preserve)", "asdouble", "clear");
     return `import delimited ${f}, ${opts.join(" ")}`;
   }
   return "";

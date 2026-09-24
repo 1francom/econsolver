@@ -69,12 +69,10 @@ export function shouldUseSQLPath(ctx) {
   }
 
   // GMM 2-step efficient SE is heteroskedasticity-robust via Ω̂; HC overrides
-  // are still not supported. Fase 8 adds LIML HC0/HC1/clustered/HAC.
+  // are still not supported. LIML is classical-only too: its robust meat needs
+  // k-class scores the SQL builders do not produce (see LIMLSuffStatsEngine).
   if (ctx.estimator === "GMM" && se !== "classical") return false;
-  if (ctx.estimator === "LIML"
-      && !["classical", "HC0", "HC1", "clustered", "HAC"].includes(se)) {
-    return false;
-  }
+  if (ctx.estimator === "LIML" && se !== "classical") return false;
 
   if (ctx.estimator === "WLS") {
     if (!ctx.weightCol || typeof ctx.weightCol !== "string") return false;

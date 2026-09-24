@@ -96,7 +96,7 @@ function rLoadLines(layers, datasets) {
     const filename = dataset?.filename ?? "";
     lines.push(`# load ${dfVar} from ${rString(filename || dataset?.name || datasetId)}`);
     if (filename) {
-      lines.push(buildRLoadLine(filename, dataset?.loadOpts ?? null).replace(/^df\b/, dfVar));
+      lines.push(buildRLoadLine(filename, dataset?.loadOpts ?? null).replace(/^df\b/m, dfVar));
     }
   });
   return lines;
@@ -109,7 +109,7 @@ function pyLoadLines(layers, datasets) {
     lines.push(`# load ${dfVar} from ${pyString(filename || dataset?.name || datasetId)}`);
     if (filename) {
       lines.push(buildPyLoadLine(filename, dataset?.loadOpts ?? null)
-        .replace(/^df\b/, dfVar)
+        .replace(/^df\b/m, dfVar)
         .replace(/\bgeopandas\./g, "gpd."));
     }
   });

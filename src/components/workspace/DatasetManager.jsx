@@ -22,6 +22,8 @@ import {
 import { createShare, listMyShares, revokeShare } from "../../services/sync/shareEngine.js";
 import { getSyncMeta, listProjects, loadProjectPipelines } from "../../services/Persistence/indexedDB.js";
 import { generateWorkspaceScript } from "../../pipeline/exporter.js";
+import { buildProjectExport, projectExportFilename } from "../../services/export/projectExport.js";
+import { storedSteps } from "../../services/Persistence/pipelineRecord.js";
 
 
 // ─── CASCADE HELPERS ──────────────────────────────────────────────────────────
@@ -210,12 +212,37 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
   const [shareCanEdit, setShareCanEdit] = useState(false);
   // ── Workspace replication export (Phase 9.5) ──────────────────────────────────
   const [wsExportBusy, setWsExportBusy] = useState("");
+  const [projExportBusy, setProjExportBusy] = useState(false);
+  const [projExportErr,  setProjExportErr]  = useState("");
 
   // Build the multi-dataset script via the topo-sort exporter and download it.
   // Each dataset's local pipeline + filename come from the per-project IDB record
   // (loadProjectPipelines), keyed by dataset id. globalPipeline carries the
   // cross-dataset G-steps. Join/append local steps are skipped inside the
   // exporter (gStepId filter) so they emit once, from the global section.
+  // The project as a recipe: datasets (filename + load options), pipelines,
+  // pinned model specs, plots, maps and Explore pins. No rows — re-open it
+  // against the same source files and everything reproduces.
+  async function exportProject() {
+    if (projExportBusy) return;
+    setProjExportBusy(true);
+    setProjExportErr("");
+    try {
+      const payload = await buildProjectExport(pid);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const a    = document.createElement("a");
+      a.href     = URL.createObjectURL(blob);
+      a.download = projectExportFilename(payload);
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      console.warn("[DatasetManager] project export failed:", e?.message);
+      setProjExportErr(e?.message ?? "Export failed.");
+    } finally {
+      setProjExportBusy(false);
+    }
+  }
+
   async function exportWorkspace(language) {
     if (wsExportBusy) return;
     setWsExportBusy(language);
@@ -229,7 +256,7 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
           id,
           name:     meta.name ?? id,
           filename: dsRec.filename ?? meta.filename ?? meta.loadOpts?.filename ?? null,
-          pipeline: Array.isArray(dsRec.pipeline) ? dsRec.pipeline : [],
+          pipeline: storedSteps(dsRec),
           loadOpts: dsRec.loadOpts ?? meta.loadOpts ?? null,
         };
       }
@@ -266,6 +293,12 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
 
   const list    = Object.values(datasets);
   const count   = list.length;
+  // Any dataset held in memory only (over the 100 MB IndexedDB cap, no OPFS
+  // fallback). Surfaced on the TRIGGER button too, not just on the row inside
+  // the panel — a warning the user has to open a dropdown to find is a warning
+  // they get after losing the work, not before.
+  const unsaved = list.filter(d => d?.notPersisted);
+
   const active  = activeDatasetId ?? primaryDatasetId;
   const primary = datasets[active];
   const cloudMissingLocally = cloudProjects.filter(cp => !localProjects.some(lp => lp.pid === cp.pid));
@@ -293,14 +326,13 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       const [cloud, local] = user ? await Promise.all([listCloudProjects(), listProjects()]) : [[], await listProjects()];
       setCloudProjects(cloud);
       setLocalProjects(local);
-      // Unlock prompt removed — users unlock manually via the sync panel when needed
-      if (user && cloud.length && hasSyncSession() && cloud.some(cp => !local.some(lp => lp.pid === cp.pid))) {
-        // Only prompt once per browser session — not on every project switch or window refocus
-        if (!sessionStorage.getItem("econ_restore_prompted")) {
-          sessionStorage.setItem("econ_restore_prompted", "1");
-          setRestoreOpen(true);
-        }
-      }
+      // No auto-prompt. The "once per browser session" sessionStorage guard did
+      // not hold: the flag is per TAB, and restoring one project leaves the
+      // others missing locally forever, so the modal reappeared on every new
+      // tab and every reload. Cloud projects that are not on this device are
+      // surfaced as a button in the sync panel instead — the user opens it when
+      // they want it. (Same reasoning as the unlock modal: a prompt nobody
+      // asked for, in front of the work.)
     } catch {
       if (user) setSyncState("offline");
     }
@@ -403,7 +435,8 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
       setUnlockPass("");
       setUnlockRecovery("");
       setUnlocked(true);
-      if (cloudMissingLocally.length) setRestoreOpen(true);
+      // Unlocking is not a request to restore anything — the sync panel's
+      // "Restore N from cloud" button is the way in.
     }
   }
 
@@ -532,6 +565,14 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
         }}>
           {count || 0} dataset{count === 1 ? "" : "s"}
         </span>
+        {unsaved.length > 0 && (
+          <span
+            title={`${unsaved.length} dataset${unsaved.length === 1 ? "" : "s"} (${unsaved.map(d => d.name).join(", ")}) exceeded the 100 MB browser-storage cap and were NOT saved. They live in memory for this session only and will be gone after a reload. Export to CSV to keep them.`}
+            style={{ color: C.red, fontWeight: 700, flexShrink: 0 }}
+          >
+            {`⚠ ${unsaved.length} unsaved`}
+          </span>
+        )}
 
         {primary && (
           <span style={{
@@ -620,6 +661,26 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                 }}>
                   {syncLabel()}
                 </span>
+              )}
+              {/* The only way into the restore modal now that it no longer
+                  opens itself. Shown only when there is something to restore. */}
+              {user && cloudMissingLocally.length > 0 && (
+                <button
+                  onClick={() => setRestoreOpen(true)}
+                  title={`${cloudMissingLocally.length} cloud project${cloudMissingLocally.length === 1 ? "" : "s"} not on this device`}
+                  style={{
+                    padding: "0.24rem 0.52rem",
+                    background: "transparent",
+                    border: `1px solid ${C.border2}`,
+                    borderRadius: 3,
+                    color: C.textDim,
+                    cursor: "pointer",
+                    fontFamily: T.code.fontFamily,
+                    fontSize: T.caption.fontSize,
+                  }}
+                >
+                  Restore {cloudMissingLocally.length} from cloud
+                </button>
               )}
               {!syncMeta.published ? (
                 <button
@@ -767,6 +828,21 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                           <span style={{ color: C.violet, marginLeft: 6 }}>{ds.source}</span>
                         )}
                       </div>
+                      {/* A derived dataset above the 100 MB IndexedDB cap is not
+                          stored anywhere: `opfsCacheKey` only exists for tables
+                          that came through DuckDB from a FILE, so a join output
+                          has no second persistence path. Say so here rather than
+                          letting the work disappear on the next reload — and do
+                          not tell the user to "re-import the file", because a
+                          derived dataset never had one. */}
+                      {ds.notPersisted && (
+                        <div
+                          style={{ fontSize: T.caption.fontSize, color: C.red, marginTop: 2 }}
+                          title={`This dataset is ${ds.persistBytes ? `${(ds.persistBytes / 1e6).toFixed(1)} MB, over the ` : "over the "}100 MB browser-storage cap, so it was not saved. It is held in memory for this session only and will be GONE after a reload — there is no source file to re-import, because it was produced inside Litux. Export it as CSV from the Clean tab if you need to keep it.`}
+                        >
+                          {"⚠ not saved — lost on reload"}
+                        </div>
+                      )}
                       {ds.crs?.label && (
                         <div
                           style={{ fontSize: T.caption.fontSize, color: ds.crs.reprojected ? C.gold : C.teal, marginTop: 2, opacity: 0.85 }}
@@ -960,6 +1036,35 @@ export default function DatasetManager({ activeDatasetId, pid, onSelectDataset, 
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Project export — the whole project as a recipe (no rows) */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "0.4rem 0.85rem", borderTop: `1px solid ${C.border}`,
+            }}>
+              <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, letterSpacing: "0.04em", flex: 1 }}>
+                Export project
+              </span>
+              <button
+                onClick={exportProject}
+                disabled={projExportBusy}
+                title="Datasets, pipelines, pinned models, plots and pins as one .litux.json — a recipe, not the data"
+                style={{
+                  padding: "2px 8px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  border: `1px solid ${projExportErr ? C.red : projExportBusy ? C.teal : C.border2}`, borderRadius: 2,
+                  background: projExportBusy ? `${C.teal}1a` : "transparent",
+                  color: projExportErr ? C.red : projExportBusy ? C.teal : C.textDim,
+                  cursor: projExportBusy ? "default" : "pointer",
+                }}
+              >
+                {projExportBusy ? "…" : projExportErr ? "failed" : "JSON"}
+              </button>
+            </div>
+            {projExportErr && (
+              <div style={{ padding: "0 0.85rem 0.4rem", fontSize: T.caption.fontSize, color: C.red, fontFamily: T.body.fontFamily }}>
+                {projExportErr}
               </div>
             )}
 

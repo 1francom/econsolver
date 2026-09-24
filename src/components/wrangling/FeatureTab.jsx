@@ -9,6 +9,7 @@ const arrMax = a => a.reduce((m, v) => v > m ? v : m, a[0]);
 import FormatTab from "./FormatTab.jsx";
 import VectorAssignForm from "./VectorAssignForm.jsx";
 import { isSafeExpr } from "../../pipeline/exprGuard.js";
+import { makeRowFn, compileRowExpr, NA_OPS, isNA } from "../../pipeline/rowExpr.js";
 import { menuLabel, evalPredicate } from "../../pipeline/predicate.js";
 
 // ─── MUTATE SUB-TAB ───────────────────────────────────────────────────────────
@@ -38,8 +39,8 @@ function MutateSubTab({rows, headers, info, onAdd}){
 
   // Per-row helpers (scalar context)
   const ROW_H={
-    ifelse:(c,t,f)=>c?t:f,
-    between:(x,lo,hi)=>(typeof x==="number"&&x>=lo&&x<=hi)?1:0,
+    ifelse:(c,t,f)=>isNA(c)?null:c?t:f,
+    between:(x,lo,hi)=>typeof x!=="number"||Number.isNaN(x)?null:(x>=lo&&x<=hi)?1:0,
     log:(x)=>(typeof x==="number"&&x>0)?Math.log(x):null,
     log2:(x)=>(typeof x==="number"&&x>0)?Math.log2(x):null,
     log10:(x)=>(typeof x==="number"&&x>0)?Math.log10(x):null,
@@ -97,7 +98,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
     if(!isSafeExpr(e))return{error:"Disallowed identifier (e.g. fetch, localStorage, constructor)",vals:[],grouped:false};
     if(!isGrouped){
       const pN=[...Object.keys(ROW_H),"row",...safeH];
-      let fn;try{fn=new Function(...pN,`"use strict";return(${e});`);}catch(err){return{error:`Syntax: ${err.message}`,vals:[],grouped:false};}
+      let fn;try{fn=makeRowFn(e,pN);}catch(err){return{error:`Syntax: ${err.message}`,vals:[],grouped:false};}
       const vals=[],errs=[];
       rows.slice(0,6).forEach(r=>{
         try{let v=fn(...Object.values(ROW_H),r,...safeH.map(h=>r[h]??null));if(v===undefined||(typeof v==="number"&&!isFinite(v)))v=null;vals.push(v);}
@@ -123,7 +124,7 @@ function MutateSubTab({rows, headers, info, onAdd}){
       const pN=[...Object.keys(gh),...safeH];
       const pV=[...Object.values(gh),...safeH.map(h=>colArrs[h])];
       let v=null;
-      try{const fn2=new Function(...pN,`"use strict";return(${e});`);v=fn2(...pV);if(v===undefined||(typeof v==="number"&&!isFinite(v)))v=null;}catch(_){}
+      try{const fn2=new Function(...pN,"__na",`"use strict";return(${compileRowExpr(e)??e});`);v=fn2(...pV,NA_OPS);if(v===undefined||(typeof v==="number"&&!isFinite(v)))v=null;}catch(_){}
       vals.push(v);labels.push(gmBy.map(b=>String(grp[0][b]??"")).join(" · "));
     }
     return{vals,labels,hasResult:vals.some(v=>v!==null),grouped:true,error:null};

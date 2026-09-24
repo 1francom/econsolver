@@ -120,6 +120,7 @@ import {
   buildModelAvail, buildModelHint, resolveEstimator,
 } from "./modeling/helpers.js";
 import { runEstimationOnRows, buildEstimationConfigFromSpec } from "./modeling/runEstimation.js";
+import { nextPaint } from "../utils/nextPaint.js";
 
 // ─── CS RESULTS PANEL (Callaway-Sant'Anna) ────────────────────────────────────
 // Tabbed result panel for CallawayCS estimation. Separated from the IIFE
@@ -568,7 +569,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
   // for THIS estimation only; never mutates the stored panel declaration.
   const [selectedFeCols, setSelectedFeCols] = useState(null);
   // Plain "FE" (linear, within estimator) historically demeans by ENTITY ONLY
-  // (validated vs R fixest::feols(y ~ x | unit) — see engineValidation.js).
+  // (the fixest::feols(y ~ x | unit) default).
   // LSDV also historically defaulted to entity-only (its old separate "Time
   // Fixed Effects" toggle defaulted off — that toggle is gone now, the Fixed
   // Effects picker is the sole source of truth). Both must stay entity-only,
@@ -798,6 +799,17 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
   // ── G12: Plot Builder panel ───────────────────────────────────────────────
   const [plotOpen,        setPlotOpen]        = useState(false);
+  // Post-estimation tools (Plot Builder, Predict, Coefficient Test, model
+  // export/import) sit in ONE collapsible block below the result, closed by
+  // default, so the model output is not pushed off screen by four headers.
+  // Remembered per browser — a per-viewer convenience, not project state.
+  const [toolsOpen, setToolsOpen] = useState(() => {
+    try { return localStorage.getItem("litux.modelToolsOpen") === "1"; } catch { return false; }
+  });
+  const toggleTools = () => setToolsOpen(v => {
+    try { localStorage.setItem("litux.modelToolsOpen", v ? "0" : "1"); } catch { /* storage blocked */ }
+    return !v;
+  });
   const [plotTemplateKey, setPlotTemplateKey]  = useState(0);
   const [plotInitLayers,  setPlotInitLayers]   = useState([]);
 
@@ -1006,6 +1018,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setSpecRunning(true);
     try {
       const baseRows = await getFullRows();
+      await nextPaint();
       for (let t = Number(start); t <= Number(end) + 1e-9; t += s) {
         const filtered = (baseRows ?? []).filter(row => {
           const v = Number(row[col]);
@@ -1041,6 +1054,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setSubsetRunSummary(null);
     try {
       const baseRows = await getFullRows();
+      await nextPaint();
       const hasSubsetSteps = branchPointIdx !== null && branchPointIdx < fullPipeline.length - 1;
       const perSubsetSteps = hasSubsetSteps ? fullPipeline.slice(branchPointIdx + 1) : [];
       const failures = [];
@@ -1105,6 +1119,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
     setRunning(true);
     try {
       const baseRows = await getFullRows();
+      await nextPaint();
       // The model buffer is a fixed-size FIFO, so importing a full file can
       // evict pins the user already had — permanently, since it persists.
       // Measured, not assumed: `before + added - after` needs no knowledge of
@@ -1694,8 +1709,11 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
 
           if (effModel === "LIML") {
             // ── LIML SQL branch (Fase 3b + Fase 8 robust-SE backfill) ──
-            if (!["classical", "HC0", "HC1", "clustered", "HAC"].includes(seTypeNorm)) {
-              throw new Error(`LIML SQL path does not support ${seTypeNorm} - fallback to JS`);
+            // Robust LIML needs k-class scores (1−κ)x + κx̂ in the meat; the SQL
+            // meat builders use the raw design, which gave SEs ~55% off Stata on
+            // the endogenous regressor. Classical only until that exists.
+            if (seTypeNorm !== "classical") {
+              throw new Error(`LIML SQL path supports classical SE only (${seTypeNorm}) - fallback to JS`);
             }
             const { xColsExpanded: wExp, dummySQL: wDummy } = await expandFactors({ xCols: wVars, tableName: duckTable, factorRefs });
             const { xColsExpanded: xExp, dummySQL: xDummy } = await expandFactors({ xCols: xVars, tableName: duckTable, factorRefs });
@@ -2155,6 +2173,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
       // ── Standard path: extract full rows into JS, run engine ───────────────
       // For DuckDB datasets, `rows` is only a 500-row preview.
       const estimationRows = await getFullRows();
+      await nextPaint();   // let "running" render before the engine blocks the thread
       const mj = await measure(async () => _runEstimation(estimationRows));
       const out = mj.result;
       logEstimate({
@@ -2371,6 +2390,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
               "Extract: write fitted values, residuals or estimated fixed effects back as dataset columns",
               "Coefficient test: post-estimation hypothesis tests on a pinned model, joint tests included",
               "Bacon decomposition (under a TWFE DiD result): shows how much weight sits on later-vs-earlier-treated comparisons",
+              "Post-estimation tools (collapsed below the result, click to open): Plot Builder, Predict from Model, Coefficient Test, and Export / Import models",
               "Plot Builder: result-augmented charts, plus a coefficient-comparison mode across pinned models",
               "◫ in the top bar opens the floating artifact panel without leaving this tab — useful for checking a saved plot against the spec you are building",
               "Subsets: define named subsets and run the same spec on all of them at once",
@@ -2971,7 +2991,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     { id: "yhat",  label: "Y vs Ŷ",
                       node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={resultY} /> },
                     { id: "forest", label: "Coefficient plot",
-                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-ols" filename="ols_coefficients.svg" /> },
+                      node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-ols" filename="ols_coefficients.svg" /> },
                     { id: "resid",  label: "Residuals vs Fitted",
                       node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
                     { id: "qq",     label: "Q-Q",
@@ -3025,7 +3045,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   defaultId="forest"
                   plots={[
                     { id: "forest", label: "Coefficient plot",
-                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-spatial" filename="spatial_regression_coefficients.svg" /> },
+                      node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-spatial" filename="spatial_regression_coefficients.svg" /> },
                     { id: "yhat", label: "Y vs Ŷ",
                       node: <YFittedPlot resid={r.resid} Yhat={r.Yhat} yLabel={yVar[0]} svgIdSuffix="-spatial" /> },
                     { id: "resid", label: "Residuals vs Fitted",
@@ -3276,7 +3296,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} factorMap={r.factorMap} />
                 <PlotSelector accentColor={C.blue} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
-                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
+                    node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-lsdv" filename="lsdv_coefficients.svg" /> },
                   { id: "resid", label: "Residuals", node: <ResidualVsFitted resid={r.resid} Yhat={r.Yhat} /> },
                 ]} />
                 <ExportBar yVar={yVar[0]} results={r} model="LSDV"
@@ -3307,10 +3327,10 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                   { label: "n",       value: r.n,                              color: C.text },
                 ]} />
                 <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} factorMap={r.factorMap} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel={r.testStatLabel} irr={r.IRR} factorMap={r.factorMap} />
                 <PlotSelector accentColor={C.violet} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
-                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poisson" filename="poisson_coefficients.svg" /> },
+                    node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-poisson" filename="poisson_coefficients.svg" /> },
                 ]} />
               </div>
             );
@@ -3345,7 +3365,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     : `AIC/BIC penalty includes entity FEs (k = ${r.k} regressors + ${r.nUnits ?? Object.keys(r.alphas ?? {}).length} entity FEs — comparable to R LSDV AIC)`}
                 </div>
                 <Lbl color={C.textMuted}>Coefficient Table — toggle β / IRR (exp(β))</Lbl>
-                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} irr={r.IRR} factorMap={r.factorMap} />
+                <CoeffTable dict={dict} rows={rows} varNames={r.varNames} beta={r.beta} se={r.se} tStats={r.testStats} pVals={r.pVals} yVar={yVar[0]} df={r.df} statLabel={r.testStatLabel} irr={r.IRR} factorMap={r.factorMap} />
                 {isNegBin && (
                   <div style={{ marginTop: "1rem", marginBottom: "1rem", padding: "0.85rem 1rem", background: C.surface2, border: `1px solid ${C.violet}40`, borderLeft: `3px solid ${C.violet}`, borderRadius: 4 }}>
                     <div style={{ fontSize: T.caption.fontSize, color: C.violet, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 6, fontFamily: T.code.fontFamily }}>
@@ -3402,7 +3422,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                 )}
                 <PlotSelector accentColor={C.violet} defaultId="forest" plots={[
                   { id: "forest", label: "Coefficient plot",
-                    node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={isNegBin ? "forest-negbinfe" : "forest-poissonfe"} filename={isNegBin ? "negbinfe_coefficients.svg" : "poissonfe_coefficients.svg"} /> },
+                    node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={isNegBin ? "forest-negbinfe" : "forest-poissonfe"} filename={isNegBin ? "negbinfe_coefficients.svg" : "poissonfe_coefficients.svg"} /> },
                 ]} />
                 <ExportBar yVar={yVar[0]} results={r} model={r.type}
                   onReport={() => openReport({ ...r, modelLabel: isNegBin ? "Negative Binomial FE" : "Poisson FE", yVar: yVar[0], xVars: [...xVars, ...wVars] })}
@@ -3512,7 +3532,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                       ? { id: "main", label: "Parallel trends", node: <DiDPlot result={r} yLabel={yVar[0]} /> }
                       : { id: "main", label: "Event study",     node: <EventStudyPlot result={r} yLabel={yVar[0]} /> },
                     { id: "forest", label: "Coefficient plot",
-                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${result.type.toLowerCase()}`} filename={`${result.type.toLowerCase()}_coefficients.svg`} /> },
+                      node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${result.type.toLowerCase()}`} filename={`${result.type.toLowerCase()}_coefficients.svg`} /> },
                   ]}
                 />
                 {/* Goodman-Bacon: explains the TWFE number by splitting it into
@@ -3660,7 +3680,7 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
                     { id: "hist", label: "Predicted Probabilities",
                       node: <PredProbHistogram fitted={r.Yhat} Y={validY} /> },
                     { id: "forest", label: "Coefficient plot",
-                      node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${family}`} filename={`${family}_coefficients.svg`} /> },
+                      node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId={`forest-${family}`} filename={`${family}_coefficients.svg`} /> },
                   ]}
                 />
 
@@ -3788,6 +3808,30 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           />
 
         </div>
+
+        {/* ── Post-estimation tools: one collapsible block ── */}
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, marginBottom: toolsOpen ? "1.4rem" : "0.6rem", overflow: "hidden" }}>
+          <button
+            onClick={toggleTools}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 8,
+              padding: "0.5rem 0.85rem", background: C.surface2, border: "none",
+              borderBottom: toolsOpen ? `1px solid ${C.border}` : "none",
+              cursor: "pointer", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+              color: C.textDim, textAlign: "left",
+            }}
+          >
+            <span style={{ color: C.textMuted }}>{toolsOpen ? "▾" : "▸"}</span>
+            <span style={{ letterSpacing: "0.2em", textTransform: "uppercase" }}>Post-estimation tools</span>
+            <span style={{ color: C.textMuted }}>
+              {[result && "Plot Builder", pinnedModels.length > 0 && "Predict", pinnedModels.length > 0 && "Coefficient test", "Export / Import models"].filter(Boolean).join(" · ")}
+            </span>
+            {pinnedModels.length > 0 && (
+              <span style={{ marginLeft: "auto", color: C.textMuted }}>{pinnedModels.length} pinned</span>
+            )}
+          </button>
+          {toolsOpen && (
+          <div style={{ padding: "0.6rem 0.6rem 0" }}>
 
         {/* ── G12: Plot Builder panel ── */}
         {result && (
@@ -4004,6 +4048,9 @@ export default function ModelingTab({ cleanedData, availableDatasets = [], onBac
           filenameBase={(cleanedData?.filename ?? "dataset").replace(/\.[^.]+$/, "").replace(/[^\w.-]/g, "_").slice(0, 100)}
           onImportAll={importModelsFromFile}
         />
+          </div>
+          )}
+        </div>
 
         {/* ── Import summary: every spec estimated + pinned, failures named ── */}
         {importSummary && (() => {

@@ -1,8 +1,9 @@
 // ─── ECON STUDIO · ExplorerModule.jsx ────────────────────────────────────────
 // Evidence Explorer: EDA, distributions, correlation heatmap, AI insights.
 // Consumes cleanedData emitted by WranglingModule.
-import { useState, useMemo, useRef, useEffect, Fragment } from "react";
-import { extractAllRows, queryDuckDB } from "./services/data/duckdb.js";
+import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from "react";
+import { extractAllRows, queryDuckDB, getTablePage } from "./services/data/duckdb.js";
+import { fetchColumnInfoSQL, fetchSummaryStatsSQL, runDuckSQL } from "./services/data/duckdbExplore.js";
 import { useTheme } from "./ThemeContext.jsx";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
@@ -526,6 +527,51 @@ async function fetchCorrMatrixSQL(duckTable, numH) {
 const CORR_AUTO_MAX   = 15;
 // Even hand-picked, past this the labels collide and the cells are a few px wide.
 const CORR_RENDER_MAX = 60;
+// Summary shows every numeric variable up to this many; past it, the first ones
+// are shown and the rest are opt-in through the variable picker.
+const SUMMARY_AUTO_MAX = 15;
+
+// Search-and-tick variable picker, shared by Correlation and Summary.
+function VarPicker({all,sel,setSel,tooMany=false}){
+  const{C,T}=useTheme();
+  const [query,setQuery]=useState("");
+  const shown=query.trim()
+    ? all.filter(h=>h.toLowerCase().includes(query.trim().toLowerCase()))
+    : all;
+  const toggle=h=>setSel(prev=>prev.includes(h)?prev.filter(x=>x!==h):[...prev,h]);
+  const btn={padding:"3px 9px",fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+    background:"none",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textDim,cursor:"pointer"};
+  return(
+    <div style={{marginBottom:"0.8rem"}}>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
+        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search variables…"
+          style={{flex:"1 1 200px",maxWidth:280,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+            background:C.surface2,color:C.text,border:`1px solid ${C.border}`,borderRadius:3,padding:"4px 7px"}}/>
+        <button style={btn} onClick={()=>setSel(prev=>[...new Set([...prev,...shown])])}>
+          {`Add shown (${shown.length})`}
+        </button>
+        <button style={btn} onClick={()=>setSel(prev=>prev.filter(h=>!shown.includes(h)))}>Remove shown</button>
+        <button style={btn} onClick={()=>setSel([])}>Clear</button>
+        <span style={{fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>
+          <span style={{color:tooMany?C.red:C.gold}}>{sel.length}</span>{` of ${all.length} selected`}
+        </span>
+      </div>
+      <div style={{maxHeight:150,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:3,
+        padding:"5px 7px",display:"flex",flexWrap:"wrap",gap:"3px 10px"}}>
+        {shown.length===0&&<span style={{fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.body.fontFamily}}>No variable matches that search.</span>}
+        {shown.map(h=>(
+          <label key={h} title={h} style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",
+            fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+            color:sel.includes(h)?C.teal:C.textDim,width:"calc(25% - 10px)",minWidth:130,
+            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            <input type="checkbox" checked={sel.includes(h)} onChange={()=>toggle(h)} style={{accentColor:C.teal,flexShrink:0}}/>
+            {h}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function CorrHeatmap({headers,rows,info,duckTable,selectable=false,onColsChange}){
   const{C,T}=useTheme();
@@ -534,9 +580,8 @@ function CorrHeatmap({headers,rows,info,duckTable,selectable=false,onColsChange}
   const autoAll=!selectable||numH.length<=CORR_AUTO_MAX;
 
   const [sel,setSel]=useState(()=>autoAll?numH:[]);
-  const [query,setQuery]=useState("");
   // Re-seed when the dataset (or the Explore filter) changes the numeric set.
-  useEffect(()=>{setSel(autoAll?numH:[]);setQuery("");
+  useEffect(()=>{setSel(autoAll?numH:[]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[numHKey,autoAll]);
 
@@ -570,44 +615,7 @@ function CorrHeatmap({headers,rows,info,duckTable,selectable=false,onColsChange}
     [rows, selKey, tooMany]
   );
 
-  const shown=query.trim()
-    ? numH.filter(h=>h.toLowerCase().includes(query.trim().toLowerCase()))
-    : numH;
-  const toggle=h=>setSel(prev=>prev.includes(h)?prev.filter(x=>x!==h):[...prev,h]);
-
-  const btn={padding:"3px 9px",fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
-    background:"none",border:`1px solid ${C.border2}`,borderRadius:3,color:C.textDim,cursor:"pointer"};
-
-  const picker=selectable&&(
-    <div style={{marginBottom:"0.8rem"}}>
-      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
-        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search variables…"
-          style={{flex:"1 1 200px",maxWidth:280,fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
-            background:C.surface2,color:C.text,border:`1px solid ${C.border}`,borderRadius:3,padding:"4px 7px"}}/>
-        <button style={btn} onClick={()=>setSel(prev=>[...new Set([...prev,...shown])])}>
-          {`Add shown (${shown.length})`}
-        </button>
-        <button style={btn} onClick={()=>setSel(prev=>prev.filter(h=>!shown.includes(h)))}>Remove shown</button>
-        <button style={btn} onClick={()=>setSel([])}>Clear</button>
-        <span style={{fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.code.fontFamily}}>
-          <span style={{color:tooMany?C.red:C.gold}}>{sel.length}</span>{` of ${numH.length} selected`}
-        </span>
-      </div>
-      <div style={{maxHeight:150,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:3,
-        padding:"5px 7px",display:"flex",flexWrap:"wrap",gap:"3px 10px"}}>
-        {shown.length===0&&<span style={{fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.body.fontFamily}}>No variable matches that search.</span>}
-        {shown.map(h=>(
-          <label key={h} title={h} style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",
-            fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
-            color:sel.includes(h)?C.teal:C.textDim,width:"calc(25% - 10px)",minWidth:130,
-            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            <input type="checkbox" checked={sel.includes(h)} onChange={()=>toggle(h)} style={{accentColor:C.teal,flexShrink:0}}/>
-            {h}
-          </label>
-        ))}
-      </div>
-    </div>
-  );
+  const picker=selectable&&<VarPicker all={numH} sel={sel} setSel={setSel} tooMany={tooMany}/>;
 
   const note=msg=>(
     <div style={{fontSize:T.code.fontSize,color:C.textMuted,fontFamily:T.body.fontFamily,padding:"1rem 0"}}>{msg}</div>
@@ -668,16 +676,44 @@ function CorrHeatmap({headers,rows,info,duckTable,selectable=false,onColsChange}
 }
 
 // ─── SUMMARY TABLE (Table 1) ──────────────────────────────────────────────────
-function SummaryTable({rows,headers,info,panel,onPin}){
+// `duckTable` set = compute in DuckDB over the full table (`rows` is only a
+// preview then); null = compute on `rows` in JS.
+function SummaryTable({rows,headers,info,panel,onPin,duckTable=null,totalRows}){
   const{C,T}=useTheme();
-  const numH=headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null);
+  const numAll=useMemo(()=>headers.filter(h=>info[h]?.isNum&&info[h]?.mean!=null),[headers,info]);
   const catH=headers.filter(h=>info[h]?.isCat&&!info[h]?.isNum);
+  const nTotal=totalRows??rows.length;
+  // Variable selection: every numeric variable up to SUMMARY_AUTO_MAX, otherwise
+  // the first SUMMARY_AUTO_MAX and the rest through the picker in the header.
+  const numAllKey=numAll.join("|");
+  const [selVars,setSelVars]=useState(()=>numAll.slice(0,SUMMARY_AUTO_MAX));
+  const [pickerOpen,setPickerOpen]=useState(false);
+  useEffect(()=>{setSelVars(numAll.slice(0,SUMMARY_AUTO_MAX));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[numAllKey]);
+  const canPick=numAll.length>SUMMARY_AUTO_MAX;
+  const numH=useMemo(()=>numAll.filter(h=>selVars.includes(h)),[numAll,selVars]);
   const [groupBy,  setGroupBy]  = useState("");
   const [view,     setView]     = useState("stats"); // "stats"|"head"|"tail"
   const [viewN,    setViewN]    = useState(6);
   const [extraQs,  setExtraQs]  = useState([]);      // custom percentiles e.g. [5,95]
   const [qInput,   setQInput]   = useState("");
-  const groups=groupBy?[...new Set(rows.map(r=>r[groupBy]).filter(v=>v!=null))].sort():["All"];
+  // Rows are partitioned ONCE per (rows, groupBy). The table used to filter the
+  // whole dataset for every group × column on every render — 2.6 s per render
+  // at 100k rows, 180 groups and 7 variables, including each keystroke in the
+  // percentile box.
+  const groupRows=useMemo(()=>{
+    if(!groupBy||duckTable) return null;
+    const m=new Map();
+    for(const r of rows){ const v=r[groupBy]; if(v==null) continue; let a=m.get(v); if(!a){a=[];m.set(v,a);} a.push(r); }
+    return m;
+  },[rows,groupBy,duckTable]);
+  const [sqlRes,setSqlRes]=useState(null);
+  const [sqlErr,setSqlErr]=useState(null);
+  const jsGroups=useMemo(()=>groupRows?[...groupRows.keys()].sort():["All"],[groupRows]);
+  const groups=duckTable?(sqlRes?.groups??[]):jsGroups;
+  const subsetOf=g=>groupRows?(groupRows.get(g)??[]):rows;
+  const groupCount=g=>duckTable?(sqlRes?.counts?.[g]??0):subsetOf(g).length;
 
   function qtile(sorted,p){
     if(!sorted.length)return null;
@@ -685,7 +721,9 @@ function SummaryTable({rows,headers,info,panel,onPin}){
     return lo===hi?sorted[lo]:sorted[lo]+(sorted[hi]-sorted[lo])*(i-lo);
   }
   function statsFor(subset,col){
-    const vals=subset.map(r=>r[col]).filter(v=>typeof v==="number"&&isFinite(v)).sort((a,b)=>a-b);
+    const buf=new Float64Array(subset.length); let k=0;
+    for(const r of subset){ const v=r[col]; if(typeof v==="number"&&isFinite(v)) buf[k++]=v; }
+    const vals=buf.subarray(0,k).sort();
     if(!vals.length)return{mean:null,std:null,min:null,max:null,median:null,q1:null,q3:null,n:0};
     const mean=vals.reduce((a,b)=>a+b,0)/vals.length;
     const std=Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length);
@@ -702,15 +740,24 @@ function SummaryTable({rows,headers,info,panel,onPin}){
   const fmt=v=>v!=null?v.toFixed(3):"—";
   const [copiedExport,setCopiedExport]=useState("");
 
-  function buildRows(){
-    return numH.map(h=>{
-      const subset=groupBy?null:rows;
-      return{h,groups:groups.map(g=>{
-        const sub=groupBy?rows.filter(r=>r[groupBy]===g):rows;
-        return{g,s:statsFor(sub,h)};
-      })};
-    });
-  }
+  const numKey=numH.join("|");
+  const qKey=extraQs.join(",");
+  useEffect(()=>{
+    if(!duckTable||view!=="stats"){setSqlRes(null);return;}
+    let cancelled=false;
+    setSqlErr(null);
+    fetchSummaryStatsSQL(runDuckSQL,duckTable,numH,{groupBy:groupBy||null,quantiles:extraQs})
+      .then(r=>{if(!cancelled)setSqlRes(r);})
+      .catch(e=>{if(!cancelled){console.error("[SummaryTable] SQL stats failed:",e);setSqlErr(e?.message||"query failed");}});
+    return()=>{cancelled=true;};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[duckTable,view,numKey,groupBy,qKey]);
+  const statsTable=useMemo(()=>{
+    if(duckTable) return sqlRes?numH.filter(h=>sqlRes.stats[h]).map(h=>({h,groups:sqlRes.groups.map(g=>({g,s:sqlRes.stats[h][g]}))})):[];
+    return numH.map(h=>({h,groups:groups.map(g=>({g,s:statsFor(subsetOf(g),h)}))}));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[duckTable,sqlRes,numKey,groups,groupRows,rows,extraQs]);
+  function buildRows(){ return statsTable; }
 
   function copyCSV(){
     const tblRows=buildRows();
@@ -750,11 +797,24 @@ function SummaryTable({rows,headers,info,panel,onPin}){
 
   const thS={padding:"0.35rem 0.6rem",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,color:C.textMuted,fontWeight:400,letterSpacing:"0.1em",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,background:C.surface2,textAlign:"right",whiteSpace:"nowrap"};
   const tdS={padding:"0.32rem 0.6rem",fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,color:C.text,borderBottom:`1px solid ${C.border}`,textAlign:"right",whiteSpace:"nowrap"};
-  const chipBtn=(active,color,onClick,label)=>(
-    <button onClick={onClick} style={{padding:"0.22rem 0.6rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{label}</button>
+  // `key` is a parameter because this helper CREATES the element — a key set at
+  // the .map() call site would land on the call, not on the button, which is
+  // why React warned about SummaryTable's children.
+  const chipBtn=(active,color,onClick,label,key)=>(
+    <button key={key} onClick={onClick} style={{padding:"0.22rem 0.6rem",border:`1px solid ${active?color:C.border2}`,background:active?`${color}18`:"transparent",color:active?color:C.textDim,borderRadius:3,cursor:"pointer",fontSize: T.caption.fontSize,fontFamily: T.code.fontFamily}}>{label}</button>
   );
 
-  const previewRows=view==="head"?rows.slice(0,viewN):view==="tail"?rows.slice(-viewN):[];
+  // head/tail read the real ends of the table — from DuckDB when it is backed
+  // by one, since `rows` is then only a preview.
+  const [sqlPage,setSqlPage]=useState([]);
+  useEffect(()=>{
+    if(!duckTable||view==="stats") return;
+    let cancelled=false;
+    const off=view==="head"?0:Math.max(0,nTotal-viewN);
+    getTablePage(duckTable,off,viewN).then(r=>{if(!cancelled)setSqlPage(r);}).catch(()=>{if(!cancelled)setSqlPage([]);});
+    return()=>{cancelled=true;};
+  },[duckTable,view,viewN,nTotal]);
+  const previewRows=duckTable?(view==="stats"?[]:sqlPage):view==="head"?rows.slice(0,viewN):view==="tail"?rows.slice(-viewN):[];
   const prevH=headers.slice(0,8);
 
   return(
@@ -766,7 +826,7 @@ function SummaryTable({rows,headers,info,panel,onPin}){
           <Lbl mb={0}>Group by</Lbl>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
             {chipBtn(!groupBy,C.gold,()=>setGroupBy(""),"None")}
-            {catH.map(h=>chipBtn(groupBy===h,C.gold,()=>setGroupBy(h),h))}
+            {catH.map(h=>chipBtn(groupBy===h,C.gold,()=>setGroupBy(h),h,h))}
           </div>
         </div>
         <div style={{width:1,height:20,background:C.border,flexShrink:0}}/>
@@ -774,7 +834,7 @@ function SummaryTable({rows,headers,info,panel,onPin}){
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <Lbl mb={0}>View</Lbl>
           <div style={{display:"flex",gap:4,alignItems:"center"}}>
-            {[["stats","Stats"],["head","head(n)"],["tail","tail(n)"]].map(([k,l])=>chipBtn(view===k,C.teal,()=>setView(k),l))}
+            {[["stats","Stats"],["head","head(n)"],["tail","tail(n)"]].map(([k,l])=>chipBtn(view===k,C.teal,()=>setView(k),l,k))}
             {view!=="stats"&&<input type="number" min={1} max={500} value={viewN} onChange={e=>setViewN(Math.max(1,parseInt(e.target.value)||6))}
               style={{width:44,padding:"0.2rem 0.4rem",background:C.surface2,border:`1px solid ${C.border2}`,borderRadius:3,color:C.text,fontFamily: T.code.fontFamily,fontSize: T.caption.fontSize,outline:"none"}}/>}
           </div>
@@ -804,15 +864,37 @@ function SummaryTable({rows,headers,info,panel,onPin}){
         }}/></>}
       </div>
 
+      {/* ── Variable picker (opened from the Variable header) ── */}
+      {view==="stats"&&canPick&&pickerOpen&&<VarPicker all={numAll} sel={selVars} setSel={setSelVars}/>}
+      {view==="stats"&&canPick&&!pickerOpen&&numH.length<numAll.length&&(
+        <div style={{marginBottom:6,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.body.fontFamily}}>
+          Showing {numH.length} of {numAll.length} numeric variables — use the Variable button in the table header to choose.
+        </div>
+      )}
+      {view==="stats"&&duckTable&&!sqlRes&&!sqlErr&&numH.length>0&&(
+        <div style={{marginBottom:6,fontSize:T.caption.fontSize,color:C.textMuted,fontFamily:T.body.fontFamily}}>⏳ computing over the full table…</div>
+      )}
+      {view==="stats"&&sqlErr&&(
+        <div style={{marginBottom:6,fontSize:T.caption.fontSize,color:C.red,fontFamily:T.body.fontFamily}}>⚠ {sqlErr}</div>
+      )}
       {/* ── Stats table ── */}
       {view==="stats"&&(
         <div style={{overflowX:"auto",borderRadius:4,border:`1px solid ${C.border}`}}>
           <table style={{borderCollapse:"collapse",width:"100%",fontSize: T.code.fontSize}}>
             <thead>
               <tr>
-                <th style={{...thS,textAlign:"left",minWidth:80}}>Variable</th>
+                <th style={{...thS,textAlign:"left",minWidth:80}}>
+                  {canPick
+                    ? <button onClick={()=>setPickerOpen(o=>!o)} title="Choose which variables the table shows"
+                        style={{background:pickerOpen?`${C.teal}18`:"none",border:`1px solid ${pickerOpen?C.teal:C.border2}`,borderRadius:3,
+                          color:pickerOpen?C.teal:C.textDim,cursor:"pointer",fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,
+                          letterSpacing:"0.1em",textTransform:"uppercase",padding:"2px 7px"}}>
+                        {`Variable ${pickerOpen?"▴":"▾"} ${numH.length}/${numAll.length}`}
+                      </button>
+                    : "Variable"}
+                </th>
                 {groups.map(g=><th key={g} colSpan={nCols} style={{...thS,textAlign:"center",color:C.gold}}>
-                  {groupBy?String(g):"Full sample"}{groupBy&&<span style={{color:C.textMuted}}> ({rows.filter(r=>r[groupBy]===g).length})</span>}
+                  {groupBy?String(g):"Full sample"}{groupBy&&<span style={{color:C.textMuted}}> ({groupCount(g)})</span>}
                 </th>)}
               </tr>
               <tr>
@@ -821,14 +903,12 @@ function SummaryTable({rows,headers,info,panel,onPin}){
               </tr>
             </thead>
             <tbody>
-              {numH.map((h,ri)=>(
+              {statsTable.map(({h,groups:grs},ri)=>(
                 <tr key={h} style={{background:ri%2?C.surface2:C.surface}}>
                   <td style={{...tdS,textAlign:"left",color:C.teal}}>{h}</td>
-                  {groups.map(g=>{
-                    const subset=groupBy?rows.filter(r=>r[groupBy]===g):rows;
-                    const s=statsFor(subset,h);
-                    return <Fragment key={g}>{allCols.map(([k])=><td key={k} style={tdS}>{fmt(s[k])}</td>)}</Fragment>;
-                  })}
+                  {grs.map(({g,s})=>(
+                    <Fragment key={g}>{allCols.map(([k])=><td key={k} style={tdS}>{fmt(s[k])}</td>)}</Fragment>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -849,7 +929,7 @@ function SummaryTable({rows,headers,info,panel,onPin}){
             </thead>
             <tbody>
               {previewRows.map((row,ri)=>{
-                const absIdx=view==="head"?ri:rows.length-viewN+ri;
+                const absIdx=view==="head"?ri:Math.max(0,nTotal-viewN)+ri;
                 return(
                   <tr key={ri} style={{background:ri%2?C.surface2:C.surface}}>
                     <td style={{...tdS,textAlign:"right",color:C.textMuted}}>{absIdx+1}</td>
@@ -865,7 +945,7 @@ function SummaryTable({rows,headers,info,panel,onPin}){
 
       <div style={{marginTop:8,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <span style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily}}>
-          {view==="stats"?`N=${rows.length} total observations · ${numH.length} numeric variables`:`Showing ${view}(${viewN}) of ${rows.length} rows`}
+          {view==="stats"?`N=${nTotal} total observations · ${numH.length} of ${numAll.length} numeric variables`:`Showing ${view}(${viewN}) of ${nTotal} rows`}
         </span>
         {view==="stats"&&numH.length>0&&<>
           {[["csv","CSV"],["latex","LaTeX"]].map(([id,label])=>(
@@ -954,7 +1034,7 @@ function DispersionPanel({rows,headers,info,onPin}){
 }
 
 // ─── DISTRIBUTION TAB ─────────────────────────────────────────────────────────
-function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
+function DistributionTab({rows,headers,info,panel,onPin,duckTable,rowsReady=true,onLoadRows,rowsLoading=false,totalRows}){
   const{C,T}=useTheme();
   const palette = [
     { label:"teal",  val:C.teal },
@@ -1318,7 +1398,9 @@ function DistributionTab({rows,headers,info,panel,onPin,duckTable}){
           </div>
           {spagCol&&<div>
             <div style={{fontSize: T.caption.fontSize,color:C.textMuted,fontFamily: T.code.fontFamily,marginBottom:8}}>i={panel.entityCol} · t={panel.timeCol} · showing ≤15 random units</div>
-            <SvgSpaghetti rows={rows} entityCol={panel.entityCol} timeCol={panel.timeCol} col={spagCol} sampleN={15}/>
+            {rowsReady
+              ? <SvgSpaghetti rows={rows} entityCol={panel.entityCol} timeCol={panel.timeCol} col={spagCol} sampleN={15}/>
+              : <LoadRowsGate n={totalRows ?? rows.length} what="Unit trajectories" onLoad={onLoadRows} loading={rowsLoading}/>}
           </div>}
         </div>
       )}
@@ -1439,7 +1521,7 @@ function AdfPanel({ results }) {
 }
 
 // ─── TIME SERIES TAB ──────────────────────────────────────────────────────────
-function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable }) {
+function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable, totalRows }) {
   const{C,T}=useTheme();
   const numH = headers.filter(h => info[h]?.isNum);
   const catH = headers.filter(h => info[h]?.isCat || (!info[h]?.isNum && headers.includes(h)));
@@ -1772,7 +1854,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable }) {
           <div style={{ padding: "0.35rem 0.9rem", background: C.surface2, borderTop: `1px solid ${C.border}`, fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, display: "flex", gap: 16 }}>
             <span>{series.length} serie{series.length !== 1 ? "s" : ""}</span>
             <span>{series[0]?.pts.length} time points</span>
-            <span>n = {rows.length} observations</span>
+            <span>n = {(duckTable ? (totalRows ?? rows.length) : rows.length).toLocaleString()} observations</span>
           </div>
         </div>
       ) : (
@@ -1783,7 +1865,7 @@ function TimeSeriesTab({ rows, headers, info, panel, onPin, duckTable }) {
     </div>
   );
 }
-function AIInsights({rows,headers,info,panel}){
+function AIInsights({rows,nObs,headers,info,panel}){
   const{C,T}=useTheme();
   const [text,setText]=useState(""),[loading,setLoading]=useState(false),[done,setDone]=useState(false);
   const ran = { current: false };
@@ -1798,7 +1880,7 @@ function AIInsights({rows,headers,info,panel}){
       return `${h}: mean=${i.mean?.toFixed(3)}, std=${i.std?.toFixed(3)}, min=${i.min?.toFixed(3)}, max=${i.max?.toFixed(3)}, median=${i.median?.toFixed(3)}, NAs=${(i.naPct*100).toFixed(1)}%`;
     }).join("; ");
     const panelNote=panel?`Dataset is a ${panel.balance||"panel"} panel with i=${panel.entityCol} and t=${panel.timeCol}.`:"Dataset is cross-sectional.";
-    const prompt=`You are a senior econometrician. Write a concise 3-4 sentence descriptive paragraph (Table 1 prose style, academic tone) about this dataset. Include: total observations, key variables and their distributions (mention skewness or outliers if relevant), any notable patterns. ${panelNote}\n\nStats: ${summary}\n\nObs: ${rows.length}, Cols: ${headers.length}.\n\nRespond ONLY with the prose paragraph, no markdown, no headers.`;
+    const prompt=`You are a senior econometrician. Write a concise 3-4 sentence descriptive paragraph (Table 1 prose style, academic tone) about this dataset. Include: total observations, key variables and their distributions (mention skewness or outliers if relevant), any notable patterns. ${panelNote}\n\nStats: ${summary}\n\nObs: ${nObs ?? rows.length}, Cols: ${headers.length}.\n\nRespond ONLY with the prose paragraph, no markdown, no headers.`;
     callClaude({ user: prompt, maxTokens: 400 })
       .then(t=>{setText(t||"");setDone(true);}).catch(()=>setText("AI analysis unavailable.")).finally(()=>setLoading(false));
   }
@@ -1863,7 +1945,7 @@ function generateExploreScript(language, { headers, info, filename }) {
       `version 17`,
       `set more off`,
       ``,
-      `import delimited "${filename || `${base}.csv`}", clear`,
+      `import delimited "${filename || `${base}.csv`}", case(preserve) asdouble clear`,
       ``,
       `* ── Overview ──`,
       `describe`,
@@ -2503,6 +2585,26 @@ function QuickFilter({headers, rows, totalRows, filteredCount, conds, setConds})
   );
 }
 
+// Stands in for a panel that needs row objects on a DuckDB table that has not
+// been loaded into JS — loading is an explicit action, not a tab-open side effect.
+function LoadRowsGate({n,what,onLoad,loading,error}){
+  const{C,T}=useTheme();
+  return(
+    <div style={{marginTop:"1.4rem",padding:"0.7rem 0.9rem",border:`1px dashed ${C.border2}`,borderRadius:4,
+      display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",fontFamily:T.body.fontFamily,fontSize:T.caption.fontSize,color:C.textDim}}>
+      <span style={{flex:1,minWidth:220}}>
+        {error ? `⚠ Could not load the table: ${error}`
+          : `${what} work on individual rows. Load all ${Number(n).toLocaleString()} rows into memory to use them.`}
+      </span>
+      <button onClick={onLoad} disabled={loading&&!error}
+        style={{padding:"0.25rem 0.8rem",border:`1px solid ${C.teal}`,borderRadius:3,background:`${C.teal}14`,
+          color:C.teal,cursor:loading&&!error?"wait":"pointer",fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize}}>
+        {loading&&!error?"⏳ Loading…":"Load rows"}
+      </button>
+    </div>
+  );
+}
+
 // ─── EVIDENCE EXPLORER ROOT ───────────────────────────────────────────────────
 export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDataset, pid, projectPid, onRequestDataset, pendingPlot, onConsumePendingPlot}) {
   const{C,T}=useTheme();
@@ -2519,14 +2621,24 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
   // Permanent until the user re-imports the file, unlike `usingPreview` below.
   const duckdbRestoreFailed = !!cleanedData._duckdbRestoreFailed;
   const expectedRowCount = cleanedData._expectedRowCount ?? null;
+  const [tab,setTab] = useState("summary");
+  const [filterConds, setFilterConds] = useState([]);
+  const duckRowCount = cleanedData._duckdb?.rowCount ?? 0;
+  // The full table is materialised into JS only when something on screen needs
+  // row objects: an active ⊘ filter (still evaluated in JS), the Plot Builder,
+  // or a row-bound panel the user asked to run. Summary, Distributions,
+  // Correlation, Time Series and Group Summarize all compute in DuckDB, so a
+  // large dataset now opens without pulling every row across.
+  const [rowsRequested, setRowsRequested] = useState(false);
+  const wantRows = !!duckTable && (filterConds.length > 0 || tab === "plot" || rowsRequested);
   const [fullRows, setFullRows] = useState(null);
   const [fullRowsError, setFullRowsError] = useState(null);
   const [fullRowsRetry, setFullRowsRetry] = useState(0);
+  useEffect(() => { setFullRows(null); setFullRowsError(null); }, [duckTable]);
   useEffect(() => {
     let cancelled = false;
-    setFullRows(null);
+    if (!duckTable || !wantRows || fullRows) return;
     setFullRowsError(null);
-    if (!duckTable) return;
     extractAllRows(duckTable)
       .then(all => { if (!cancelled) setFullRows(all); })
       .catch(e => {
@@ -2535,18 +2647,41 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         setFullRowsError(e?.message || "failed to load the full dataset");
       });
     return () => { cancelled = true; };
-  }, [duckTable, fullRowsRetry]);
-  // Every stat/plot below reads `rows` — while this is true they are silently computed
-  // on the 500-row preview, not the full table. Never let that happen without telling the user.
-  const usingPreview = !!duckTable && !fullRows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duckTable, fullRowsRetry, wantRows]);
+  // Every JS-computed stat/plot below reads `rows` — while this is true they are
+  // computed on the preview, not the full table. Never let that happen silently.
+  const usingPreview = wantRows && !fullRows;
+  const rowsReady = !duckTable || !!fullRows;
   const rows = (duckTable && fullRows) ? fullRows : previewRows;
-  const info = useMemo(()=>buildInfo(headers,rows), [headers,rows]);
-  const [tab,setTab] = useState("summary");
-  const [filterConds, setFilterConds] = useState([]);
-  const filteredRows = useMemo(()=>{
-    if(!filterConds.length) return rows;
-    return rows.filter(row=>filterConds.every(cond=>matchCond(row,cond)));
-  },[rows,filterConds]);
+  // Column info from DuckDB for a DuckDB-backed table (identical to buildInfo —
+  // duckdbExploreValidation.mjs), so types and stats never come from the preview.
+  const headersKey = headers.join("\u0001");
+  const [sqlInfo, setSqlInfo] = useState(null);
+  useEffect(() => {
+    setSqlInfo(null);
+    if (!duckTable) return;
+    let cancelled = false;
+    fetchColumnInfoSQL(runDuckSQL, duckTable, headers)
+      .then(i => { if (!cancelled) setSqlInfo(i); })
+      .catch(e => console.error("[ExplorerModule] SQL column info failed, using loaded rows:", e));
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duckTable, headersKey]);
+  const info = useMemo(
+    () => (duckTable && sqlInfo) ? sqlInfo : buildInfo(headers, rows),
+    [duckTable, sqlInfo, headers, rows]);
+  const totalRows = duckTable ? (duckRowCount || rows.length) : rows.length;
+  // Single owner of "apply a QuickFilter condition list to rows" — the live bar
+  // and every pinned artifact must scope rows the same way, or a pin shows a
+  // different sample from the one it was created on.
+  const applyConds = useCallback((src, conds) => (
+    !conds?.length ? src : src.filter(row => conds.every(cond => matchCond(row, cond)))
+  ), []);
+  const filteredRows = useMemo(
+    () => applyConds(rows, filterConds),
+    [rows, filterConds, applyConds]
+  );
   // Numeric columns available to the group-contrast panel below Group Summarize.
   const numericCols = useMemo(
     () => headers.filter(h => info[h]?.isNum && info[h]?.mean != null),
@@ -2593,17 +2728,37 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
       params: { ...params, dataset: filename ?? null, filters: filterConds.length ? filterConds : null },
       label,
     });
-    setPinnedItems(prev => [...prev, { id: Date.now(), kind: params.kind, label, params }]);
+    // `dataset` binds the pin to the data it was computed on (the unified script
+    // and the project export need it; params stay exactly what re-renders it).
+    // `filters` freezes the row scope the pin was created on. Without it a pin
+    // redrew through whatever filter happened to be active later, so clearing
+    // the bar silently widened every pinned plot (and disagreed with the
+    // exported script, which has always compiled the pin's own filter).
+    setPinnedItems(prev => [...prev, {
+      id: Date.now(), kind: params.kind, label, params,
+      dataset: filename ?? null,
+      filters: filterConds.length ? JSON.parse(JSON.stringify(filterConds)) : null,
+    }]);
   };
   const removePin = (id) => setPinnedItems(prev => prev.filter(p => p.id !== id));
+  // Deliberate re-scoping: adopt the filter now in the bar, or drop the pin's
+  // filter so it covers the whole dataset.
+  const setPinFilters = (id, conds) => setPinnedItems(prev => prev.map(p => (
+    p.id === id ? { ...p, filters: conds?.length ? JSON.parse(JSON.stringify(conds)) : null } : p
+  )));
 
   // Re-render a pinned descriptive plot from its params + the current rows, so the
   // ExplorePinBar "Compare" panel shows the actual charts side by side (not just
   // params). Returns null for kinds without a chart (the bar falls back to text).
   const renderPinnedPlot = (item) => {
     const p = item?.params || {};
+    // The pin's OWN filter, not the bar's current one.
+    const pinRows = applyConds(rows, item?.filters);
+    // Pinned charts redraw from row objects; on a DuckDB table that has not been
+    // loaded that would be the preview, so show the text summary instead.
+    if (!rowsReady) return null;
     if (item?.kind === "histogram") {
-      let vals = filteredRows.map(r => Number(r[p.col])).filter(Number.isFinite);
+      let vals = pinRows.map(r => Number(r[p.col])).filter(Number.isFinite);
       if (p.transform === "log")        vals = vals.filter(v => v > 0).map(Math.log);
       else if (p.transform === "log10") vals = vals.filter(v => v > 0).map(Math.log10);
       else if (p.transform === "sqrt")  vals = vals.filter(v => v >= 0).map(Math.sqrt);
@@ -2612,19 +2767,19 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     }
     if (item?.kind === "barchart") {
       const counts = {};
-      filteredRows.forEach(r => { const k = String(r[p.col] ?? ""); counts[k] = (counts[k] || 0) + 1; });
+      pinRows.forEach(r => { const k = String(r[p.col] ?? ""); counts[k] = (counts[k] || 0) + 1; });
       let bars = Object.entries(counts).map(([label, count]) => ({ label, count }));
       if (p.order === "count") bars.sort((a, b) => b.count - a.count);
       return <SvgBarChart items={bars.slice(0, 15)} color={p.color} fillMode={p.fillMode ?? "filled"} title={p.title ?? ""} xLabel={p.xLabel ?? p.col} scale={p.scale ?? "linear"} />;
     }
     if (item?.kind === "spaghetti") {
-      return <SvgSpaghetti rows={filteredRows} entityCol={p.entityCol} timeCol={p.timeCol} col={p.col} sampleN={15} />;
+      return <SvgSpaghetti rows={pinRows} entityCol={p.entityCol} timeCol={p.timeCol} col={p.col} sampleN={15} />;
     }
     if (item?.kind === "timeseries") {
-      return <SvgMiniTimeSeries series={aggregateTimeSeries(filteredRows, p.timeCol, p.yCol, p.groupCol || "", p.agg || "mean")} />;
+      return <SvgMiniTimeSeries series={aggregateTimeSeries(pinRows, p.timeCol, p.yCol, p.groupCol || "", p.agg || "mean")} />;
     }
     if (item?.kind === "correlation") {
-      return <CorrHeatmap headers={p.cols ?? []} rows={filteredRows} info={info} />;
+      return <CorrHeatmap headers={p.cols ?? []} rows={pinRows} info={info} />;
     }
     return null;
   };
@@ -2757,7 +2912,7 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
               ? <>⚠ Could not load the full {(cleanedData._duckdb?.rowCount ?? 0).toLocaleString()}-row dataset — every stat and plot below is computed on a {previewRows.length.toLocaleString()}-row preview only.
                   <button onClick={()=>setFullRowsRetry(n=>n+1)} style={{fontFamily:T.code.fontFamily,fontSize:T.caption.fontSize,color:"inherit",background:"none",border:`1px solid currentColor`,borderRadius:3,padding:"0.15rem 0.5rem",cursor:"pointer"}}>retry</button>
                 </>
-              : <>⏳ Loading full dataset ({(cleanedData._duckdb?.rowCount ?? 0).toLocaleString()} rows)… stats and plots below are computed on a {previewRows.length.toLocaleString()}-row preview until this finishes.</>}
+              : <>⏳ Loading full dataset ({(cleanedData._duckdb?.rowCount ?? 0).toLocaleString()} rows) for the filter / Plot Builder… until it finishes, those views use a {previewRows.length.toLocaleString()}-row preview.</>}
           </div>
         )}
         <HintBox title="Explore" sections={[
@@ -2779,7 +2934,8 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             "Copies as t.test(y ~ treat, data = df) — the script references your data instead of pasting it in",
           ]},
           { heading: "Summary", items: [
-            "5-number summary (mean, SD, median, min, max) for all numeric variables",
+            "5-number summary (mean, SD, median, min, max) for the numeric variables — up to 15 are shown automatically; past that, the Variable button in the table header opens a search-and-tick picker (the pin and CSV/LaTeX copy follow your selection)",
+            "Large datasets (DuckDB-backed) are summarised over the full table without loading it into memory; panels that need individual rows (count diagnostics, group hypothesis tests) ask before loading them",
             "Dispersion panel: variance, IQR, skewness and kurtosis",
             "Group Summarize: aggregate by a categorical column and save the result as a new dataset",
           ]},
@@ -2815,9 +2971,9 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           ]},
         ]} />
         {/* AI Insights */}
-        <AIInsights rows={filteredRows} headers={headers} info={info} panel={panel}/>
+        <AIInsights rows={filteredRows} nObs={filterConds.length ? filteredRows.length : totalRows} headers={headers} info={info} panel={panel}/>
         {/* Quick Filter */}
-        <QuickFilter headers={headers} rows={rows} totalRows={rows.length} filteredCount={filteredRows.length} conds={filterConds} setConds={setFilterConds}/>
+        <QuickFilter headers={headers} rows={rows} totalRows={totalRows} filteredCount={filterConds.length ? filteredRows.length : totalRows} conds={filterConds} setConds={setFilterConds}/>
         {/* Tabs */}
         <div style={{display:"flex",gap:1,background:C.border,borderRadius:4,overflow:"hidden",marginBottom:"1.2rem"}}>
           {[["summary","⊞ Summary"],["visuals","⬡ Distributions"],["corr","⬡ Correlation"],["timeseries","⬡ Time Series"],["plot","◈ Plot Builder"]].map(([k,l])=>(
@@ -2826,8 +2982,12 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
         </div>
         {tab==="summary"&&(
           <>
-            <SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}/>
-            <DispersionPanel rows={filteredRows} headers={headers} info={info} onPin={pinExplore}/>
+            <SummaryTable rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore}
+              duckTable={filterConds.length ? null : duckTable}
+              totalRows={filterConds.length ? filteredRows.length : totalRows}/>
+            {rowsReady
+              ? <DispersionPanel rows={filteredRows} headers={headers} info={info} onPin={pinExplore}/>
+              : <LoadRowsGate n={totalRows} what="Count diagnostics and group hypothesis tests" onLoad={() => setRowsRequested(true)} loading={rowsRequested} error={fullRowsError}/>}
             <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
               <div style={{fontSize: T.caption.fontSize,color:C.textMuted,letterSpacing:"0.2em",textTransform:"uppercase",marginBottom:"0.8rem",fontFamily: T.code.fontFamily}}>Group Summarize</div>
               <GroupSummarizeExplorer rows={filteredRows} headers={headers} info={info} onSaveDataset={onSaveDataset} usingPreview={usingPreview}
@@ -2838,17 +2998,18 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
                 looking for it. Fed filteredRows, not rows: a contrast computed
                 on the whole sample sitting beside plots of a subgroup would be
                 two surfaces disagreeing about the same data. */}
-            <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
+            {rowsReady && <div style={{marginTop:"2rem",borderTop:`1px solid ${C.border}`,paddingTop:"1.5rem"}}>
               <SampleTestPanel
                 columns={numericCols.map(h => ({ name: h, values: filteredRows.map(r => r[h]) }))}
                 rows={filteredRows}
                 headers={headers}
                 title="Compare groups — hypothesis test"
               />
-            </div>
+            </div>}
           </>
         )}
-        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
+        {tab==="visuals"&&<DistributionTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}
+          rowsReady={rowsReady} onLoadRows={() => setRowsRequested(true)} rowsLoading={rowsRequested && !fullRowsError} totalRows={totalRows}/>}
         {tab==="corr"&&(
           <div>
             <div style={{fontSize: T.code.fontSize,color:C.textDim,lineHeight:1.7,marginBottom:"1.2rem",padding:"0.65rem 1rem",background:C.surface,border:`1px solid ${C.border}`,borderLeft:`3px solid ${C.teal}`,borderRadius:4,display:"flex",alignItems:"center",gap:10}}>
@@ -2868,10 +3029,11 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
             </div>
           </div>
         )}
-        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable}/>}
-        {tab==="plot"&&<ExplorePlotTab headers={headers} rows={filteredRows} panel={panel} numericCols={numericCols} pid={pid} histPid={histPid} filename={filename} scriptPreamble={plotScriptPreamble} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{height:"70vh", minHeight:520}}/>}
+        {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable} totalRows={totalRows}/>}
+        {tab==="plot"&&<ExplorePlotTab headers={headers} rows={filteredRows} baseRows={rows} activeFilters={filterConds} applyFilters={applyConds} panel={panel} numericCols={numericCols} pid={pid} histPid={histPid} filename={filename} scriptPreamble={plotScriptPreamble} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{height:"70vh", minHeight:520}}/>}
       </div>
-      <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
+      <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot}
+        onRemove={removePin} activeFilters={filterConds} onSetFilters={setPinFilters} />
     </div>
   );
 }

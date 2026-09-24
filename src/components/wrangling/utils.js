@@ -153,8 +153,9 @@ export function audit(headers,rows,info){
     if(c.outliers>0&&c.isNum)
       out.push({col:h,type:"outlier",sev:c.outliers>3?"high":"medium",title:`'${h}' — ${c.outliers} outlier${c.outliers>1?"s":""}`,detail:`IQR-based. Range [${c.min?.toFixed(2)}, ${c.max?.toFixed(2)}]. Consider winsorizing.`,act:"winz"});
     if(c.isCat&&!c.isNum){
-      const rawVals=c.uVals.map(v=>String(v));
+      // All distinct values — `uVals` is capped at 20.
       const allRawForFreq=rows.map(r=>r[h]).filter(v=>v!=null).map(v=>String(v));
+      const rawVals=[...new Set(allRawForFreq)];
       const clusters=fuzzyGroups(rawVals,allRawForFreq);
       if(clusters.length>0){
         const variantCount=clusters.reduce((s,cl)=>s+cl.members.length,0);

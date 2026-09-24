@@ -115,7 +115,7 @@ export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = 
                 };
               }),
               { id: "forest", label: "Coefficient plot",
-                node: <ForestPlot varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} svgId="forest-2sls-second" filename="2sls_second_stage_coefficients.svg" /> },
+                node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={second.varNames} beta={second.beta} se={second.se} pVals={second.pVals} svgId="forest-2sls-second" filename="2sls_second_stage_coefficients.svg" /> },
               { id: "resid",  label: "Residuals vs Fitted",
                 node: <ResidualVsFitted resid={second.resid} Yhat={second.Yhat} svgIdSuffix="-2sls-resid" /> },
               { id: "qq",     label: "Q-Q",
@@ -162,7 +162,7 @@ export function TwoSLSResults({ result, yVar, xVars, wVars, zVars, rows, dict = 
               { id: "scatter", label: "Instrument scatter",
                 node: <FirstStagePlot firstStages={[fs]} rows={rows} instrVars={zVars} endogVars={[fs.endVar]} /> },
               { id: "forest", label: "Coefficient plot",
-                node: <ForestPlot varNames={fs.varNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} svgId={`forest-2sls-fs${i}`} filename={`2sls_first_stage_${fs.endVar}_coefficients.svg`} /> },
+                node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={fs.varNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} svgId={`forest-2sls-fs${i}`} filename={`2sls_first_stage_${fs.endVar}_coefficients.svg`} /> },
             ]}
           />
         </div>
@@ -220,7 +220,7 @@ export function GMMResults({ result, yVar, xVars, wVars, zVars, rows, dict = {},
           <PlotSelector accentColor={C.gold} defaultId="yhat"
             plots={[
               { id: "yhat", label: "Y vs Ŷ", node: <YFittedPlot resid={result.resid} Yhat={result.Yhat} yLabel={yVar[0]} svgIdSuffix="-gmm" /> },
-              { id: "forest", label: "Coefficient plot", node: <ForestPlot varNames={result.varNames} beta={result.beta} se={result.se} pVals={result.pVals} svgId="forest-gmm" filename="gmm_coefficients.svg" /> },
+              { id: "forest", label: "Coefficient plot", node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={result.varNames} beta={result.beta} se={result.se} pVals={result.pVals} svgId="forest-gmm" filename="gmm_coefficients.svg" /> },
               { id: "resid", label: "Residuals vs Fitted", node: <ResidualVsFitted resid={result.resid} Yhat={result.Yhat} svgIdSuffix="-gmm-resid" /> },
               { id: "qq", label: "Q-Q", node: <QQPlot resid={result.resid} svgIdSuffix="-gmm-qq" /> },
             ]} />
@@ -294,7 +294,7 @@ export function LIMLResults({ result, yVar, xVars, wVars, zVars, rows, dict = {}
           <PlotSelector accentColor={C.gold} defaultId="yhat"
             plots={[
               { id: "yhat", label: "Y vs Ŷ", node: <YFittedPlot resid={result.resid} Yhat={result.Yhat} yLabel={yVar[0]} svgIdSuffix="-liml" /> },
-              { id: "forest", label: "Coefficient plot", node: <ForestPlot varNames={result.varNames} beta={result.beta} se={result.se} pVals={result.pVals} svgId="forest-liml" filename="liml_coefficients.svg" /> },
+              { id: "forest", label: "Coefficient plot", node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={result.varNames} beta={result.beta} se={result.se} pVals={result.pVals} svgId="forest-liml" filename="liml_coefficients.svg" /> },
               { id: "resid", label: "Residuals vs Fitted", node: <ResidualVsFitted resid={result.resid} Yhat={result.Yhat} svgIdSuffix="-liml-resid" /> },
               { id: "qq", label: "Q-Q", node: <QQPlot resid={result.resid} svgIdSuffix="-liml-qq" /> },
             ]} />

@@ -41,7 +41,10 @@ export async function setProject(pid) {
   _pid = pid || null;
   if (!_pid) { _buf = []; return; }
   const rec = await loadModelBuffer(_pid);
-  _buf = Array.isArray(rec?.models) ? rec.models : [];
+  // Pins saved before trimResult kept `testStats` carry only `tStats`.
+  _buf = Array.isArray(rec?.models)
+    ? rec.models.map(m => (m && m.testStats == null && m.tStats ? { ...m, testStats: m.tStats } : m))
+    : [];
 }
 
 // Panel estimation returns a WRAPPER — { type:"FE", fe: <EstimationResult>, fd: null }

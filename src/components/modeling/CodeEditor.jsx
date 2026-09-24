@@ -11,6 +11,7 @@ import { useTheme }                         from "./shared.jsx";
 import { generateRScript }                  from "../../services/export/rScript.js";
 import { generatePythonScript }             from "../../services/export/pythonScript.js";
 import { generateStataScript }              from "../../services/export/stataScript.js";
+import { exportSpecExtras }                 from "../../services/export/exportSpecExtras.js";
 
 // ─── TAB DEFINITIONS ─────────────────────────────────────────────────────────
 const TABS = [
@@ -34,6 +35,7 @@ function buildScript(tab, result, allDatasets = {}) {
     auditTrail:    spec.auditTrail    ?? null,
     allDatasets,
     model: {
+      ...exportSpecExtras(result),
       type:       result.type ?? spec.type ?? "OLS",
       yVar:       spec.yVar       ?? "",
       xVars:      spec.xVars      ?? [],
@@ -54,6 +56,10 @@ function buildScript(tab, result, allDatasets = {}) {
       kernel:     spec.kernel     ?? "triangular",
       factorVars:        spec.factorVars        ?? [],
       factorRefs:        spec.factorRefs        ?? {},
+      // `model` is the config KEY here, not a variable — this file's binding is
+      // `result`. And a panel result arrives as the {type, fe, fd} wrapper, so
+      // factorMap needs the same nesting fallback `spec` above uses.
+      factorMap: result.factorMap ?? result.fe?.factorMap ?? result.fd?.factorMap ?? null,
       interactionTerms:  spec.interactionTerms  ?? [],
       xVarsRaw:          spec.xVarsRaw          ?? null,
       wVarsRaw:          spec.wVarsRaw          ?? null,

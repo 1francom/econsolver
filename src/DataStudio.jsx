@@ -19,12 +19,12 @@
 
 import { describePredicate } from "./pipeline/predicate.js";
 import { useState, useRef, useCallback, useEffect, useMemo, forwardRef, useImperativeHandle } from "react";
-import * as XLSX from "xlsx";
+import { parseInWorker } from "./services/data/parseInWorker.js";
 import { useTheme } from "./ThemeContext.jsx";
 import WranglingModule from "./WranglingModule.jsx";
 import { saveRawData, loadRawData, deleteRawData, saveDatasetRegistry, loadDatasetRegistry, saveProject } from "./services/Persistence/indexedDB.js";
 import WorldBankFetcher from "./components/wrangling/WorldBankFetcher.jsx";
-import { useSessionDispatch, registerDataset } from "./services/session/sessionState.jsx";
+import { useSessionDispatch, registerDataset, updateDatasetMeta } from "./services/session/sessionState.jsx";
 import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 import { deleteCacheEntry } from "./services/data/parquetCache.js";
 import { ensureRowIdentity } from "./services/data/rowIdentity.js";
@@ -39,67 +39,8 @@ function genId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// ─── CSV PARSER ───────────────────────────────────────────────────────────────
-// Handles: RFC 4180 quoting, embedded commas/newlines, CRLF/LF, type inference.
-// Detects and handles TSV automatically.
-function parseCSV(text, delimiter = ",") {
-  const NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|#na|\.\.?|\s*)$/i;
-
-  function tokenize(line) {
-    const fields = [];
-    let i = 0;
-    while (i <= line.length) {
-      if (i === line.length) { fields.push(""); break; }
-      if (line[i] === '"') {
-        let field = ""; i++;
-        while (i < line.length) {
-          if (line[i] === '"') {
-            if (line[i + 1] === '"') { field += '"'; i += 2; }
-            else { i++; break; }
-          } else { field += line[i++]; }
-        }
-        fields.push(field);
-        if (line[i] === delimiter) i++;
-      } else {
-        const end = line.indexOf(delimiter, i);
-        if (end === -1) { fields.push(line.slice(i)); break; }
-        fields.push(line.slice(i, end)); i = end + 1;
-      }
-    }
-    return fields;
-  }
-
-  const lines = text.split(/\r?\n/);
-  const rawHeaders = tokenize(lines[0]);
-  // Deduplicate headers (Excel often exports duplicates)
-  const headerCount = {};
-  const headers = rawHeaders.map(h => {
-    const t = h.trim() || "col";
-    headerCount[t] = (headerCount[t] || 0) + 1;
-    return headerCount[t] === 1 ? t : `${t}_${headerCount[t]}`;
-  });
-  if (!headers.length) return null;
-
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    const vals = tokenize(lines[i]);
-    const row = {};
-    headers.forEach((h, j) => {
-      const raw = (vals[j] ?? "").trim();
-      if (!raw || NA_PAT.test(raw)) { row[h] = null; return; }
-      // Strip thousands separators before numeric parse
-      const clean = raw.replace(/,(?=\d{3})/g, "");
-      const n = Number(clean);
-      row[h] = isNaN(n) ? raw : n;
-    });
-    rows.push(row);
-  }
-  return rows.length ? { headers, rows } : null;
-}
-
 // ─── EXCEL PARSER ─────────────────────────────────────────────────────────────
-// Excel parser — uses the installed xlsx npm package (bundled by Vite).
+// Excel parser — parseExcelBuffer (services/data/parsers/tabular.js), run in the parse worker.
 //
 // A workbook is a COLLECTION of sheets, so this returns every one of them, the
 // same shape parseRData uses for an R workspace: { tables, skipped }. It used to
@@ -110,56 +51,9 @@ function parseCSV(text, delimiter = ",") {
 // rows, wrong sheet.
 //
 // Returns: { tables: [{ name, headers, rows }], skipped: [{ name, reason }] }
-const EXCEL_NA_PAT = /^(na|n\/a|nan|null|none|missing|#n\/a|\.|\s*)$/i;
-
-function excelRows(data) {
-  const headers = Object.keys(data[0]);
-  const rows = data.map(r => {
-    const row = {};
-    headers.forEach(h => {
-      const v = r[h];
-      if (v === null || v === undefined) { row[h] = null; return; }
-      if (typeof v === "number") { row[h] = v; return; }
-      const t = String(v).trim();
-      if (!t || EXCEL_NA_PAT.test(t)) { row[h] = null; return; }
-      const n = Number(t.replace(/,(?=\d{3})/g, ""));
-      row[h] = isNaN(n) ? t : n;
-    });
-    return row;
-  });
-  return { headers, rows };
-}
-
 async function parseExcel(file) {
   const buf = await file.arrayBuffer();
-  const wb  = XLSX.read(buf, { type: "array", cellDates: true });
-  if (!wb.SheetNames?.length) throw new Error("Excel file has no sheets.");
-
-  const tables = [];
-  const skipped = [];
-  for (const name of wb.SheetNames) {
-    const ws = wb.Sheets[name];
-    if (!ws) { skipped.push({ name, reason: "sheet missing from workbook" }); continue; }
-    let data;
-    try {
-      data = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
-    } catch (e) {
-      skipped.push({ name, reason: e?.message || "could not be read" });
-      continue;
-    }
-    // Empty and header-only sheets are extremely common in real workbooks
-    // (blank tabs, notes). Report them rather than failing the whole file.
-    if (!data.length) { skipped.push({ name, reason: "no rows" }); continue; }
-    const { headers, rows } = excelRows(data);
-    if (!headers.length) { skipped.push({ name, reason: "no columns" }); continue; }
-    tables.push({ name, headers, rows });
-  }
-
-  if (!tables.length) {
-    const detail = skipped.map(s => `${s.name} (${s.reason})`).join(", ");
-    throw new Error(`No readable sheet in this workbook${detail ? ` — ${detail}` : ""}.`);
-  }
-  return { tables, skipped };
+  return parseInWorker("excel", buf);
 }
 
 // ─── JSON PARSER ──────────────────────────────────────────────────────────────
@@ -225,25 +119,6 @@ async function parseJSON(file) {
     return row;
   });
   return { headers, rows };
-}
-
-// ─── DELIMITER DETECTION ─────────────────────────────────────────────────────
-// Samples up to 5 non-empty lines and picks the most frequent candidate delimiter.
-// Handles comma, semicolon, tab, pipe — covers sep=",", sep=";", sep="\t", sep="|".
-function detectDelimiter(text) {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (!lines.length) return ",";
-  // Use only the header line — data rows may contain commas/semicolons inside
-  // values (e.g. WKT geometry coordinates), which would skew a multi-line count.
-  const header = lines[0];
-  const tabs   = (header.match(/\t/g)  || []).length;
-  const commas = (header.match(/,/g)   || []).length;
-  const semis  = (header.match(/;/g)   || []).length;
-  const pipes  = (header.match(/\|/g)  || []).length;
-  if (tabs  > commas && tabs  > semis && tabs  > pipes) return "\t";
-  if (semis > commas && semis > pipes && semis > tabs)  return ";";
-  if (pipes > commas && pipes > semis && pipes > tabs)  return "|";
-  return ",";
 }
 
 // ─── FILE DISPATCHER ──────────────────────────────────────────────────────────
@@ -466,17 +341,17 @@ async function parseFile(file) {
       // DuckDB auto-detects delimiter — record as "auto" so exports can mirror that.
       return withLoadOpts(await loadLargeCSV(file), { format: "csv", delimiter: "auto", engine: "duckdb" });
     }
-    const text = await file.text();
-    const delimiter = detectDelimiter(text);
-    return withLoadOpts(parseCSV(text, delimiter), { format: "csv", delimiter, encoding: "utf-8" });
+    // Parsed in a worker so the UI keeps drawing while a large file is read.
+    const { parsed, delimiter } = await parseInWorker("csv", await file.arrayBuffer());
+    return withLoadOpts(parsed, { format: "csv", delimiter, encoding: "utf-8" });
   }
   if (ext === "tsv") {
     if (file.size > 10 * 1024 * 1024) {
       const { loadLargeCSV } = await import("./services/data/duckdb.js");
       return withLoadOpts(await loadLargeCSV(file), { format: "tsv", delimiter: "\t", engine: "duckdb" });
     }
-    const text = await file.text();
-    return withLoadOpts(parseCSV(text, "\t"), { format: "tsv", delimiter: "\t", encoding: "utf-8" });
+    const { parsed } = await parseInWorker("csv", await file.arrayBuffer(), { delimiter: "\t" });
+    return withLoadOpts(parsed, { format: "tsv", delimiter: "\t", encoding: "utf-8" });
   }
   if (["xlsx", "xls"].includes(ext)) {
     // Like .RData, a workbook can hold several tables, so it can yield MORE THAN
@@ -504,22 +379,20 @@ async function parseFile(file) {
     return withLoadOpts(await parseJSON(file), { format: "json", encoding: "utf-8" });
   }
   if (ext === "dta") {
-    const { parseStata } = await import("./services/data/parsers/stata.js");
     if (file.size > 10 * 1024 * 1024) {
       const { loadLargeParsedData } = await import("./services/data/duckdb.js");
       return withLoadOpts(await loadLargeParsedData(
         file,
-        async () => parseStata(await file.arrayBuffer()),
+        async () => parseInWorker("stata", await file.arrayBuffer()),
         "stata"
       ), { format: "stata", engine: "duckdb" });
     }
     const buf = await file.arrayBuffer();
-    return withLoadOpts(await parseStata(buf), { format: "stata" });
+    return withLoadOpts(await parseInWorker("stata", buf), { format: "stata" });
   }
   if (ext === "rds") {
-    const { parseRDS } = await import("./services/data/parsers/rds.js");
     const buf = await file.arrayBuffer();
-    return withLoadOpts(await parseRDS(buf), { format: "rds" });
+    return withLoadOpts(await parseInWorker("rds", buf), { format: "rds" });
   }
   if (ext === "rdata" || ext === "rda") {
     // A workspace can hold several data.frames, so this is the one parser that
@@ -527,8 +400,7 @@ async function parseFile(file) {
     // envelope; parseFiles/handleLoadFile fan it out into separate datasets.
     // `objectName` is kept in loadOpts so replication scripts can emit
     // `load(file)` followed by `df <- <objectName>` rather than guessing.
-    const { parseRData } = await import("./services/data/parsers/rdata.js");
-    const { tables, skipped } = await parseRData(await file.arrayBuffer());
+    const { tables, skipped } = await parseInWorker("rdata", await file.arrayBuffer());
     const multi = tables.map(t => withLoadOpts(
       { headers: t.headers, rows: t.rows },
       { format: "rdata", objectName: t.name, sourceFile: file.name },
@@ -595,9 +467,8 @@ async function parseFile(file) {
   }
   // Unknown extension: try CSV as fallback with auto-detected delimiter
   try {
-    const text = await file.text();
-    const delimiter = detectDelimiter(text);
-    return withLoadOpts(parseCSV(text, delimiter), { format: "csv", delimiter, encoding: "utf-8", fallback: true });
+    const { parsed, delimiter } = await parseInWorker("csv", await file.arrayBuffer());
+    return withLoadOpts(parsed, { format: "csv", delimiter, encoding: "utf-8", fallback: true });
   } catch { return null; }
 }
 
@@ -666,7 +537,15 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
         if (registry.length) {
           const loaded = await Promise.all(registry.map(async m => {
             let restoreFailed = false;
-            if (m.opfsCacheKey) {
+            // IndexedDB first: when it already holds every row (anything under
+            // its 100 MB cap is stored whole), the OPFS/DuckDB restore is pure
+            // cost — it initialises DuckDB-Wasm, a multi-second download and
+            // compile, on every page load. A dataset that went through DuckDB at
+            // import time but fits in IndexedDB opens from there directly.
+            const idbRaw = await loadRawData(m.id);
+            const idbComplete = !!idbRaw?.rows?.length && Number(m.rowCount) > 0
+              && idbRaw.rows.length >= Number(m.rowCount);
+            if (m.opfsCacheKey && !idbComplete) {
               try {
                 const { restoreCachedParquet } = await import("./services/data/duckdb.js");
                 const restored = await restoreCachedParquet(m.opfsCacheKey, `project_${m.id}`);
@@ -683,7 +562,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
                   `Run window.__validation.fase9.listCache() to see what is actually in OPFS.`
                 );
               }
-            } else if (m.rowCount > PREVIEW_ROWS) {
+            } else if (!idbComplete && m.rowCount > PREVIEW_ROWS) {
               // A DuckDB-backed dataset whose durable key is gone: it can never be
               // restored, so say so instead of silently serving the preview.
               restoreFailed = true;
@@ -692,7 +571,7 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
                 `cannot restore the full table. Re-import the file.`
               );
             }
-            const raw = await loadRawData(m.id);
+            const raw = idbRaw;
             if (!raw || !raw.rows?.length) return null;
             // saveRawData() only ever persists a 500-row preview for DuckDB-backed
             // datasets (see indexedDB.js — it never writes `_duckdb`). If the registry
@@ -701,7 +580,13 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
             // user their analysis is silently running on a stale preview instead of
             // just showing a wrong "N obs" with no explanation (see ExplorerModule's
             // duckdbRestoreFailed banner).
-            if (restoreFailed || m.rowCount > raw.rows.length) {
+            // A failed OPFS restore only matters if rows are actually missing: a
+            // dataset loaded through DuckDB can still have its FULL table in
+            // IndexedDB (a mid-sized .dta, say), and flagging it produced a false
+            // "running on a 11,547-row preview" banner over 11,547 of 11,547 rows.
+            // With no recorded row count, a failed restore stays flagged.
+            const expected = Number(m.rowCount) || 0;
+            if (expected ? expected > raw.rows.length : restoreFailed) {
               raw._duckdbRestoreFailed = true;
               raw._expectedRowCount = m.rowCount || raw.rows.length;
             }
@@ -809,6 +694,11 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
 
   // Expose slim dataset list to parent (for Modeling Lab dataset picker)
   useEffect(() => {
+    // Not before hydration: the pre-hydration empty list reached App, which
+    // persisted `datasetCount: 0` on the project; that read-modify-write raced
+    // the real count written a moment later, and projects with 5 datasets were
+    // listed as "0 datasets".
+    if (!hydratedRef.current) return;
     onDatasetsChange?.(datasets.map(d => ({
       id:       d.id,
       filename: d.filename,
@@ -817,6 +707,9 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
       headers:  d.rawData?.headers ?? [],
       crs:      datasetCrs(d),
       loadOpts: d.rawData?._loadOpts ?? null,
+      // Which dataset it was derived from — the unified script flags a derived
+      // dataset that has no lineage record (it cannot be rebuilt from raw data).
+      origin:   d.origin ?? null,
       // Full-table pointer — consumers MUST compute off this (SQL / extractAllRows),
       // never off `rows`, which is a 500-row preview for large DuckDB datasets.
       _duckdb:  d.rawData?._duckdb  ?? null,
@@ -975,10 +868,29 @@ const DataStudio = forwardRef(function DataStudio({ projectPid, initialDatasets,
     // ensureRowIds: assign __ri so cell editing (patch step) works for
     // simulated / API-loaded / derived datasets, not just file uploads
     const rawData = ensureRowIds({ rows, headers });
-    // Durably persist to IndexedDB (100MB cap) so large derived datasets — e.g.
-    // spatial Aggregate-to-Grid / Spatial Join outputs carrying WKT geometry —
-    // survive a reload even when they exceed the sessionStorage size budget.
-    saveRawData(id, rawData);
+    // Persist to IndexedDB so large derived datasets — e.g. spatial
+    // Aggregate-to-Grid / Spatial Join outputs carrying WKT geometry — survive a
+    // reload even when they exceed the sessionStorage size budget.
+    //
+    // BUT that store has a 100 MB hard cap and `saveRawData` declines silently
+    // above it, returning { stored: false }. This call used to DISCARD that
+    // result, and a derived dataset has no second persistence path: an
+    // `opfsCacheKey` only exists for tables that came through DuckDB from a
+    // file, so a join output has none. Net effect was silent data loss — a
+    // 109.8 MB `joined_data` simply vanished on F5, and the reload warning told
+    // the user to "re-import the file" for something that never had one.
+    // Flag it on the rawData instead, the same way `_duckdbRestoreFailed`
+    // travels to the UI, so the user is told BEFORE they lose the work.
+    // The flag lives on the session REGISTRY, not on rawData: DatasetManager —
+    // which lists every dataset and is reachable from any tab — reads the
+    // registry, and "this dataset is not persisted" is dataset metadata. One
+    // home, so the two cannot disagree. `saveRawData` never rejects; it always
+    // resolves { stored, byteSize }, including on a genuine IDB error (with
+    // byteSize 0), which is also correctly "not persisted".
+    saveRawData(id, rawData).then(({ stored, byteSize }) => {
+      if (stored || !dispatch) return;
+      updateDatasetMeta(dispatch, id, { notPersisted: true, persistBytes: byteSize });
+    });
     const entry = {
       id,
       filename: name,

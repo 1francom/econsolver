@@ -25,7 +25,7 @@ import { baconScript } from "../../services/export/baconScript.js";
 const BACON_HEADERS = ["type", "weight", "estimate", "treated", "control", "nTreatedUnits", "nControlUnits"];
 
 export default function ExplorePlotTab({
-  headers = [], rows = [], panel, numericCols = [],
+  headers = [], rows = [], baseRows = null, activeFilters = null, applyFilters = null, panel, numericCols = [],
   pid, histPid, filename, scriptPreamble,
   onRequestDataset, initialPendingPlotId, onConsumePendingPlot, style,
 }) {
@@ -198,6 +198,7 @@ export default function ExplorePlotTab({
         key={`${mode}_${tmplKey}`}
         headers={plotHeaders}
         rows={plotRows}
+        {...(isBacon ? {} : { baseRows, activeFilters, applyFilters })}
         initialLayers={initLayers}
         pid={isBacon ? (pid && `${pid}_bacon`) : pid}
         projectPid={histPid}

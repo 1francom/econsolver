@@ -17,6 +17,12 @@ check("strips fittedValues", t.fittedValues === undefined);
 check("strips residuals", t.residuals === undefined);
 check("strips vcov", t.vcov === undefined);
 check("json round-trips", JSON.parse(JSON.stringify(t)).beta[1] === 2);
+const withT = trimResult({ ...big, testStats: [10, 10], testStatLabel: "z" });
+check("keeps testStats (what the result panels read)", withT.testStats?.[1] === 10);
+check("mirrors testStats into tStats", withT.tStats?.[1] === 10);
+check("keeps testStatLabel", withT.testStatLabel === "z");
+const engT = trimResult({ ...big, tStats: [3, 4] });
+check("engine tStats also exposed as testStats", engT.testStats?.[1] === 4);
 check("null in → null out", trimResult(null) === null);
 
 console.log(`\ntrimResult: ${pass} passed, ${fail} failed`);

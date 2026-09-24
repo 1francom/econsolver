@@ -78,7 +78,7 @@ export function toDfVar(name) {
   return "df_" + base.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^[0-9]/, "_");
 }
 
-function toStataFile(name) {
+export function toStataFile(name) {
   return name.replace(/[^a-zA-Z0-9_]/g, "_") + ".dta";
 }
 
@@ -139,12 +139,14 @@ function emitOperand(frozen, liveDs, lang, allDatasets, toStep, loadLine) {
     };
   }
 
-  const tmp = `.${safe}_at_join`;
+  // R hides a leading-dot name from ls(); Python has no such name — a leading
+  // dot is a syntax error, so the Python branch uses an underscore.
+  const tmp = lang === "python" ? `_${safe}_at_join` : `.${safe}_at_join`;
   return {
     expr: tmp,
     pre: [
       note,
-      loadLine(file, frozen.loadOpts ?? null).replace(/^df\b/, tmp),
+      loadLine(file, frozen.loadOpts ?? null).replace(/^df\b/m, tmp),
       ...(frozen.snapshot ?? []).map(s => toStep(s, tmp, allDatasets)),
     ],
     mode,
@@ -265,14 +267,12 @@ function emitCrossStepStata(g, datasets, allDatasets) {
   if (/_join$/.test(g.opType ?? "")) {
     const inner = g.opType === "inner_join";
     out.push(`use "${L.expr}", clear`);
-    // See stepTranslators.js: Stata cannot express a true many-to-many merge.
-    // 1:m assumes the key is unique in the master; joinby is the general form
-    // but has no suffixes(). UNVERIFIED against a real Stata run.
-    out.push(`* 1:m — assumes '${lk}' is unique in the master. If both sides repeat it,`);
-    out.push(`* use: joinby ${lk} using "${R2.expr}", unmatched(master)`);
-    out.push(`merge 1:m ${lk} using "${R2.expr}"`);
-    out.push(inner ? `keep if _merge == 3` : `drop if _merge == 2`);
-    out.push(`drop _merge`);
+    // joinby, not `merge 1:m` — verified on StataNow 19.5 that it reproduces
+    // dplyr's and Litux's row counts in every cardinality regime, where
+    // `merge 1:m` errors (r(459)) the moment the master key repeats.
+    // services/export/stataJoin.js owns this decision and its measurements.
+    out.push(`joinby ${lk} using "${R2.expr}", unmatched(${inner ? "none" : "master"})`);
+    out.push(`capture drop _merge`);
     out.push(`save "${outFile}", replace`);
   } else if (g.opType === "lookup") {
     out.push(`use "${L.expr}", clear`);
@@ -341,7 +341,7 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
     const lines = [
       rHeader(datasetName),
       `# ── Load dataset ──`,
-      buildRLoadLine(filename, loadOpts).replace(/^df/, df),
+      buildRLoadLine(filename, loadOpts).replace(/^df\b/m, df),
       ``,
     ];
     if (pipeline.length) {
@@ -384,7 +384,7 @@ export function generateCleanScript({ language, datasetName, filename, pipeline,
     const lines = [
       pythonHeader(datasetName),
       `# ── Load dataset ──`,
-      buildPyLoadLine(filename, loadOpts).replace(/^df/, df),
+      buildPyLoadLine(filename, loadOpts).replace(/^df\b/m, df),
       ``,
     ];
     if (pipeline.length) {
@@ -464,6 +464,21 @@ export function topoSort(datasets, globalPipeline) {
  * @param {object[]} opts.globalPipeline - G-steps array
  * @returns {string}
  */
+// A dataset derived inside Litux BEFORE lineage was recorded (registry
+// `origin` set, but no G-step builds it) has no recipe: nothing can rebuild it
+// from the raw file. Say so above its load line — the only way to run the
+// script is to export it from Litux as CSV, or re-derive it so it gets one.
+function noRecipeNote(ds, globalPipeline, cm) {
+  if (!ds?.origin || isInAppDataset(ds, globalPipeline)) return [];
+  const file = toLoadFile(ds);
+  return [
+    `${cm} NOTE: ${ds.name} was derived inside Litux before its lineage was recorded, so`,
+    `${cm} this script cannot rebuild it from the raw data. Export it from Litux`,
+    `${cm} (Dataset Manager → CSV) as "${file}" next to this script — or re-derive it`,
+    `${cm} in Litux (Save as dataset) and re-generate the script to rebuild it here.`,
+  ];
+}
+
 export function generateWorkspaceScript({ language, datasets, globalPipeline = [] }) {
   const dsList = Object.values(datasets);
   if (!dsList.length) return { perDataset: `# No datasets in session`, crossDataset: "" };
@@ -496,7 +511,8 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
-      lines.push(buildRLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
+      lines.push(...noRecipeNote(ds, globalPipeline, "#"));
+      lines.push(buildRLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/m, df));
       const local = localStepsOf(ds, globalPipeline);
       const inline = prefixStepsFor(ds);
       for (let i = 0; i <= local.length; i++) {
@@ -534,6 +550,7 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`* ${"─".repeat(60)}`);
       lines.push(`* Dataset: ${ds.name}`);
       lines.push(`* ${"─".repeat(60)}`);
+      lines.push(...noRecipeNote(ds, globalPipeline, "*"));
       lines.push(buildStataLoadLine(file, ds.loadOpts ?? null));
       const local = localStepsOf(ds, globalPipeline);
       const inline = prefixStepsFor(ds);
@@ -574,7 +591,8 @@ export function generateWorkspaceScript({ language, datasets, globalPipeline = [
       lines.push(`# ${"─".repeat(60)}`);
       lines.push(`# Dataset: ${ds.name}`);
       lines.push(`# ${"─".repeat(60)}`);
-      lines.push(buildPyLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/, df));
+      lines.push(...noRecipeNote(ds, globalPipeline, "#"));
+      lines.push(buildPyLoadLine(file, ds.loadOpts ?? null).replace(/^df\b/m, df));
       const local = localStepsOf(ds, globalPipeline);
       const inline = prefixStepsFor(ds);
       for (let i = 0; i <= local.length; i++) {

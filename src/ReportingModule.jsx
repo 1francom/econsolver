@@ -13,23 +13,22 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useTheme } from "./ThemeContext.jsx";
 import { HintBox } from "./components/HelpSystem.jsx";
 import { stars, buildLatex } from "./math/index.js";
-import { interpretRegression, generateUnifiedScript } from "./services/AI/AIService.js";
+import { interpretRegression, generateScriptNotes } from "./services/AI/AIService.js";
 import { buildSessionSnapshot } from "./services/AI/sessionSnapshot.js";
 import { useSessionLog } from "./services/session/sessionLog.jsx";
 import { useSessionState } from "./services/session/sessionState.jsx";
-import { generateCleanScript, generateWorkspaceScript, toDfVar } from "./pipeline/exporter.js";
+import { toDfVar } from "./pipeline/exporter.js";
 import { transpileSpatialOp } from "./services/export/spatialScript.js";
-import { buildGgplot, buildMatplotlibPlot, buildStataPlot } from "./services/export/plotScript.js";
+import { buildUnifiedScript, modelConfigFromResult } from "./services/export/unifiedScript.js";
 import { buildLeafletR, buildFoliumPy } from "./services/export/mapScript.js";
-import { transpileExploreStat } from "./services/export/exploreStatScript.js";
 import { getPlotHistory, getMapHistory } from "./services/Persistence/plotHistory.js";
 import { getArtifactOrder, saveArtifactOrder, makeArtifactId, orderArtifacts } from "./services/Persistence/artifactOrder.js";
-import { planExecutionOrder, detectInterleaving } from "./services/export/timelinePlan.js";
+import { planExecutionOrder, detectInterleaving, assignModelsToEstimates } from "./services/export/timelinePlan.js";
 import { loadProjectPipelines } from "./services/Persistence/indexedDB.js";
-import { generateRScript }     from "./services/export/rScript.js";
-import { generatePythonScript } from "./services/export/pythonScript.js";
-import { generateStataScript } from "./services/export/stataScript.js";
+import { ForestPlot } from "./components/modeling/resultDisplay.jsx";
+import { buildCoefGroups, hiddenCoefNames } from "./components/modeling/coefGroups.js";
 import { buildStargazer }      from "./services/export/latexTable.js";
+import { storedSteps } from "./services/Persistence/pipelineRecord.js";
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 // ─── SAFE NUMBER FORMATTER ────────────────────────────────────────────────────
@@ -133,134 +132,9 @@ function CopyBtn({ text, label = "Copy", successLabel = "Copied ✓", color }) {
   );
 }
 
-// ─── 1. COEFFICIENT FOREST PLOT ───────────────────────────────────────────────
-// Teal diamond = significant (p < 0.05), grey = not significant.
-// Each row: label | CI whisker + point | β value
-function ForestPlot({ varNames, beta, se, pVals }) {
-  const { C, T } = useTheme();
-  const items = useMemo(() =>
-    varNames
-      .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
-      .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s)),
-  [varNames, beta, se, pVals]);
-
-  if (!items.length) return (
-    <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily, padding: "1rem" }}>
-      No coefficients to plot (intercept-only or empty result).
-    </div>
-  );
-
-  // Dynamic sizing
-  const rowH    = 34;
-  const PAD     = { l: 148, r: 72, t: 20, b: 24 };
-  const W       = 620;
-  const iW      = W - PAD.l - PAD.r;
-  const H       = items.length * rowH + PAD.t + PAD.b;
-
-  // Scale: include all CI endpoints + zero
-  const lo = Math.min(0, ...items.map(d => d.b - 1.96 * d.s));
-  const hi = Math.max(0, ...items.map(d => d.b + 1.96 * d.s));
-  const range = hi - lo || 1;
-  const sx  = v => PAD.l + ((v - lo) / range) * iW;
-  const zero = sx(0);
-
-  // Nice axis ticks: 5 evenly spaced
-  const ticks = Array.from({ length: 5 }, (_, i) => lo + (range * i) / 4);
-
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`}
-           style={{ width: "100%", maxWidth: 700, minWidth: 400, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
-        {/* Background */}
-        <rect width={W} height={H} fill={C.bg} />
-
-        {/* Alternating row bands */}
-        {items.map((_, i) => (
-          <rect key={i}
-            x={PAD.l} y={PAD.t + i * rowH}
-            width={iW} height={rowH}
-            fill={i % 2 === 0 ? C.surface : C.surface2}
-            opacity={0.6} />
-        ))}
-
-        {/* Tick grid lines */}
-        {ticks.map((t, i) => (
-          <line key={i}
-            x1={sx(t)} x2={sx(t)} y1={PAD.t} y2={H - PAD.b}
-            stroke={C.border} strokeWidth={1} strokeDasharray="3 3" />
-        ))}
-
-        {/* Zero reference line */}
-        {zero >= PAD.l && zero <= PAD.l + iW && (
-          <line x1={zero} x2={zero} y1={PAD.t} y2={H - PAD.b}
-                stroke={C.border2} strokeWidth={1.5} />
-        )}
-
-        {/* Rows */}
-        {items.map((d, i) => {
-          const cy   = PAD.t + i * rowH + rowH / 2;
-          const cx   = sx(d.b);
-          const ciLo = Math.max(PAD.l, sx(d.b - 1.96 * d.s));
-          const ciHi = Math.min(PAD.l + iW, sx(d.b + 1.96 * d.s));
-          const sig  = d.p < 0.05;
-          const dotC = sig ? C.teal : C.textMuted;
-          const lblC = sig ? C.text : C.textDim;
-          const capLen = 5;
-
-          return (
-            <g key={d.v}>
-              {/* CI whisker */}
-              <line x1={ciLo} x2={ciHi} y1={cy} y2={cy}
-                    stroke={dotC} strokeWidth={sig ? 1.5 : 1} opacity={sig ? 0.8 : 0.45} />
-              {/* CI caps */}
-              <line x1={sx(d.b - 1.96 * d.s)} x2={sx(d.b - 1.96 * d.s)}
-                    y1={cy - capLen} y2={cy + capLen}
-                    stroke={dotC} strokeWidth={1} opacity={0.6} />
-              <line x1={sx(d.b + 1.96 * d.s)} x2={sx(d.b + 1.96 * d.s)}
-                    y1={cy - capLen} y2={cy + capLen}
-                    stroke={dotC} strokeWidth={1} opacity={0.6} />
-              {/* Point — filled diamond if sig, hollow if not */}
-              <rect x={cx - 5} y={cy - 5} width={10} height={10}
-                    fill={sig ? dotC : "transparent"}
-                    stroke={dotC} strokeWidth={sig ? 0 : 1.5}
-                    opacity={sig ? 0.9 : 0.55}
-                    transform={`rotate(45,${cx},${cy})`} />
-              {/* Variable label */}
-              <text x={PAD.l - 10} y={cy + 4} textAnchor="end"
-                    fill={lblC} fontSize={T.caption.fontSize}>
-                {d.v.length > 18 ? d.v.slice(0, 17) + "…" : d.v}
-              </text>
-              {/* β value + stars */}
-              <text x={PAD.l + iW + 8} y={cy + 4} textAnchor="start"
-                    fill={dotC} fontSize={9.5} fontFamily={T.data.fontFamily}>
-                {isFinite(d.b) && d.b > 0 ? "+" : ""}{safeNum(d.b, 3)}{stars(d.p)}
-              </text>
-              {/* p-value hint */}
-              <text x={PAD.l + iW + 8} y={cy + 15} textAnchor="start"
-                    fill={C.textMuted} fontSize={T.caption.fontSize} fontFamily={T.data.fontFamily}>
-                p={!isFinite(d.p) ? "N/A" : d.p < 0.001 ? "<.001" : safeNum(d.p, 3)}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* X axis */}
-        <line x1={PAD.l} x2={PAD.l + iW} y1={H - PAD.b} y2={H - PAD.b}
-              stroke={C.border2} strokeWidth={1} />
-        {ticks.map((t, i) => (
-          <text key={i} x={sx(t)} y={H - PAD.b + 12}
-                textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>
-            {t === 0 ? "0" : safeNum(t, 2)}
-          </text>
-        ))}
-        <text x={PAD.l + iW / 2} y={H - 3}
-              textAnchor="middle" fill={C.textMuted} fontSize={T.caption.fontSize}>
-          Coefficient estimate with 95% CI  ·  ◆ p&lt;0.05  ◇ n.s.
-        </text>
-      </svg>
-    </div>
-  );
-}
+// The forest plot is the SHARED component in components/modeling/resultDisplay.jsx.
+// This module used to carry a byte-for-byte copy of it, so the row-count scaling
+// bug (and its fix) existed in two places at once.
 
 // ─── 2. LATEX EXPORT ──────────────────────────────────────────────────────────
 // buildStargazer is imported from services/export/latexTable.js (shared with ModelComparison).
@@ -712,14 +586,32 @@ function FitBar({ result }) {
 }
 
 // ─── SIGNIFICANT COEFFICIENTS CALLOUT ────────────────────────────────────────
+// How many chips are worth reading at a glance. Past this the callout stops
+// being a callout — a 93-level factor drowned the two terms that were estimated.
+const SIG_CHIP_MAX = 12;
+
 function SigCallout({ result }) {
   const { C, T } = useTheme();
   const { varNames, beta, se, pVals } = result;
-  const sig = varNames
+  const [showAll, setShowAll] = useState(false);
+  // Factor levels are parameters, not findings — same rule as the forest plot.
+  const { levelOf } = useMemo(
+    () => buildCoefGroups(varNames, result.spec?.factorVars ?? []),
+    [varNames, result.spec?.factorVars],
+  );
+  const allSig = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
     .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s) && d.p < 0.05);
+  const levelSig = allSig.filter(d => levelOf.has(d.v));
+  // Rank what is left by |t|, so the strongest result is the first chip rather
+  // than whichever column happened to sit first in the design matrix.
+  const ranked = allSig
+    .filter(d => !levelOf.has(d.v))
+    .sort((a, b) => Math.abs(b.b / b.s) - Math.abs(a.b / a.s));
+  const sig = showAll ? [...ranked, ...levelSig] : ranked.slice(0, SIG_CHIP_MAX);
+  const hiddenN = allSig.length - sig.length;
 
-  if (!sig.length) return (
+  if (!allSig.length) return (
     <div style={{ fontSize: T.code.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily,
                   padding: "0.65rem 1rem", border: `1px solid ${C.border}`,
                   borderRadius: 4, marginBottom: "1.2rem" }}>
@@ -745,6 +637,17 @@ function SigCallout({ result }) {
           </div>
         </div>
       ))}
+      {(hiddenN > 0 || showAll) && (
+        <button
+          onClick={() => setShowAll(v => !v)}
+          style={{ padding: "0.45rem 0.85rem", background: "none",
+            border: `1px dashed ${C.border2}`, borderRadius: 4, cursor: "pointer",
+            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.textDim }}>
+          {showAll
+            ? "▾ show fewer"
+            : `▸ ${hiddenN} more significant${levelSig.length ? ` (${levelSig.length} factor levels)` : ""}`}
+        </button>
+      )}
     </div>
   );
 }
@@ -765,7 +668,10 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
   // ── Structuring question (Fase 0.2): how the user wants the script organised.
   //    "execution" needs the unified timeline (Fase 3) — shown but disabled.
   const [structureMode,     setStructureMode]     = useState("module"); // "module" | "execution" | "custom"
-  const [customInstruction, setCustomInstruction] = useState("");
+  // AI commentary is optional and additive: a comment block above the
+  // deterministic script. The script never depends on it.
+  const [aiNotes, setAiNotes]       = useState(false);
+  const [notesState, setNotesState] = useState(null); // null | "loading" | "done" | message
   const [replicateMode,     setReplicateMode]     = useState("active"); // "active" | "all"
   const [artOrder, setArtOrder] = useState([]);
   const [artList,  setArtList]  = useState([]); // [{ artifactId, label, kind, savedAt }]
@@ -779,7 +685,6 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
   const STRUCTURES = [
     { id: "module",    label: "Per module",          disabled: false, tip: "Sections grouped by workspace module" },
     { id: "execution", label: "Per execution order", disabled: false, tip: "Blocks in the exact order you ran them (best for interleaved workflows)" },
-    { id: "custom",    label: "Custom",              disabled: false, tip: "Give Claude your own structuring instruction" },
   ];
 
   // ── Interleaving detection (Fase 3.2) — when the session interleaves datasets
@@ -821,8 +726,8 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         for (const ds of availableDatasets) {
           const isActive = ds.filename === cleanedData?.filename;
           const pipe = isActive
-            ? (cleanedData?.pipeline ?? map[ds.id]?.pipeline ?? [])
-            : (map[ds.id]?.pipeline ?? []);
+            ? (cleanedData?.pipeline ?? storedSteps(map[ds.id]))
+            : storedSteps(map[ds.id]);
           const n = (Array.isArray(pipe) ? pipe : []).filter(s => s.type === "patch").length;
           if (n > 0) counts[ds.name ?? ds.filename ?? ds.id] = n;
         }
@@ -856,54 +761,6 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
     const a    = document.createElement("a");
     a.href = url; a.download = `${base}_cleaned.csv`; a.click();
     URL.revokeObjectURL(url);
-  }
-
-  function _buildModelScript(language, model = result) {
-    if (!model) return "";
-    const spec = model.spec ?? {};
-    // The model's SOURCE dataset (spec.filename, stamped at estimation time) may
-    // differ from the Report tab's active dataset — load opts and pipeline must
-    // come from the source, never silently from the active one.
-    const modelFile    = spec.filename ?? cleanedData?.filename ?? "dataset.csv";
-    const modelDs      = availableDatasets.find(d => d.filename === modelFile) ?? null;
-    const sameAsActive = modelFile === cleanedData?.filename;
-    const config = {
-      filename:       modelFile,
-      pipeline:       spec.pipeline       ?? (sameAsActive ? cleanedData?.pipeline ?? [] : []),
-      dataDictionary: spec.dataDictionary ?? (sameAsActive ? cleanedData?.dataDictionary : null),
-      dataLoadOpts:   modelDs?.loadOpts ?? (sameAsActive ? cleanedData?.loadOpts : null) ?? null,
-      model: {
-        type:       model.type      ?? "OLS",
-        yVar:       spec.yVar       ?? "",
-        xVars:      spec.xVars      ?? [],
-        wVars:      spec.wVars      ?? [],
-        zVars:      spec.zVars      ?? [],
-        entityCol:  spec.entityCol  ?? null,
-        timeCol:    spec.timeCol    ?? null,
-        postVar:    spec.postVar    ?? null,
-        treatVar:   spec.treatVar   ?? null,
-        runningVar: spec.runningVar ?? null,
-        cutoff:     spec.cutoff     ?? null,
-        bandwidth:  spec.bandwidth  ?? null,
-        kernel:     spec.kernel     ?? "triangular",
-        factorVars:       spec.factorVars       ?? [],
-        factorRefs:       spec.factorRefs       ?? {},
-        interactionTerms: spec.interactionTerms ?? [],
-        xVarsRaw:         spec.xVarsRaw          ?? null,
-        wVarsRaw:         spec.wVarsRaw          ?? null,
-        // SE type the user selected — export must report the same SEs as Litux.
-        seType:      spec.seType ?? model.seType ?? "classical",
-        clusterVar:  spec.clusterVar  ?? null,
-        clusterVar2: spec.clusterVar2 ?? null,
-        noIntercept: spec.noIntercept ?? false,
-      },
-    };
-    try {
-      if (language === "r")      return generateRScript(config);
-      if (language === "python") return generatePythonScript(config);
-      if (language === "stata")  return generateStataScript(config);
-    } catch { return ""; }
-    return "";
   }
 
   function modelReplicationKey(model) {
@@ -970,6 +827,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
     setLoading(true);
     setError("");
     setScript("");
+    setNotesState(null);
     try {
       const multiDataset = availableDatasets.length > 1 || globalPipeline.length > 0;
       const comment = lang === "stata" ? "*" : "#";
@@ -989,9 +847,11 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           name:     ds.name ?? ds.filename ?? ds.id,
           filename: dsRec.filename ?? ds.filename ?? null,
           pipeline: isActive
-            ? (cleanedData?.pipeline ?? dsRec.pipeline ?? [])
-            : (Array.isArray(dsRec.pipeline) ? dsRec.pipeline : []),
+            ? (cleanedData?.pipeline ?? storedSteps(dsRec))
+            : storedSteps(dsRec),
           loadOpts: ds.loadOpts ?? dsRec.loadOpts ?? null,
+          // A derived dataset with no lineage record gets an explicit NOTE in the script.
+          origin:   ds.origin ?? null,
         };
         dsMap[ds.id] = { name: ds.name ?? ds.filename, filename: ds.filename };
       }
@@ -1003,12 +863,6 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
       // by filename (explore pin records `params.dataset`), or — for spatial
       // points, whose source dataset is not logged — by matching the op's lat/lon
       // columns against each loaded dataset's headers.
-      const idToVar   = (id) => { const d = dsMap[id]; return d ? toDfVar(d.name ?? d.filename) : null; };
-      const fileToVar = (fn) => {
-        if (!fn) return null;
-        const d = availableDatasets.find(x => x.filename === fn || x.name === fn);
-        return d ? toDfVar(d.name ?? d.filename) : toDfVar(String(fn).replace(/\.[^.]+$/, ""));
-      };
       const pointsSrcFor = (p) => {
         const c1 = p?.latCol ?? p?.yCol, c2 = p?.lonCol ?? p?.xCol;
         if (c1 && c2) {
@@ -1024,164 +878,33 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
                 .map(ev => ev.params?.gridDsId).filter(Boolean)
       );
 
-      // Render one estimation block, bound to the model's source df (not the
-      // Report-active dataset). Shared by the module and execution paths.
-      const renderModel = (model, index) => {
-        let block = _buildModelScript(lang, model);
-        if (!block) return "";
-        if (lang !== "stata") {
-          const modelFile = model?.spec?.filename ?? cleanedData?.filename;
-          const modelDs   = availableDatasets.find(d => d.filename === modelFile) ?? null;
-          if (modelFile) block = block.replace(/\bdf\b/g, toDfVar(modelDs?.name ?? modelFile));
-        }
-        const label = model?.label ?? model?.modelLabel ?? model?.type ?? "Model";
-        return `${comment} Model ${index + 1}: ${label}\n${block}`;
+      // ── Items, each bound to ITS OWN dataset ─────────────────────────────
+      // The script itself is deterministic (services/export/unifiedScript.js):
+      // every dataset is built once from its raw file + lineage, then these
+      // items run in order, each on its own data. Nothing here goes through
+      // an LLM — the model rewrote data prep before (PS5 lost a filter) and the
+      // raw concatenation it fell back to could not run in Stata (PS4).
+      const modelItem = (model) => ({
+        kind: "model",
+        label: model?.label ?? model?.modelLabel ?? model?.type ?? "Model",
+        dataset: model?.datasetId ?? model?.spec?.filename ?? cleanedData?.filename,
+        model: modelConfigFromResult(model),
+        pipeline: model?.spec?.pipeline ?? [],
+      });
+      const exploreItem = (ev) => ({
+        kind: "explore", label: ev.label ?? ev.params?.kind ?? "Explore",
+        dataset: ev.params?.dataset ?? cleanedData?.filename, params: ev.params,
+      });
+      const spatialItem = (ev) => {
+        const c = transpileSpatialOp(ev.opType, ev.params, lang, dsMap, pointsSrcFor(ev.params), builtGridIds);
+        return c ? { kind: "code", label: ev.label ?? ev.opType, code: c } : null;
       };
 
-      // Visual / spatial sections are deterministic replication code; they are
-      // appended to the FINAL script AFTER the AI returns (never sent through it)
-      // so the model can never drop or rewrite them.
-      let visualSections = "";
-      let cleanSc;
-      let modelSc;
-      if (structureMode === "execution" && timeline.length) {
-        // ── Execution-order skeleton (Fase 3.1) ──────────────────────────────
-        // Walk the timeline plan and emit each block where it actually happened.
-        // Data prep for a dataset is emitted (load + full pipeline) at its first
-        // mention; estimations are matched to their pinned/active model and
-        // emitted inline. The AI preserves this order (prompt rule 2 + 9).
-        const all  = [result, ...pinnedModels].filter(Boolean);
-        const matchModel = ev => {
-          const f = ev?.params?.filename, t = ev?.params?.type, y = ev?.params?.yVar;
-          return all.find(m => (m.spec?.filename ?? null) === f && (m.type ?? null) === t && (m.spec?.yVar ?? null) === y)
-              ?? all.find(m => (m.type ?? null) === t && (m.spec?.yVar ?? null) === y)
-              ?? null;
-        };
-        const plan = planExecutionOrder(timeline);
-        const emittedData = new Set();
-        let modelIdx = 0;
-        const out = [];
-        for (const blk of (plan?.blocks ?? [])) {
-          if (blk.kind === "load" || blk.kind === "clean") {
-            if (blk.datasetId && !emittedData.has(blk.datasetId) && built[blk.datasetId]) {
-              emittedData.add(blk.datasetId);
-              const ds = built[blk.datasetId];
-              out.push(generateCleanScript({
-                language: lang, datasetName: ds.name,
-                filename: ds.filename ?? `${ds.name}.csv`,
-                pipeline: ds.pipeline, loadOpts: ds.loadOpts, allDatasets: dsMap,
-              }));
-            }
-          } else if (blk.kind === "estimate") {
-            const m = matchModel(blk.events?.[0]);
-            out.push(m ? renderModel(m, modelIdx++)
-                       : `${comment} ${blk.label} — model not pinned; pin it in the Model tab to replicate`);
-          } else if (blk.kind === "explore") {
-            const code = (blk.events ?? [])
-              .map(ev => {
-                const exDf = fileToVar(ev.params?.dataset) ?? toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
-                const c = transpileExploreStat(ev.params, lang, exDf);
-                return c ? `${comment} ${ev.label ?? ev.params?.kind}\n${c}` : null;
-              })
-              .filter(Boolean)
-              .join("\n\n");
-            out.push(code || `${comment} ${blk.label} — Explore artifact (no code translation)`);
-          } else if (blk.kind === "spatial") {
-            const seen = new Set();
-            const code = (blk.events ?? [])
-              .map(ev => transpileSpatialOp(ev.opType, ev.params, lang, dsMap, pointsSrcFor(ev.params), builtGridIds))
-              .filter(c => c && !seen.has(c) && seen.add(c))  // drop repeated identical ops
-              .join("\n\n");
-            out.push(code
-              ? `${comment} ${blk.label}\n${code}`
-              : `${comment} ${blk.label} — spatial op (use the Spatial tab map/plot exports)`);
-          }
-        }
-        cleanSc = out.filter(Boolean).join("\n\n");
-        modelSc = ""; // models are emitted inline, in execution order
-      } else if (multiDataset) {
-        // Workspace skeleton: ALL session datasets in topological order.
-        const ws = generateWorkspaceScript({ language: lang, datasets: built, globalPipeline });
-        cleanSc = ws.perDataset;
-        // Cross-dataset joins are deterministic replication code and are appended
-        // AFTER the AI returns, exactly like the visual/spatial sections below.
-        // Sent THROUGH the model they get dropped — that is how a session with
-        // three joins exported a script with none, then estimated on a dataset
-        // the script never built.
-        if (ws.crossDataset.trim()) {
-          visualSections = `\n\n${comment} ── Cross-dataset interactions ───────────────────────\n${ws.crossDataset}`
-                         + visualSections;
-        }
-        modelSc = modelsToReplicate().map(renderModel).filter(Boolean).join("\n\n");
-      } else {
-        const dsName = cleanedData?.filename?.replace(/\.[^.]+$/, "") ?? "dataset";
-        cleanSc = generateCleanScript({
-          language:    lang,
-          datasetName: dsName,
-          filename:    cleanedData?.filename ?? "dataset.csv",
-          pipeline:    cleanedData?.pipeline ?? [],
-          loadOpts:    cleanedData?.loadOpts ?? null,
-          allDatasets: dsMap,
-        });
-        modelSc = modelsToReplicate().map(renderModel).filter(Boolean).join("\n\n");
-      }
-      // ── Spatial analyze ops ──────────────────────────────────────────────
-      // Execution mode inlines spatial ops in order. The module/multi-dataset
-      // modes are pipeline-only and would otherwise drop them, so append a
-      // Spatial section translating the logged ops (st_join/buffer/grid/…).
-      if (structureMode !== "execution") {
-        const seenSpatial = new Set();
-        const spatialCode = timeline
-          .filter(ev => ev?.module === "spatial" && ev.opType !== "geocode")
-          .map(ev => {
-            const c = transpileSpatialOp(ev.opType, ev.params, lang, dsMap, pointsSrcFor(ev.params), builtGridIds);
-            return c ? `${comment} ${ev.label ?? ev.opType}\n${c}` : null;
-          })
-          // Drop repeated identical spatial ops (e.g. the user re-ran the same
-          // grid build 3×) — keyed on the generated code, ignoring the label.
-          .filter(block => {
-            if (!block) return false;
-            const key = block.replace(/^#.*\n/, "");
-            return !seenSpatial.has(key) && seenSpatial.add(key);
-          })
-          .join("\n\n");
-        if (spatialCode) {
-          visualSections += `\n\n${comment} ── Spatial operations ───────────────────────────────\n${spatialCode}`;
-        }
-        // Explore pins (Summary / Distributions / Time Series / Correlation).
-        // Each pin binds to ITS OWN source dataset (params.dataset = the filename
-        // active when pinned), not the Report-active dataset.
-        const exploreCode = timeline
-          .filter(ev => ev?.module === "explore" && ev.opType === "explore_stat")
-          .map(ev => {
-            const exDf = fileToVar(ev.params?.dataset) ?? toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
-            const c = transpileExploreStat(ev.params, lang, exDf);
-            return c ? `${comment} ${ev.label ?? ev.params?.kind}\n${c}` : null;
-          })
-          .filter(Boolean)
-          .join("\n\n");
-        if (exploreCode) {
-          visualSections += `\n\n${comment} ── Explore (descriptive plots & stats) ──────────────\n${exploreCode}`;
-        }
-      }
-      // ── Saved plots (PlotBuilder) + maps (leaflet) ───────────────────────
-      // Persisted per project (plotHistory) with their own Track P translators.
-      // Weave them in as Plots / Maps sections (all modes) so the unified script
-      // reproduces the visuals too — not just data prep + estimation.
+      // Saved plots + maps, in the order the artifact panel shows.
+      let visualItems = [];
       try {
-        const plotDfVar = toDfVar(cleanedData?.name ?? cleanedData?.filename ?? "df");
-        // PlotBuilder / SpatialPlotTab persist history keyed by the DATASET id
-        // (their `pid` prop is tabDsId), NOT the project pid — so query every
-        // dataset id plus the project pid and aggregate, else the histories read
-        // empty and Plots/Maps never appear.
-        const histPids = Array.from(new Set([pid, ...availableDatasets.map(d => d.id)].filter(Boolean)));
-        // Tag each entry with the dataset id it was saved under so the plot binds
-        // to its own source dataset (not the Report-active one). flat() would
-        // otherwise lose that association.
-        // Dedupe history entries: the same saved plot/map can surface under more
-        // than one histPid (saved under a dataset id AND re-listed under the
-        // project pid), producing the duplicate "Map 1 ×2" Franco saw. Key on a
-        // stable id, falling back to name + serialized config.
+        const histPids = Array.from(new Set([pid, ...availableDatasets.map(d => d.id)].filter(Boolean)))
+          .flatMap(p => [p, `${p}_model`, `${p}_spec`, `${p}_bacon`]);
         const dedupeHistory = (arr) => {
           const seen = new Set();
           return arr.filter(e => {
@@ -1190,53 +913,99 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           });
         };
         const savedPlots = dedupeHistory((await Promise.all(
-          histPids.map(async p => (await getPlotHistory(p).catch(() => [])).map(e => ({ ...e, _srcId: p })))
+          histPids.map(async p => (await getPlotHistory(p).catch(() => [])).map(e => ({ ...e, _srcId: p.replace(/_(model|spec|bacon)$/, "") })))
         )).flat());
         const savedMaps = dedupeHistory((await Promise.all(histPids.map(p => getMapHistory(p).catch(() => [])))).flat());
-        const order = artOrder; // use the in-state order the panel shows (no extra IDB read / race)
-        const plotArts = (savedPlots ?? []).map(e => ({ kind: "plot", artifactId: makeArtifactId("plot", e.id), savedAt: e.savedAt ?? 0, entry: e }));
-        const mapArts  = (savedMaps  ?? []).map(e => ({ kind: "map",  artifactId: makeArtifactId("map",  e.id), savedAt: e.savedAt ?? 0, entry: e }));
-        const visualArts = orderArtifacts([...plotArts, ...mapArts], order);
-        const orderedVisualCode = visualArts.map(a => {
+        const plotArts = savedPlots.map(e => ({ kind: "plot", artifactId: makeArtifactId("plot", e.id), savedAt: e.savedAt ?? 0, entry: e }));
+        const mapArts  = savedMaps.map(e => ({ kind: "map", artifactId: makeArtifactId("map", e.id), savedAt: e.savedAt ?? 0, entry: e }));
+        visualItems = orderArtifacts([...plotArts, ...mapArts], artOrder).map(a => {
           if (a.kind === "plot") {
-            const entryDf = idToVar(a.entry._srcId ?? a.entry.datasetId) ?? plotDfVar;
-            const code = lang === "python" ? buildMatplotlibPlot(a.entry, { dfVar: entryDf })
-                       : lang === "stata"  ? buildStataPlot(a.entry, { dataVar: entryDf })
-                       :                     buildGgplot(a.entry, { dfVar: entryDf });
-            return code ? `${comment} Plot: ${a.entry.name ?? "untitled"}\n${code}` : null;
+            // A plot saved under the project id belongs to whichever dataset it
+            // was drawn from; fall back to the Report's dataset.
+            const src = a.entry.datasetId ?? a.entry._srcId;
+            const dataset = dsMap[src] ? src : cleanedData?.filename;
+            return { kind: "plot", label: `Plot: ${a.entry.name ?? "untitled"}`, dataset, entry: a.entry };
           }
-          let code;
-          if (lang === "python") code = buildFoliumPy(a.entry, { datasets: availableDatasets });
-          else if (lang === "stata") code = `${comment} Map "${a.entry.name ?? ""}" — Stata has no leaflet; reproduce in R (leaflet) or Python (folium)`;
-          else code = buildLeafletR(a.entry, { datasets: availableDatasets });
-          return code ? `${comment} Map: ${a.entry.name ?? "untitled"}\n${code}` : null;
-        }).filter(Boolean).join("\n\n");
-        if (orderedVisualCode) {
-          visualSections += `\n\n${comment} ── Saved visuals (in your chosen order) ─────────────\n${orderedVisualCode}`;
-        }
+          const code = lang === "python" ? buildFoliumPy(a.entry, { datasets: availableDatasets })
+            : lang === "stata" ? `${comment} Map "${a.entry.name ?? ""}" — Stata has no leaflet; reproduce in R (leaflet) or Python (folium)`
+            : buildLeafletR(a.entry, { datasets: availableDatasets });
+          return { kind: "code", label: `Map: ${a.entry.name ?? "untitled"}`, code };
+        });
       } catch { /* histories are best-effort; never block script generation */ }
-      const dict = cleanedData?.dataDictionary ?? null;
-      const structureInstruction =
-        structureMode === "custom" && customInstruction.trim()
-          ? customInstruction.trim()
-          : structureMode === "execution"
-            ? "Structure the script in EXACT EXECUTION ORDER as given in the section blocks: do not regroup by module, preserve the interleaving of data prep and estimation exactly as ordered."
-            : structureMode === "module"
-              ? "Structure the script grouped by module section: Setup, Data Loading, Cleaning, Feature Engineering, Estimation, Results."
-              : null;
-      const replicationInstruction = replicateMode === "all"
-        ? "REPLICATE: all pinned models plus the active model, without duplicating an identical active pin. Preserve every labeled model block and its source dataset binding."
-        : "REPLICATE: active model only.";
-      const userInstruction = [structureInstruction, replicationInstruction].filter(Boolean).join("\n");
-      const cleanedFiles = editedNames.map(n => `"${n.replace(/\.[^.]+$/, "")}_cleaned.csv"`).join(", ");
-      const manualEditNote = showEditWarning
-        ? `This session contains ${manualEdits} manual cell edit(s) ("patch" steps keyed on internal row ids __row_id/__ri that do NOT exist in the raw file) on the following dataset(s): ${editedNames.map(n => `"${n}"`).join(", ")}. Do NOT emit row-id-based patch assignments. Instead, in the Data Loading section add a prominent comment telling the user to load the exported cleaned dataset(s) ${cleanedFiles} (downloadable from Litux) for an exact replication.`
-        : null;
-      const out = await generateUnifiedScript({ clean: cleanSc, model: modelSc }, lang, dict, { snapshot, userInstruction, manualEditNote });
-      // Append the deterministic Spatial / Explore / Plots / Maps sections AFTER
-      // the AI so they are guaranteed in the final script (the model can't drop
-      // or rewrite them).
-      setScript(visualSections ? `${out}\n${visualSections}` : out);
+
+      const items = [];
+      if (structureMode === "execution" && timeline.length) {
+        // Analysis blocks in the order they were run. Data prep is not
+        // interleaved any more: every dataset has to exist before anything
+        // reads it, and a derived one can only be built after its parent.
+        // The timeline records an estimation as (type, yVar, filename), which
+        // several pinned models can share — PS4 had four FE models on the same
+        // outcome. Matching against the whole list returned the first one every
+        // time, so ONE model was emitted and the other three printed "model not
+        // pinned". Each match therefore consumes its model, and anything the
+        // timeline never matched is appended after the loop rather than lost.
+        const candidates = modelsToReplicate();
+        const blocks = planExecutionOrder(timeline)?.blocks ?? [];
+        // Each estimation block consumes one model (see assignModelsToEstimates):
+        // matching against the whole list emitted one of four FE models on the
+        // same outcome and called the rest unpinned.
+        const estimateBlocks = blocks.filter(b => b.kind === "estimate");
+        const { matched, leftover } = assignModelsToEstimates(estimateBlocks.map(b => b.events?.[0]), candidates);
+        const modelFor = new Map(estimateBlocks.map((b, i) => [b, matched[i]]));
+        const notedBlocks = new Set();
+        for (const blk of blocks) {
+          if (blk.kind === "estimate") {
+            const m = modelFor.get(blk);
+            if (m) items.push(modelItem(m));
+            else if (!notedBlocks.has(blk.label)) {
+              // Re-runs of one spec produce several identical blocks; say it once.
+              notedBlocks.add(blk.label);
+              items.push({ kind: "code", label: blk.label, code: `${comment} ${blk.label} — not among the models being replicated; pin it in the Model tab to include it` });
+            }
+          } else if (blk.kind === "explore") {
+            for (const ev of (blk.events ?? [])) if (ev?.opType === "explore_stat") items.push(exploreItem(ev));
+          } else if (blk.kind === "spatial") {
+            const seen = new Set();
+            for (const ev of (blk.events ?? [])) {
+              const it = spatialItem(ev);
+              if (it && !seen.has(it.code)) { seen.add(it.code); items.push(it); }
+            }
+          }
+        }
+        // A model the timeline never matched (pinned in an earlier session, or
+        // an event whose params drifted) still belongs in the script.
+        items.push(...leftover.map(modelItem));
+      } else {
+        items.push(...modelsToReplicate().map(modelItem));
+        for (const ev of timeline.filter(e => e?.module === "explore" && e.opType === "explore_stat")) items.push(exploreItem(ev));
+        const seenSpatial = new Set();
+        for (const ev of timeline.filter(e => e?.module === "spatial" && e.opType !== "geocode")) {
+          const it = spatialItem(ev);
+          if (it && !seenSpatial.has(it.code)) { seenSpatial.add(it.code); items.push(it); }
+        }
+      }
+      items.push(...visualItems);
+
+      let out = buildUnifiedScript({ lang, datasets: built, globalPipeline, items, title: "Unified replication script" });
+      if (showEditWarning) {
+        const files = editedNames.map(n => `"${n.replace(/\.[^.]+$/, "")}_cleaned.csv"`).join(", ");
+        out = `${comment} NOTE: ${manualEdits} manual cell edit(s) on ${editedNames.map(n => `"${n}"`).join(", ")} cannot be\n`
+            + `${comment} replayed from the raw file. For an exact replication load ${files} (download it from Litux).\n\n${out}`;
+      }
+      setScript(out);
+      // Optional commentary: a comment block above the code, never a rewrite.
+      if (aiNotes) {
+        setNotesState("loading");
+        try {
+          const notes = await generateScriptNotes(out, lang, { snapshot });
+          if (notes.trim()) setScript(`${notes}\n\n${out}`);
+          setNotesState("done");
+        } catch (e) {
+          setNotesState(e?.message === "INSUFFICIENT_CREDITS"
+            ? "AI notes skipped: no credits left this month. The script above is complete."
+            : `AI notes skipped (${e?.message ?? "request failed"}). The script above is complete.`);
+        }
+      }
     } catch (e) {
       const msg = e.message === "REPLICATION_PAID_ONLY"
         ? "AI script replication is a paid-tier feature. Upgrade to Pro or Premium to generate the unified replication script. (You can still export the deterministic R / Stata / Python scripts from the model tab.)"
@@ -1273,7 +1042,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
         }}
       >
         <span style={{ fontSize: T.caption.fontSize, color: C.gold, letterSpacing: "0.22em", textTransform: "uppercase" }}>
-          ✦ AI Unified Script Export
+          ✦ Unified Replication Script
         </span>
         <span style={{ fontSize: T.caption.fontSize, color: C.textMuted }}>{open ? "▲" : "▼"}</span>
       </button>
@@ -1285,9 +1054,10 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
           background: C.surface, animation: "fadeUp 0.15s ease",
         }}>
           <div style={{ fontSize: T.code.fontSize, color: C.textDim, fontFamily: T.code.fontFamily, lineHeight: 1.6, marginBottom: "1rem" }}>
-            Generates one complete, documented replication script combining your
-            pipeline + model. Claude restructures, comments, and deduplicates the
-            auto-generated code.
+            One script for the whole project: every dataset rebuilt from its raw file
+            and recorded lineage, then your models, descriptive stats and saved plots,
+            each on its own dataset. The code is generated deterministically — the
+            same code Litux checks against R, Stata and Python — and runs as is.
           </div>
 
           {/* Manual-edit warning (Fase 0.3) — R/Stata only */}
@@ -1342,18 +1112,6 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
               <div style={{ marginTop: 6, fontSize: T.caption.fontSize, color: C.teal, fontFamily: T.code.fontFamily }}>
                 ⤳ Execution order auto-selected: {interleaveHint}
               </div>
-            )}
-            {structureMode === "custom" && (
-              <textarea
-                value={customInstruction}
-                onChange={e => setCustomInstruction(e.target.value)}
-                placeholder='e.g. "One section per dataset, model at the end, comment every step in Spanish"'
-                rows={2}
-                style={{ width: "100%", marginTop: 6, padding: "0.45rem 0.6rem", resize: "vertical",
-                         background: C.bg, border: `1px solid ${C.teal}40`, borderRadius: 3,
-                         color: C.text, fontFamily: T.code.fontFamily, fontSize: T.code.fontSize,
-                         outline: "none", boxSizing: "border-box" }}
-              />
             )}
           </div>
 
@@ -1430,6 +1188,19 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
               {loading ? "Generating…" : script ? "↻ Regenerate" : "✦ Generate"}
             </button>
           </div>
+          <div style={{ marginTop: -6, marginBottom: "0.9rem" }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+                            fontSize: T.caption.fontSize, color: C.textDim, fontFamily: T.code.fontFamily }}>
+              <input type="checkbox" checked={aiNotes} onChange={e => setAiNotes(e.target.checked)} />
+              Add AI commentary (a comment header describing the analysis — the code is not changed)
+            </label>
+            {notesState === "loading" && (
+              <div style={{ marginTop: 4, fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily }}>Claude is writing the commentary…</div>
+            )}
+            {notesState && notesState !== "loading" && notesState !== "done" && (
+              <div style={{ marginTop: 4, fontSize: T.caption.fontSize, color: C.gold, fontFamily: T.code.fontFamily }}>⚠ {notesState}</div>
+            )}
+          </div>
 
           {/* Error */}
           {error && (
@@ -1446,7 +1217,7 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
               <div style={{ width: 12, height: 12, border: `2px solid ${C.border2}`,
                             borderTopColor: C.gold, borderRadius: "50%",
                             animation: "spin 0.7s linear infinite" }} />
-              <span>Claude is writing your script…</span>
+              <span>Building the script…</span>
             </div>
           )}
 
@@ -1498,6 +1269,14 @@ function AIUnifiedScript({ result, cleanedData, snapshot, availableDatasets = []
 export default function ReportingModule({ result: propResult, cleanedData, availableDatasets = [], pinnedModels = [], pid = null, onClose }) {
   const { C, T } = useTheme();
   const [tab, setTab] = useState("forest");
+  // Which factor groups the forest plot has open. Owned HERE, not inside the
+  // plot, because the "Copy LaTeX" button beside it must omit the same rows —
+  // a figure and a table in one tab disagreeing about the model is the
+  // export-drift failure this codebase keeps hitting.
+  // `forestOmit` itself has to sit AFTER `result` is declared: `result` is a
+  // const below, so reading it up here is a temporal-dead-zone ReferenceError,
+  // not an undefined — it crashed the whole module.
+  const [forestExpanded, setForestExpanded] = useState(() => new Set());
 
   // Which model the report currently displays — defaults to the model that
   // was active when this tab opened, but the user can switch to any pinned
@@ -1506,6 +1285,15 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
   const rawResult = (selectedId && pinnedModels.find(m => m.id === selectedId)) || propResult;
 
   const result = useMemo(() => normaliseResult(rawResult), [rawResult]);
+
+  // Rows the forest plot is collapsing, so "Copy LaTeX" omits the same ones.
+  // `result` can be null before a model is pinned, so everything here tolerates
+  // an absent varNames rather than assuming the shape.
+  const forestOmit = useMemo(() => {
+    const names = result?.varNames ?? [];
+    const { levelOf } = buildCoefGroups(names, result?.spec?.factorVars ?? []);
+    return hiddenCoefNames(names, levelOf, forestExpanded);
+  }, [result, forestExpanded]);
 
   // ── Build session snapshot once per render — passed to AI calls so Claude
   //    sees data load opts (sep, sheet, encoding), pipeline, dictionary, etc.
@@ -1633,6 +1421,7 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
           { heading: "Outputs", items: [
             "LaTeX Stargazer table: multi-column comparison of all pinned models, publication-ready",
             "Forest plot: coefficient + 95% CI across all pinned specifications",
+            "Levels of a factor variable are collapsed behind a per-factor toggle — expand one and the LaTeX table drops the same rows, so figure and table always agree",
             "AI Narrative: 2–3 academic paragraphs interpreting the results",
             "Replication bundle: R + Stata + Python scripts plus the data, as a zip",
           ]},
@@ -1640,6 +1429,9 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
             "The script is built from what you actually did: the load call, every pipeline step, and the model spec",
             "Load options are honoured — a semicolon CSV exports as read_delim(delim=\";\"), an Excel sheet keeps its sheet name, a .dta uses read_dta",
             "Multi-dataset sessions load every dataset with the right reader and estimate on the model's own source dataset",
+            "Unified Replication Script: every dataset is rebuilt once from its raw file and recorded lineage, then your models, Explore pins and saved plots run in order, each on its own dataset — the code is generated, not written by AI, and runs as is in R, Stata and Python",
+            "Add AI commentary puts a comment header above the script (what the analysis does, identifying assumptions); it never changes the code",
+            "A dataset derived before Litux recorded lineage cannot be rebuilt — the script says so above its load line; re-derive it (Save as dataset) to fix that",
             "Renaming a dataset in the Data tab changes the df_<name> it gets in the script",
             "Scripts are editable before download — but edits are yours to maintain, they are not fed back into the app",
           ]},
@@ -1715,7 +1507,7 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
               <Lbl mb={0}>Coefficient Estimates · 95% Confidence Intervals</Lbl>
               <CopyBtn
-                text={buildStargazer([{ label: modelLabel, result, yVar }])}
+                text={buildStargazer([{ label: modelLabel, result, yVar }], { omitVars: forestOmit })}
                 label="Copy LaTeX"
                 successLabel="Copied ✓"
                 color={C.gold}
@@ -1732,6 +1524,11 @@ export default function ReportingModule({ result: propResult, cleanedData, avail
               beta={result.beta}
               se={result.se}
               pVals={result.pVals}
+              factorVars={result.spec?.factorVars ?? []}
+              expanded={forestExpanded}
+              onExpandedChange={setForestExpanded}
+              svgId="forest-report"
+              filename="report_coefficients.svg"
             />
           </div>
         )}

@@ -16,14 +16,16 @@
 //   style         object     — optional container style overrides
 //   initialLayers array      — optional pre-seeded layers (G10 template mode)
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useTheme } from "./modeling/shared.jsx";
 import { PLOT_PALETTES } from "../theme.js";
 import PlotExportBar from "./shared/PlotExportBar.jsx";
 import { PRESETS, downloadCombinedPNG } from "../services/export/plotExporter.js";
 import { buildGgplot, buildMatplotlibPlot, buildStataPlot, resolvePlotPreamble } from "../services/export/plotScript.js";
+import { filterScopeBlock } from "../services/export/exploreStatScript.js";
 import { toDfVar } from "../pipeline/exporter.js";
 import { getPlotHistory, savePlotHistory } from "../services/Persistence/plotHistory.js";
+import { describeFilters } from "./explore/ExplorePinBar.jsx";
 import { buildPlotsFile, parsePlotsFile, downloadJSON } from "../services/export/artifactIO.js";
 
 const arrMin = (a, fb = 0) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : fb;
@@ -1543,7 +1545,21 @@ function CombinedExportBar({ getElA, getElB, filename = "plot_combined" }) {
 // scriptPreamble(language) optionally prepends model-context replication code.
 // datasetName: source dataset name → R/Python df identifier (df_<name>) in copied
 // scripts so the export matches the unified-script convention. Defaults to "df".
-export default function PlotBuilder({ headers = [], rows = [], style, initialLayers = [], pid, projectPid, datasetId, onRequestDataset, initialPendingPlotId, onConsumePendingPlot, scriptPreamble, datasetName }) {
+export default function PlotBuilder({ headers = [], rows: liveRows = [], style, initialLayers = [], pid, projectPid, datasetId, onRequestDataset, initialPendingPlotId, onConsumePendingPlot, scriptPreamble, datasetName,
+  // Row-scope plumbing (Explore passes these; ModelingTab and free mode do not).
+  // `liveRows` is already scoped by the host's active filter. A SAVED plot,
+  // however, must redraw through the filter it was saved with, or clearing the
+  // filter bar silently changes every saved plot — so the host also hands over
+  // the unfiltered rows and the one filter evaluator it uses itself.
+  baseRows = null, activeFilters = null, applyFilters = null }) {
+  // Filter a LOADED saved plot carries. null = follow the host's live filter.
+  const [entryFilters, setEntryFilters] = useState(null);
+  const canScope = !!(applyFilters && baseRows);
+  const rows = useMemo(
+    () => (canScope && entryFilters?.length ? applyFilters(baseRows, entryFilters) : liveRows),
+    [canScope, entryFilters, applyFilters, baseRows, liveRows]
+  );
+
   const { C, T, prefs } = useTheme();
   const histPid = projectPid ?? pid; // history is project-scoped; falls back to pid
   const [layers,      setLayers]      = useState(initialLayers);
@@ -1650,6 +1666,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     setYCatOrder(entry.yCatOrder || "");
     setFacetCol(entry.facetCol || "");
     setFacetCols(entry.facetCols || 3);
+    setEntryFilters(entry.filters ?? null);
   }, []);
 
   // After App switches datasets to honor a cross-dataset plot click, open the
@@ -1673,8 +1690,13 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
     return {
       layers: JSON.parse(JSON.stringify(layers)),
       title, xLabel, yLabel, scheme, ...scaleState, facetCol, facetCols,
+      // The rows this plot was drawn on, so reopening it reproduces the figure
+      // rather than following whatever filter is active then.
+      filters: (entryFilters ?? (activeFilters?.length ? activeFilters : null))
+        ? JSON.parse(JSON.stringify(entryFilters ?? activeFilters))
+        : null,
     };
-  }, [layers, title, xLabel, yLabel, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder, facetCol, facetCols]);
+  }, [layers, title, xLabel, yLabel, scheme, xScale, yScale, xDomain, yDomain, xFmt, yFmt, xCatOrder, yCatOrder, facetCol, facetCols, entryFilters, activeFilters]);
 
   const savePlot = useCallback(() => {
     if (layers.length === 0) return;
@@ -1776,12 +1798,20 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
       typeof scriptPreamble === "function" ? scriptPreamble(scriptLanguage) : null,
       { language: scriptLanguage, baseDfVar },
     );
+    // A saved plot draws on the filter it was saved with, so the script has to
+    // filter too — otherwise the copied code plots a different sample from the
+    // canvas it was copied from.
+    const scope = filterScopeBlock(entry.filters, scriptLanguage, dfVar, {
+      varName: scriptLanguage === "python" ? "_plot_d" : ".plot_d",
+      wrapStata: true,
+    });
     const generated = scriptLanguage === "python"
-      ? buildMatplotlibPlot(entry, { dfVar })
+      ? buildMatplotlibPlot(entry, { dfVar: scope.df })
       : scriptLanguage === "stata"
         ? buildStataPlot(entry)
-        : buildGgplot(entry, { dfVar });
-    const script = preamble ? `${preamble}\n\n${generated}` : generated;
+        : buildGgplot(entry, { dfVar: scope.df });
+    const body = [...scope.pre, generated, ...scope.post].filter(Boolean).join("\n");
+    const script = preamble ? `${preamble}\n\n${body}` : body;
     navigator.clipboard.writeText(script).then(() => {
       setCopiedLanguage(scriptLanguage);
       setTimeout(() => setCopiedLanguage(current => current === scriptLanguage ? null : current), 1600);
@@ -1789,6 +1819,7 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
   }, [layers.length, currentPlotEntry, scriptLanguage, scriptPreamble, datasetName]);
 
   const newPlot = useCallback(() => {
+    setEntryFilters(null);
     setLayers([]);
     setActiveId(null);
     setTitle("");
@@ -2016,6 +2047,21 @@ export default function PlotBuilder({ headers = [], rows = [], style, initialLay
                 disabled={histIdx === null}
                 style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 3, color: histIdx !== null ? C.textMuted : C.border, cursor: histIdx !== null ? "pointer" : "default", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, padding: "2px 6px", lineHeight: 1 }}>→</button>
             </>)}
+            {/* A loaded plot draws on the filter it was saved with, so say so —
+                otherwise the canvas silently disagrees with the filter bar. */}
+            {canScope && entryFilters?.length > 0 && (
+              <span
+                title={`This saved plot draws on: ${describeFilters(entryFilters)}
+Click to follow the filter bar instead.`}
+                onClick={() => setEntryFilters(null)}
+                style={{
+                  fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: C.gold,
+                  border: `1px solid ${C.gold}55`, borderRadius: 3, padding: "2px 6px",
+                  cursor: "pointer", whiteSpace: "nowrap", maxWidth: 220,
+                  overflow: "hidden", textOverflow: "ellipsis",
+                }}
+              >⊘ {describeFilters(entryFilters)} ✕</span>
+            )}
             <button onClick={savePlot} disabled={layers.length === 0}
               title={histIdx !== null
                 ? `Overwrite “${plotHistory[histIdx]?.name ?? "this plot"}” with what is on the canvas`

@@ -1,6 +1,7 @@
 // Pure row-wise expression helpers shared by the Clean worker and DGP builder.
 export const HELPERS = {
-  ifelse:    (cond, a, b) => cond ? a : b,
+  // An NA condition gives NA, as in R (see rowExpr.js).
+  ifelse:    (cond, a, b) => (cond === null || cond === undefined || Number.isNaN(cond)) ? null : cond ? a : b,
   log:       x => (typeof x === "number" && x > 0) ? Math.log(x) : null,
   log10:     x => (typeof x === "number" && x > 0) ? Math.log10(x) : null,
   log2:      x => (typeof x === "number" && x > 0) ? Math.log2(x) : null,

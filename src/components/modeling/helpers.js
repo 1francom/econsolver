@@ -138,17 +138,43 @@ export function expandInteractions(rows, xVars, wVars, interactionTerms, factorV
   const augX  = [...xVars];
   const augW  = [...wVars];
 
+  // Terms that stand in the model on their own: the main effects the user
+  // selected, plus both sides of every `*` term (which adds them).
+  const ixFactorMap = {};
+  const mainEffects = new Set([...xVars, ...wVars]);
+  for (const t of interactionTerms) {
+    if (t?.type === "*" && t.var1 && t.var2) { mainEffects.add(t.var1); mainEffects.add(t.var2); }
+  }
+
   for (const { var1, var2, type } of interactionTerms) {
     if (!var1 || !var2 || var1 === var2) continue;
 
+    // R's coding rule (model.matrix / terms): a factor inside an interaction is
+    // coded with contrasts — a reference level dropped — only if what remains
+    // of the term without it is itself in the model. For `x:f` that is `x` as a
+    // main effect. Without it R codes EVERY level, i.e. one slope per group:
+    // `gdp ~ education:continent | country + year` gives five continent slopes.
+    // Dropping a reference there is not a relabelling — it forces that group's
+    // slope to ZERO (Africa's is −2021 in R), biasing every other slope and the
+    // fit (within R² 0.1162 vs R's 0.1367 on the same data).
+    // Scope: numeric × factor only. factor × factor with neither main effect is
+    // fully crossed in R and rank-deficient with an intercept — still open.
+    const fullCoding = (col, other) =>
+      fvSet.has(col) && !fvSet.has(other) && !mainEffects.has(other);
+
     // Returns dummy column names for a factor var (same convention as applyFactors),
     // or [col] for a numeric var. Side-effect: creates missing dummy columns in augRows.
-    const ensureAndGetCols = (col) => {
+    const ensureAndGetCols = (col, other) => {
       if (!fvSet.has(col)) return [col];
       const rawLevels = [...new Set(augRows.map(r => r[col]).filter(v => v != null))];
       const levels = reorderForReference(sortFactorLevels(rawLevels), factorRefs[col]);
-      const lvs = levels.slice(1);
+      const full = fullCoding(col, other);
+      const lvs = full ? levels : levels.slice(1);
       const dcs = lvs.map(lv => `${col}_${lv.replace(/\s+/g, '_')}`);
+      // Recorded like applyFactors' map so the exporters know this factor's
+      // levels even when it appears ONLY inside an interaction — Stata must
+      // `encode` a string factor before `i.` can take it (r(109) otherwise).
+      dcs.forEach((dc, i) => { ixFactorMap[dc] ??= { factor: col, level: lvs[i], ref: full ? null : levels[0] }; });
       const missing = dcs.filter(dc => !(dc in (augRows[0] ?? {})));
       if (missing.length) {
         augRows = augRows.map(r => {
@@ -168,8 +194,8 @@ export function expandInteractions(rows, xVars, wVars, interactionTerms, factorV
       return dcs;
     };
 
-    const cols1 = ensureAndGetCols(var1);
-    const cols2 = ensureAndGetCols(var2);
+    const cols1 = ensureAndGetCols(var1, var2);
+    const cols2 = ensureAndGetCols(var2, var1);
 
     for (const c1 of cols1) {
       for (const c2 of cols2) {
@@ -193,7 +219,7 @@ export function expandInteractions(rows, xVars, wVars, interactionTerms, factorV
     }
   }
 
-  return { rows: augRows, xVars: augX, wVars: augW };
+  return { rows: augRows, xVars: augX, wVars: augW, factorMap: ixFactorMap };
 }
 
 // ─── ESTIMATOR RESOLVER ───────────────────────────────────────────────────────

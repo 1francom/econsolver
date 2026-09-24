@@ -36,6 +36,33 @@ function inferFormat(filename, loadOpts) {
   return "csv";
 }
 
+// R factors, read the way Litux reads them (services/data/parsers/rds.js): a
+// factor whose labels are numbers in numeric order becomes numeric, any other
+// factor becomes text. Without it the three languages disagreed with the app
+// on the SAME file: R used the factor's level order, pandas kept categories no
+// row uses any more (a filtered-out municipality became an all-zero dummy and
+// the design went singular — linearmodels refused the IV outright), and Litux
+// sorted as text. Also drops dplyr grouping left in a saved tibble, which would
+// otherwise make every later mutate() run per group. One statement, so the
+// caller's `^df` rename still reaches it.
+const R_FROM_R = (obj) =>
+  `df <- as.data.frame(lapply(${obj}, function(x) if (is.factor(x)) { .l <- levels(x); ` +
+  `if (length(.l) && all(grepl("^-?(0|[1-9][0-9]*)([.][0-9]*[1-9])?$", .l)) && !is.unsorted(as.numeric(.l), strictly = TRUE)) ` +
+  `as.numeric(as.character(x)) else as.character(x) } else x), stringsAsFactors = FALSE, check.names = FALSE)`;
+const PY_FROM_R = (expr) => [
+  `import pyreadr, re  # pip install pyreadr`,
+  `def _lx_from_r(d):`,
+  `    # R factors as Litux reads them: numeric labels in numeric order -> numbers, other factors -> text`,
+  `    for c in d.select_dtypes("category").columns:`,
+  `        cats = [str(x) for x in d[c].cat.categories]`,
+  // pyreadr re-sorts categories as TEXT ("1","10","11",…), so R's level order is
+  // gone here; numeric labels are taken as numbers whatever their order.
+  `        num = all(re.fullmatch(r"-?(0|[1-9][0-9]*)([.][0-9]*[1-9])?", x) for x in cats)`,
+  `        d[c] = pd.to_numeric(d[c].astype(object)) if (cats and num) else d[c].astype(object)`,
+  `    return d`,
+  `df = _lx_from_r(${expr})`,
+].join("\n");
+
 // ─── R ───────────────────────────────────────────────────────────────────────
 export function buildRLoadLine(filename, loadOpts = null) {
   const fmt = inferFormat(filename, loadOpts);
@@ -62,11 +89,13 @@ export function buildRLoadLine(filename, loadOpts = null) {
     case "stata":
       return `df <- haven::read_dta(${f})`;
     case "rds":
-      return `df <- readRDS(${f})`;
+      return R_FROM_R(`readRDS(${f})`);
     case "rdata":
       // load() restores every object in the workspace under its own name, so the
       // one this dataset came from has to be picked out explicitly afterwards.
-      return `load(${f})\ndf <- ${loadOpts?.objectName ?? "# TODO: name the object from the workspace"}`;
+      return loadOpts?.objectName
+        ? `load(${f})\n${R_FROM_R(loadOpts.objectName)}`
+        : `load(${f})\ndf <- # TODO: name the object from the workspace`;
     case "parquet":
       return `df <- arrow::read_parquet(${f})`;
     case "shapefile-shp":
@@ -101,12 +130,19 @@ export function buildPyLoadLine(filename, loadOpts = null) {
       return `df = pd.read_excel(${f}${sheet})`;
     }
     case "stata":
-      return `df = pd.read_stata(${f})`;
+      // Litux reads the stored CODES (state = 1, as haven::read_dta and Stata
+      // do). pandas' default swaps them for value labels and RAISES when a
+      // label set repeats a label — real LMU data (LM6) crashed on load.
+      return `df = pd.read_stata(${f}, convert_categoricals=False)`;
     case "rds":
-      return `df = pyreadr.read_r(${f})[None]  # requires pyreadr`;
+      // The import rides with the load line: the script header only imports
+      // pandas/numpy, so a bare `pyreadr.` raised NameError on the first line.
+      return PY_FROM_R(`pyreadr.read_r(${f})[None]`);
     case "rdata":
       // pyreadr returns an OrderedDict keyed by the workspace object names.
-      return `df = pyreadr.read_r(${f})[${loadOpts?.objectName ? pyStr(loadOpts.objectName) : "None  # TODO: name the object from the workspace"}]  # requires pyreadr`;
+      return loadOpts?.objectName
+        ? PY_FROM_R(`pyreadr.read_r(${f})[${pyStr(loadOpts.objectName)}]`)
+        : `import pyreadr  # pip install pyreadr\ndf = pyreadr.read_r(${f})[None]  # TODO: name the object from the workspace`;
     case "parquet":
       return `df = pd.read_parquet(${f})`;
     case "shapefile-shp":
@@ -119,6 +155,26 @@ export function buildPyLoadLine(filename, loadOpts = null) {
 }
 
 // ─── Stata ───────────────────────────────────────────────────────────────────
+// Options every emitted `import delimited` carries — see the csv case below.
+export const STATA_CSV_OPTS = ["case(preserve)", "asdouble"];
+
+// import delimited / import excel STRIP characters a Stata name cannot hold
+// ("Both genders" -> Bothgenders, "GDP per capita" -> GDPpercapita) and keep the
+// original header as the variable label. Every later line of an exported
+// do-file spells a column the way strtoname() would ("Both_genders"), so the
+// renamed variables are brought to that spelling right after the import — or
+// `rename Both genders education` is a syntax error (r(198); LMU PS4).
+export const STATA_NAME_FIX = [
+  "* Names Stata had to change on import (spaces, symbols) -> strtoname(header)",
+  "foreach _v of varlist * {",
+  "    local _l : variable label `_v'",
+  "    if `\"`_l'\"' != \"\" {",
+  "        local _n = strtoname(`\"`_l'\"')",
+  "        if \"`_n'\" != \"`_v'\" capture rename `_v' `_n'",
+  "    }",
+  "}",
+].join("\n");
+
 export function buildStataLoadLine(filename, loadOpts = null) {
   const fmt = inferFormat(filename, loadOpts);
   const f   = stataPath(filename);
@@ -132,14 +188,17 @@ export function buildStataLoadLine(filename, loadOpts = null) {
       if (loadOpts?.encoding && loadOpts.encoding !== "utf-8") {
         opts.push(`encoding("${loadOpts.encoding}")`);
       }
-      opts.push("clear");
-      return `import delimited "${f}", ${opts.join(" ")}`;
+      // import delimited lowercases every name and stores float unless told
+      // otherwise: a column `D` becomes `d` (r(111) on the model line) and every
+      // coefficient picks up ~1e-9 of float noise. Measured on StataNow 19.5.
+      opts.push(...STATA_CSV_OPTS, "clear");
+      return `import delimited "${f}", ${opts.join(" ")}\n${STATA_NAME_FIX}`;
     }
     case "tsv":
-      return `import delimited "${f}", delimiter(tab) clear`;
+      return `import delimited "${f}", delimiter(tab) ${STATA_CSV_OPTS.join(" ")} clear\n${STATA_NAME_FIX}`;
     case "excel": {
       const sheet = loadOpts?.sheetName ? ` sheet("${loadOpts.sheetName}")` : "";
-      return `import excel "${f}", firstrow${sheet} clear`;
+      return `import excel "${f}", firstrow${sheet} clear\n${STATA_NAME_FIX}`;
     }
     case "stata":
       return `use "${f}", clear`;
@@ -154,6 +213,6 @@ export function buildStataLoadLine(filename, loadOpts = null) {
     case "shapefile-dbf":
       return `spshape2dta "${f.replace(/\.(shp|zip|dbf)$/i, "")}", replace\nuse "${f.replace(/\.(shp|zip|dbf)$/i, "")}", clear`;
     default:
-      return `import delimited "${f}", clear`;
+      return `import delimited "${f}", ${STATA_CSV_OPTS.join(" ")} clear`;
   }
 }

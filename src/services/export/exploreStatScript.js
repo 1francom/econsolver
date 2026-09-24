@@ -10,6 +10,9 @@
 //
 // Public: transpileExploreStat(params, language, dfVar) -> string|null
 
+import { predicateToR, predicateToPython, predicateToStata } from "../../pipeline/predicateExport.js";
+import { normalizeOp } from "../../pipeline/predicate.js";
+
 const rStr  = (s) => `"${String(s ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 const pyStr = rStr;
 
@@ -118,7 +121,24 @@ function stataExplore(p) {
     case "histogram":    return `histogram ${p.col}, bins(${Number(p.bins) || 30})`;
     case "barchart":     return `graph bar (count), over(${p.col})`;
     case "spaghetti":    return `xtline ${p.col}, overlay i(${p.entityCol}) t(${p.timeCol})`;
-    case "timeseries":   return `* time series: ${p.agg ?? "mean"}(${p.yCol}) over ${p.timeCol}\ncollapse (${p.agg ?? "mean"}) ${p.yCol}, by(${p.timeCol}${p.groupCol ? ` ${p.groupCol}` : ""})\ntwoway line ${p.yCol} ${p.timeCol}`;
+    case "timeseries": {
+      // `twoway line y t` after a grouped collapse draws ONE polyline through
+      // every group in file order, which is not the chart the pin shows (R gets
+      // color = group, pandas unstacks). xtline overlays one line per group.
+      const agg = p.agg ?? "mean";
+      const head = `* time series: ${agg}(${p.yCol}) over ${p.timeCol}${p.groupCol ? ` by ${p.groupCol}` : ""}`;
+      if (!p.groupCol) {
+        return [head, `collapse (${agg}) ${p.yCol}, by(${p.timeCol})`, `sort ${p.timeCol}`,
+                `twoway line ${p.yCol} ${p.timeCol}`].join("\n");
+      }
+      return [head,
+        `collapse (${agg}) ${p.yCol}, by(${p.timeCol} ${p.groupCol})`,
+        `capture drop _lx_grp`,
+        `egen _lx_grp = group(${p.groupCol}), label`,
+        `xtset _lx_grp ${p.timeCol}`,
+        `xtline ${p.yCol}, overlay`,
+      ].join("\n");
+    }
     case "correlation":  return `correlate ${cols}`;
     case "acf_pacf":     return `ac ${p.yCol}\npac ${p.yCol}`;
     case "adf":          return `dfuller ${p.yCol}`;
@@ -127,15 +147,72 @@ function stataExplore(p) {
   }
 }
 
-export function transpileExploreStat(params = {}, language = "r", dfVar = "df") {
-  const code = language === "python" ? pyExplore(params, dfVar)
-             : language === "stata"  ? stataExplore(params)
-             :                         rExplore(params, dfVar);
-  if (!code) return null;
-  // The pin records the active QuickFilter — note it so the user re-applies it.
-  if (Array.isArray(params.filters) && params.filters.length) {
-    const note = language === "stata" ? "* " : language === "python" ? "# " : "# ";
-    return `${note}NOTE: this pin was taken under an active Explore filter — re-apply it before running.\n${code}`;
+// The Explore filter bar's conditions ({col, op, val}), as a predicate node.
+// Conditions the app itself treats as INERT are dropped so the script filters
+// exactly the rows the pin saw: `in` with nothing selected keeps every row, and
+// a half-typed numeric comparison does too (see matchCond in ExplorerModule).
+export function pinFilterNode(filters) {
+  const children = [];
+  for (const f of (Array.isArray(filters) ? filters : [])) {
+    if (!f?.col || !f?.op) continue;
+    const op = normalizeOp(f.op);
+    // The filter bar writes `val`; a logged/older pin can carry `value`.
+    const raw = f.val ?? f.value;
+    if (op === "in" || op === "nin") {
+      const values = Array.isArray(raw) ? raw
+        : String(raw ?? "").split(",").map(v => v.trim()).filter(Boolean);
+      if (!values.length) continue;
+      children.push({ type: "condition", col: f.col, op, values });
+      continue;
+    }
+    if (["gt", "lt", "gte", "lte"].includes(op) && !Number.isFinite(parseFloat(raw))) continue;
+    children.push({ type: "condition", col: f.col, op, value: raw });
   }
-  return code;
+  if (!children.length) return null;
+  return children.length === 1 ? children[0] : { type: "and", children };
+}
+
+// Compile a row scope (the Explore filter bar's conditions) into the lines that
+// reproduce it, for a pin OR a saved plot — both are artifacts that record the
+// rows they were drawn on, so they must emit the same filter the same way.
+// Returns { pre, post, df }: `df` is the frame the caller's own code must read.
+// The work is done on a COPY so the block cannot change what the next one sees;
+// in Stata that means keep-if, wrapped in preserve/restore when the caller is
+// not already inside one.
+export function filterScopeBlock(filters, language = "r", dfVar = "df", { varName = null, wrapStata = false } = {}) {
+  const node = pinFilterNode(filters);
+  if (!node) return { pre: [], post: [], df: dfVar };
+  const cm = language === "stata" ? "*" : "#";
+  try {
+    if (language === "stata") {
+      const keep = `keep if ${predicateToStata(node)}`;
+      return wrapStata
+        ? { pre: ["preserve", keep], post: ["restore"], df: dfVar }
+        : { pre: [keep], post: [], df: dfVar };
+    }
+    if (language === "python") {
+      const v = varName || "_pin_d";
+      return { pre: [`${v} = ${dfVar}[${predicateToPython(node, { df: dfVar })}]`], post: [], df: v };
+    }
+    const v = varName || ".pin_d";
+    return { pre: [`${v} <- dplyr::filter(${dfVar}, ${predicateToR(node)})`], post: [], df: v };
+  } catch (e) {
+    // An operator no compiler can express must not silently widen the sample.
+    return {
+      pre: [`${cm} NOTE: this filter could not be translated (${e.message}) — re-apply it before running.`],
+      post: [], df: dfVar,
+    };
+  }
+}
+
+export function transpileExploreStat(params = {}, language = "r", dfVar = "df") {
+  // A filtered pin works on its own copy of the data, so the block cannot change
+  // what the next one sees. In Stata that means `keep if` — the caller runs pins
+  // inside preserve/restore (services/export/unifiedScript.js).
+  const { pre, df } = filterScopeBlock(params.filters, language, dfVar);
+  const code = language === "python" ? pyExplore(params, df)
+             : language === "stata"  ? stataExplore(params)
+             :                         rExplore(params, df);
+  if (!code) return null;
+  return [...pre, code].join("\n");
 }

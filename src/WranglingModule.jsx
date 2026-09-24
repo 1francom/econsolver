@@ -45,6 +45,7 @@ import { useSessionLogOptional } from "./services/session/sessionLog.jsx";
 export { validatePanel, buildInfo }   from "./pipeline/validator.js";
 export { applyStep, runPipeline, runPipelineAsync } from "./pipeline/runner.js";
 import { buildDatasetContext, referencedDatasetIds } from "./pipeline/datasetContext.js";
+import { storedSteps } from "./services/Persistence/pipelineRecord.js";
 export { fuzzyGroups }                from "./components/wrangling/utils.js";
 export { Grid }                       from "./components/wrangling/shared.jsx";
 
@@ -166,10 +167,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
         return { rows: ds.rawData.rows, headers: ds.rawData.headers };
       };
       const pipelineFor = (id) => {
-        const rec = stepsById[id];
-        return Array.isArray(rec?.steps) ? rec.steps
-             : Array.isArray(rec?.pipeline) ? rec.pipeline
-             : [];
+        return storedSteps(stepsById[id]);
       };
       try {
         const built = await buildDatasetContext(others, pipelineFor, loadRows, { only });
@@ -307,7 +305,18 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
 
   const info        = useMemo(() => buildInfo(headers, rows),                    [headers, rows]);
   const panelReport = useMemo(() => panel ? validatePanel(rows, panel.entityCol, panel.timeCol) : null, [rows, panel]);
-  const qualityReport = useMemo(() => buildDataQualityReport(headers, rows, info, panelReport), [headers, rows, info, panelReport]);
+  // Computed after the module has painted, not during render: on wide data
+  // (11.5k rows × 122 cols) it was the single biggest cost of opening a project
+  // — the old correlation scan alone took 9 s. It also recomputes after every
+  // pipeline step, which should never delay the step's result appearing.
+  const [qualityReport, setQualityReport] = useState(null);
+  useEffect(() => {
+    setQualityReport(null);
+    const id = setTimeout(() => {
+      setQualityReport(buildDataQualityReport(headers, rows, info, panelReport));
+    }, 50);
+    return () => clearTimeout(id);
+  }, [headers, rows, info, panelReport]);
 
   // ── Persist on every change (debounced 400ms to avoid thrashing IDB) ────────
   const saveTimer    = useRef(null);
@@ -408,10 +417,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       gStepId = `G_${stepId}`;
       const selfDs  = { id: pid, name: filename, filename, loadOpts: rawData?._loadOpts ?? null };
       const rightDs = (allDatasets ?? []).find(d => d.id === s.rightId) ?? null;
-      const rightRec  = rightPipelines?.[s.rightId] ?? {};
-      const rightPipe = Array.isArray(rightRec.steps) ? rightRec.steps
-                      : Array.isArray(rightRec.pipeline) ? rightRec.pipeline
-                      : [];
+      const rightPipe = storedSteps(rightPipelines?.[s.rightId]);
       sessionDispatch({
         type: "ADD_GLOBAL_STEP",
         step: {
@@ -487,12 +493,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
       const rightIds = [...new Set(staged.map(j => j.rightId).filter(Boolean))];
       const built = await buildDatasetContext(
         allDatasets ?? [],
-        (id) => {
-          const rec = rightPipelines?.[id] ?? {};
-          return Array.isArray(rec.steps) ? rec.steps
-               : Array.isArray(rec.pipeline) ? rec.pipeline
-               : [];
-        },
+        (id) => storedSteps(rightPipelines?.[id]),
         async (d) => {
           const tbl = d.rawData?._duckdb?.tableName;
           return tbl
@@ -535,10 +536,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
     );
     const joinRecords = staged.map(j => {
       const rd = (allDatasets ?? []).find(d => d.id === j.rightId) ?? { id: j.rightId };
-      const rec = rightPipelines?.[j.rightId] ?? {};
-      const rp  = Array.isArray(rec.steps) ? rec.steps
-                : Array.isArray(rec.pipeline) ? rec.pipeline
-                : [];
+      const rp  = storedSteps(rightPipelines?.[j.rightId]);
       return {
         how: j.how ?? "left", leftKey: j.leftKey, rightKey: j.rightKey, suffix: j.suffix ?? "_r",
         right: freezeParent({ id:       rd.id,
@@ -986,7 +984,10 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Normalize categories: merge near-identical string variants (numeric variants like \"comuna 1\" vs \"comuna 2\" are never merged)",
             "Winsorize, trim outliers, or just flag them as a new column",
             "Type cast, string cleaning, and regex extraction from text columns",
-            "Distinct values: inspect every level of a column from its header menu, after the pipeline has run",
+            "Every column card has a ⋯ menu: Rename, Filter, Change type, View values, Drop duplicates, Drop",
+            "Drop duplicates removes repeated rows, like dplyr's distinct(). It opens seeded with the column you clicked; add more columns if a duplicate is defined by several of them, or clear them all to require the whole row to match. Keep first / Keep last decides which copy survives — Keep last depends on the current row order, so sort first if that matters",
+            "View values is the other one: it inspects every level of a column without changing anything",
+            "Past ~25 columns the column grid starts collapsed and gets a search box, and opens into a fixed-height scroll area — so a 130-column dataset and a 1000-column one take the same space on screen. The column pickers get the same search",
           ]},
           { heading: "Workbench — features", items: [
             "Log (log1p — safe for zeros), square, standardize (z-score)",
@@ -997,6 +998,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
             "Country code: convert a country name/ISO2/ISO3 to ISO2, ISO3, name, or continent — equivalent to R's countrycode()",
             "Mutate: a custom expression, e.g. col_a / col_b * 100",
             "if_else and case_when for conditional columns",
+            "Missing values follow R in every expression: x > 0 is missing where x is, FALSE & NA is FALSE, TRUE | NA is TRUE — a filter drops those rows, if_else gives missing, case_when moves on. Wrap with is.na() to decide yourself. The R, Stata and Python exports reproduce it",
             "Grouped mutate: compute within groups without collapsing rows",
           ]},
           { heading: "Workbench — reshape & merge", items: [
@@ -1030,7 +1032,7 @@ export default function WranglingModule({ rawData, filename, onComplete, onReady
           ["workbench", "⧉ Workbench"],
           ["structure", "⊞ Panel Structure"],
           ["dictionary","◈ Dictionary"],
-          ["quality",   `◈ Quality${qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
+          ["quality",   `◈ Quality${!qualityReport ? " …" : qualityBadge > 0 ? ` (${qualityBadge})` : "  ✓"}`],
         ]} active={tab} set={setTab}/>
 
         {/* ── AI command bar (NL → validated pipeline steps) ── */}

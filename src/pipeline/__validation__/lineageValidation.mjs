@@ -218,7 +218,7 @@ assert.match(derived, /left_join\(df_joined_data, df_crimen/, "staged forma-1 jo
 // (f) all three languages return the split shape and actually emit the join.
 // Only R was covered above; a language left returning a plain string would break
 // both call sites (Report AI bypass + DatasetManager export) at runtime.
-for (const [lang, joinRe] of [["stata", /merge 1:m/], ["python", /pd\.merge\(/]]) {
+for (const [lang, joinRe] of [["stata", /joinby /], ["python", /pd\.merge\(/]]) {
   const out = generateWorkspaceScript({
     language: lang,
     datasets: { c: mkDs("c", "comunas", [dropCol]), p: mkDs("p", "crimen", []),

@@ -34,16 +34,26 @@
 //   }
 
 import { opInfix } from "../../pipeline/predicate.js";
+import { feTerm } from "./feInteractionTerm.js";
 import { auditTrailToMarkdown } from "../../pipeline/auditor.js";
 import { stepLabel } from "../../pipeline/registry.js";
 import { toR, jsExprToR, rRightLoad } from "../../pipeline/stepTranslators.js";
 import { buildRLoadLine } from "./loadLine.js";
+import { dummyR } from "./dummyStep.js";
+import { safeGroupedMutate } from "./groupedMutateExport.js";
+import { safeIfElse } from "./ifElseStep.js";
+import { mutateStep, filterExprStep, caseWhenStep } from "./rowExprExport.js";
+import { injectColumnR } from "./injectColumnStep.js";
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-// Safe R variable name: replace spaces and special chars with underscores
+// A column reference in R. readr keeps headers verbatim ("Both genders"), so a
+// non-syntactic name must be BACKTICKED, not rewritten: the old underscore
+// replacement emitted `rename(education = Both_genders)` for a column that is
+// called `Both genders` in the data frame (LMU PS4). Same rule as stepTranslators.
 function rName(s) {
-  return String(s ?? "").replace(/[^a-zA-Z0-9_.]/g, "_").replace(/^([0-9])/, "_$1");
+  const n = String(s ?? "");
+  return /^([A-Za-z]|\.(?![0-9]))[A-Za-z0-9_.]*$/.test(n) ? n : `\`${n.replace(/`/g, "\\`")}\``;
 }
 
 // Quote a string for R
@@ -128,16 +138,11 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       return `${dfVar} <- ${dfVar} |> select(-${rName(step.col)})`;
 
     case "filter": {
-      const opMap = {
-        notna: `!is.na(${col})`,
-        eq:    `${col} == ${rStr(step.value)}`,
-        neq:   `${col} != ${rStr(step.value)}`,
-        gt:    `${col} > ${step.value}`,
-        lt:    `${col} < ${step.value}`,
-        gte:   `${col} >= ${step.value}`,
-        lte:   `${col} <= ${step.value}`,
-      };
-      return `${dfVar} <- ${dfVar} |> filter(${opMap[step.op] ?? "TRUE"})`;
+      // Canonical compiler (predicateExport), as stepTranslators uses. This local
+      // copy read step.op only: a compound Clean filter (step.predicate) has none,
+      // so the filter was DROPPED from every per-model script (R: filter(TRUE)).
+      try { return toR(step, dfVar); }
+      catch (e) { return `stop(${JSON.stringify("filter step not exported: " + e.message)})`; }
     }
 
     case "add_column":
@@ -279,11 +284,7 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     }
 
     case "dummy":
-      return [
-        `# One-hot encode ${step.col} with prefix "${step.pfx}"`,
-        `${dfVar} <- ${dfVar} |> fastDummies::dummy_cols(select_columns = ${rStr(step.col)}, remove_first_dummy = FALSE, remove_selected_columns = FALSE)`,
-        `# Rename generated columns to prefix "${step.pfx}_*" if needed`,
-      ].join("\n");
+      return dummyR(step, dfVar);
 
     case "lag": {
       const ec = step.ec ? rName(step.ec) : null;
@@ -360,6 +361,7 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
     }
 
     case "mutate": {
+      try { return mutateStep("r", step, dfVar); } catch { /* fallback */ }
       const rExpr = jsExprToR(step.expr);
       if (rExpr) return `${dfVar} <- ${dfVar} |> dplyr::mutate(${nn} = ${rExpr})`;
       return [
@@ -541,14 +543,8 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       ].join("\n");
     }
 
-    case "inject_column": {
-      const vals = (step.values ?? []).map(v => (v == null ? "NA" : Number(v).toFixed(8))).join(", ");
-      return [
-        `# inject_column: "${step.colName}" — extracted from model output`,
-        `# Re-run estimation and extract again if the pipeline changes upstream.`,
-        `${dfVar}[["${rName(step.colName)}"]] <- c(${vals})`,
-      ].join("\n");
-    }
+    case "inject_column":
+      return injectColumnR(step, dfVar);
 
     case "fill_na_grouped": {
       const fn = step.strategy === "median" ? "median" : "mean";
@@ -609,14 +605,11 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
       return `${dfVar} <- ${dfVar} |> mutate(${col} = ${inner})`;
     }
 
-    case "if_else": {
-      const cond = jsExprToR(step.cond);
-      const out  = rName(step.nn);
-      if (!cond) return `# if_else: ${step.nn} = if (${step.cond}) ... — translate condition to R manually`;
-      return `${dfVar} <- ${dfVar} |> mutate(${out} = dplyr::if_else(${cond}, ${rValue(step.trueVal)}, ${rValue(step.falseVal)}))`;
-    }
+    case "if_else":
+      return safeIfElse("r", step, dfVar);
 
     case "case_when": {
+      try { return caseWhenStep("r", step, dfVar); } catch { /* fallback */ }
       const out = rName(step.nn);
       const branches = (step.cases ?? [])
         .map(c => { const cc = jsExprToR(c.cond); return cc ? `    ${cc} ~ ${rValue(c.val)}` : null; })
@@ -627,23 +620,8 @@ function transpileStep(step, dfVar = "df", allDatasets = {}) {
         : `# case_when: no valid conditions — translate manually`;
     }
 
-    case "grouped_mutate": {
-      const by = (step.by ?? []).map(rName).join(", ");
-      const out = rName(step.newCol || "grouped");
-      const fn = step.fn ?? "mean";
-      if (!by || !step.newCol) return `# grouped_mutate: incomplete config`;
-      if (fn === "expr" && step.expr) {
-        const rExpr = jsExprToR(step.expr);
-        return rExpr
-          ? `${dfVar} <- ${dfVar} |> group_by(${by}) |> mutate(${out} = ${rExpr}) |> ungroup()`
-          : `# grouped_mutate (expr): translate "${step.expr}" to R manually`;
-      }
-      const rhs = step.col ? rFn(fn, step.col) : "n()";
-      return [
-        `# grouped_mutate: ${fn} over groups${step.condition?.length ? " (row conditions applied in-app — review)" : ""}`,
-        `${dfVar} <- ${dfVar} |> group_by(${by}) |> mutate(${out} = ${rhs}) |> ungroup()`,
-      ].join("\n");
-    }
+    case "grouped_mutate":
+      return safeGroupedMutate("r", step, dfVar);
 
     case "pivot_wider": {
       const idCols    = (step.idCols ?? []).map(rName).join(", ");
@@ -725,7 +703,10 @@ function buildRFormulaStr(xVarsRaw, wVarsRaw, xVars, wVars, fvSet, interactionTe
   return parts.join(" + ") || "1";
 }
 
-// fixest `vcov=` argument for a given SE type. Mirrors the SE the user selected
+// fixest `vcov=` argument for a given SE type. Cluster-formula cases carry
+// kw:"cluster" so they emit `cluster = ~g` instead of `vcov = ~g`. fixest
+// treats the two identically — verified on a real fixture, SEs byte-identical —
+// but `cluster =` is the spelling applied work uses and reads unambiguously. Mirrors the SE the user selected
 // in Litux's Inference Options so the exported script reports the SAME standard
 // errors as the platform (was previously hardcoded to "HC1"). Returns an object
 // { arg, note, hcExact } where:
@@ -749,12 +730,12 @@ function rVcov(seType, { clusterVar, clusterVar2 } = {}) {
       note: `# NOTE: fixest's vcov="hetero" is HC1 — it has no native HC3. The feols\n# fit below is for point estimates; the exact HC3 SE come from the refit below.`,
     };
     case "clustered": return clusterVar
-      ? { arg: `~${rName(clusterVar)}`, note: null, hcExact: null }
+      ? { arg: `~${rName(clusterVar)}`, kw: "cluster", note: null, hcExact: null }
       : { arg: `"hetero"`, hcExact: null,
           note: `# WARNING: clustered SE requested but no cluster variable was set —\n# falling back to heteroskedasticity-robust (HC1) SE.` };
     case "cr2":
     case "cr3":       return clusterVar
-      ? { arg: `~${rName(clusterVar)}`, hcExact: null,
+      ? { arg: `~${rName(clusterVar)}`, kw: "cluster", hcExact: null,
           crExact: (seType || "").toUpperCase(), crCluster: clusterVar,
           note: `# NOTE: fixest has no CR2/CR3 — vcov=~cluster is CR1. The feols fit below is
 # for point estimates; the exact SE come from the clubSandwich refit.` }
@@ -762,8 +743,8 @@ function rVcov(seType, { clusterVar, clusterVar2 } = {}) {
           note: `# WARNING: ${(seType || "").toUpperCase()} SE requested but no cluster variable was set —
 # falling back to heteroskedasticity-robust (HC1) SE.` };
     case "twoway":    return (clusterVar && clusterVar2)
-      ? { arg: `~${rName(clusterVar)} + ${rName(clusterVar2)}`, note: null, hcExact: null }
-      : { arg: clusterVar ? `~${rName(clusterVar)}` : `"hetero"`, hcExact: null,
+      ? { arg: `~${rName(clusterVar)} + ${rName(clusterVar2)}`, kw: "cluster", note: null, hcExact: null }
+      : { arg: clusterVar ? `~${rName(clusterVar)}` : `"hetero"`, kw: clusterVar ? "cluster" : "vcov", hcExact: null,
           note: `# WARNING: two-way clustered SE requested but ${clusterVar ? "the second" : "no"} cluster\n# variable was set — falling back to ${clusterVar ? "one-way clustering" : "HC1"}.` };
     case "hac":       return {
       arg: `"NW"`, hcExact: null,
@@ -783,8 +764,7 @@ function rVcov(seType, { clusterVar, clusterVar2 } = {}) {
 // HC2/HC3 are the one case that cannot be made exact: there is no native fixest
 // support, and an LSDV lm() refit computes leverage on a design that INCLUDES
 // the FE dummies, whereas Litux computes h_ii on the within-transformed design
-// (duckdbWithinHC23). The two agree to ~1e-3 — see the "panel-hc23-leverage"
-// entry in __validation__/seTolerances.js. Emit the refit, but label it as
+// (duckdbWithinHC23). The two agree to ~1e-3. Emit the refit, but label it as
 // approximate rather than claiming it reproduces the platform exactly.
 function rPanelHC23Lines(hcExact, formula, feCols = []) {
   if (!hcExact) return [];
@@ -954,7 +934,7 @@ function transpileModel(model) {
         `# ── OLS ──────────────────────────────────────────────────────────────`,
         ...(noIntercept ? [`# Regression through the origin — no intercept estimated.`] : []),
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rExactSELines(vc, `${y} ~ ${xStr}`),
         ``,
         `# Diagnostics`,
@@ -971,7 +951,7 @@ function transpileModel(model) {
           `# ── WLS ──────────────────────────────────────────────────────────────`,
           `# WARNING: no weight column supplied; falling back to OLS`,
           ...(vc.note ? [vc.note] : []),
-          `fit <- fixest::feols(${y} ~ ${xStr}, data = df, vcov = ${vc.arg})`,
+          `fit <- fixest::feols(${y} ~ ${xStr}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
           ...rExactSELines(vc, `${y} ~ ${xStr}`),
           `fixest::etable(fit)`,
         ].join("\n");
@@ -980,7 +960,7 @@ function transpileModel(model) {
         `# ── WLS (weighted least squares) ─────────────────────────────────────`,
         `# Weights: ${w}`,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${xStr}, data = df, weights = ~${w}, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rExactSELines(vc, `${y} ~ ${xStr}`, `df$${w}`),
         ``,
         `# Diagnostics`,
@@ -992,23 +972,29 @@ function transpileModel(model) {
       // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity-only.
       // Fallback preserves the pre-existing entity-only default byte-for-byte.
       const feColsFE = feCols?.length ? feCols : [entityCol].filter(Boolean);
-      const feClauseFE = feColsFE.map(rName).join(" + ");
+      const feClauseFE = feColsFE.map(c => feTerm(c, "r", rName)).join(" + ");
       return [
         `# ── Fixed Effects (within estimator) ────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
-        `fit_fe <- fixest::feols(${y} ~ ${xStr} | ${feClauseFE}, data = df, vcov = ${vc.arg})`,
+        `fit_fe <- fixest::feols(${y} ~ ${xStr} | ${feClauseFE}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rPanelHC23Lines(vc.hcExact, `${y} ~ ${xStr}`, feColsFE),
         `fit_fd <- plm::plm(${y} ~ ${xStr}, data = df,`,
         `  index = c(${rStr(entityCol)}, ${rStr(timeCol)}),`,
         `  model = "fd")`,
         ``,
         `fixest::etable(fit_fe)`,
+        `fit <- fit_fe  # the name the output table below uses`,
         ``,
-        `# Hausman test (FE vs RE)`,
+        // phtest needs two plm fits. The old line piped the fixest object into
+        // `plm::as.plm()`, which does not exist — every FE export died here.
+        `# Hausman test (FE vs RE) — one-way within vs random effects, both via plm`,
+        `fit_w  <- plm::plm(${y} ~ ${xStr}, data = df,`,
+        `  index = c(${rStr(entityCol)}, ${rStr(timeCol)}),`,
+        `  model = "within")`,
         `fit_re <- plm::plm(${y} ~ ${xStr}, data = df,`,
         `  index = c(${rStr(entityCol)}, ${rStr(timeCol)}),`,
         `  model = "random")`,
-        `plm::phtest(fit_fe |> plm::as.plm(), fit_re)`,
+        `plm::phtest(fit_w, fit_re)`,
       ].join("\n");
     }
 
@@ -1021,6 +1007,7 @@ function transpileModel(model) {
         ``,
         `summary(fit_fd)`,
         ...rPlmVcovLines(seType, "fit_fd", { clusterVar }),
+        `fit <- fit_fd  # the name the output table below uses`,
       ].join("\n");
 
     case "2SLS": {
@@ -1034,7 +1021,7 @@ function transpileModel(model) {
       return [
         `# ── 2SLS / IV ────────────────────────────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${ctrls || "1"} | ${endog} ~ ${iv_rhs}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${ctrls || "1"} | ${endog} ~ ${iv_rhs}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         // fixest has no HC2/HC3; AER::ivreg does support sandwich::vcovHC exactly.
         ...(vc.hcExact ? [
           ``,
@@ -1059,7 +1046,7 @@ function transpileModel(model) {
         `# ── 2×2 Difference-in-Differences ───────────────────────────────────`,
         `# DiD interaction term: post × treat`,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${rhs}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${rhs}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rExactSELines(vc, `${y} ~ ${rhs}`),
         ``,
         `fixest::etable(fit)`,
@@ -1077,12 +1064,12 @@ function transpileModel(model) {
       // N-way FE: spec.feCols (Task 3-5) generalizes absorption beyond entity+time.
       // Fallback preserves the pre-existing entity+time default byte-for-byte.
       const feColsTWFE = feCols?.length ? feCols : [entityCol, timeCol].filter(Boolean);
-      const feClauseTWFE = feColsTWFE.map(rName).join(" + ");
+      const feClauseTWFE = feColsTWFE.map(c => feTerm(c, "r", rName)).join(" + ");
       return [
         `# ── Two-Way Fixed Effects DiD ────────────────────────────────────────`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ ${treat}${ctrls} | ${feClauseTWFE},`,
-        `  data = df, vcov = ${vc.arg})`,
+        `  data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rPanelHC23Lines(vc.hcExact, `${y} ~ ${treat}${ctrls}`, feColsTWFE),
         ``,
         `fixest::etable(fit)`,
@@ -1160,7 +1147,7 @@ function transpileModel(model) {
         `# ── Panel LSDV (Least Squares Dummy Variables) ───────────────────────`,
         `# LSDV is numerically equivalent to within (FE) estimation`,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::feols(${y} ~ ${xStr} | ${feClauseLSDV}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::feols(${y} ~ ${xStr} | ${feClauseLSDV}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ...rPanelHC23Lines(vc.hcExact, `${y} ~ ${xStr}`, feColsLSDV),
         ``,
         `fixest::etable(fit)`,
@@ -1244,7 +1231,7 @@ function transpileModel(model) {
         `# Estimate — ref = -1 (last pre-period)`,
         ...(vc.note ? [vc.note] : []),
         `fit <- fixest::feols(${y} ~ i(rel_time, ref = -1)${ctrlStr} | ${feClauseES},`,
-        `  data = df, vcov = ${vc.arg})`,
+        `  data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ``,
         `fixest::iplot(fit, main = "Event Study")   # coefficient plot with CI`,
         `fixest::etable(fit)`,
@@ -1318,9 +1305,12 @@ function transpileModel(model) {
     }
 
     case "GMM": {
-      const endog  = wVars.map(rName).join(", ");
-      const exog   = xVars.map(fmtR).join(" + ") || "1";
-      const instrs = [...xVars, ...zVars].map(rName).join(", ");
+      // X = endogenous, W = exogenous controls — the order runGMM(rows, y, X,
+      // W, Z) uses. These were swapped (the controls were instrumented and the
+      // endogenous regressor instrumented itself), so the script fitted a
+      // different model without any error.
+      const exog   = wVars.map(fmtR).join(" + ");
+      const instrs = [...wVars.map(fmtR), ...zVars.map(rName)].join(" + ");
       return [
         `# ── Two-Step Efficient GMM ───────────────────────────────────────────`,
         `# Install: install.packages("gmm")`,
@@ -1328,17 +1318,25 @@ function transpileModel(model) {
         ``,
         `# Structural: ${y} ~ exogenous + endogenous`,
         `# Instruments: exogenous + excluded`,
-        `fit <- gmm::gmm(${y} ~ ${exog}${wVars.length ? ` + ${wVars.map(fmtR).join(" + ")}` : ""},`,
+        `fit <- gmm::gmm(${y} ~ ${[exog, xVars.map(fmtR).join(" + ")].filter(Boolean).join(" + ") || "1"},`,
         `  ~ ${instrs || "1"},`,
-        // gmm::gmm's vcov vocabulary is "iid" / "MDS" / "HAC" — not sandwich's.
-        // "MDS" is the martingale-difference (heteroskedasticity-robust) weight
-        // matrix, which is the closest counterpart to the HC family here.
-        `  data = df, vcov = ${(() => {
+        // gmm::gmm's `vcov` sets the WEIGHT MATRIX as well as the covariance.
+        // "iid" makes it 2SLS, not the two-step robust-weight GMM Litux fits —
+        // measured: "iid" returned the 2SLS coefficients, "MDS" returns Litux's
+        // to 2e-6. So MDS always (HAC only when that was asked for).
+        `  data = df, vcov = ${(seType || "classical").toLowerCase() === "hac" ? `"HAC"` : `"MDS"`})`,
+        ...((() => {
           const s = (seType || "classical").toLowerCase();
-          if (s === "classical") return `"iid"`;
-          if (s === "hac") return `"HAC"`;
-          return `"MDS"`;
-        })()})`,
+          if (s === "classical") return [
+            `# NOTE: Litux reported the efficient GMM SE computed from the first-step`,
+            `# weight matrix (Stata: ivregress gmm, wmatrix(robust) vce(unadjusted)).`,
+            `# gmm::gmm has no such option; its MDS SEs are the robust (HC0) ones.`,
+          ];
+          if (s === "hc1") return [
+            `# NOTE: gmm's MDS SEs are HC0. Litux's HC1 = these x sqrt(n / (n - k)).`,
+          ];
+          return [];
+        })()),
         ``,
         `summary(fit)`,
         `coef(fit)`,
@@ -1349,15 +1347,16 @@ function transpileModel(model) {
       // fmtR, not rName: a factor appearing anywhere on a formula RHS — endogenous
       // side or instrument list — still needs factor()/relevel(), otherwise the
       // raw column name is emitted and R treats it as numeric.
-      const endog  = wVars.map(fmtR).join(" + ");
-      const exog   = xVars.map(fmtR).join(" + ") || "1";
-      const instrs = [...xVars.map(fmtR), ...zVars.map(rName)].join(" + ");
+      // Same X = endogenous / W = exogenous convention as GMM above.
+      const endog  = xVars.map(fmtR).join(" + ");
+      const exog   = wVars.map(fmtR).join(" + ") || "1";
+      const instrs = [...wVars.map(fmtR), ...zVars.map(rName)].join(" + ");
       return [
         `# ── Limited Information Maximum Likelihood (LIML) ────────────────────`,
         `# Install: install.packages("ivreg")`,
         `library(ivreg)`,
         ``,
-        `fit <- ivreg::ivreg(${y} ~ ${exog}${wVars.length ? ` + ${endog}` : ""} | ${instrs || "1"},`,
+        `fit <- ivreg::ivreg(${y} ~ ${exog}${xVars.length ? ` + ${endog}` : ""} | ${instrs || "1"},`,
         `  data = df, method = "liml")`,
         ``,
         `summary(fit, diagnostics = TRUE)`,
@@ -1401,7 +1400,7 @@ function transpileModel(model) {
         `library(fixest)`,
         ``,
         ...(vc.note ? [vc.note] : []),
-        `fit <- fixest::fepois(${y} ~ ${cov} | ${feStr}, data = df, vcov = ${vc.arg})`,
+        `fit <- fixest::fepois(${y} ~ ${cov} | ${feStr}, data = df, ${vc.kw ?? "vcov"} = ${vc.arg})`,
         ``,
         `fixest::etable(fit)`,
         `cat("Incidence Rate Ratios:\\n")`,
@@ -1535,6 +1534,16 @@ function transpileModel(model) {
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────────────────────
+/** The estimation code of one model (no header, packages, load or pipeline). */
+export function rModelCode(model = {}) {
+  return transpileModel(model);
+}
+
+/** R packages a model's estimation code needs (same rule as the single-model header). */
+export function rModelPackages(model = {}, pipeline = []) {
+  return [...buildPackageList(model.type, pipeline, model.seType)];
+}
+
 export function generateRScript(config) {
   const {
     filename       = "dataset.csv",

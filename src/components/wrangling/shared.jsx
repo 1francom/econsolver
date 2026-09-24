@@ -15,6 +15,45 @@ export { useTheme };
 // Use `useTheme()` → `C.*` and `T.code.fontFamily` / `T.data.fontFamily`.
 
 // ─── ATOMS ────────────────────────────────────────────────────────────────────
+// Column pickers render one chip (or card) per column, which is fine at 12
+// columns and a wall at 122 — a PISA extract has 122 and the picker buried every
+// other control on the tab. Above COLUMN_SEARCH_MIN this adds a filter box; below
+// it renders nothing at all, so small datasets keep the exact layout they had.
+//
+// Returns { shown, search, q }: `shown` is the filtered list to map over, `search`
+// is the input to render above it (null when under the threshold).
+export const COLUMN_SEARCH_MIN = 25;
+
+export function useColumnSearch(headers = [], opts = {}) {
+  const { min = COLUMN_SEARCH_MIN, placeholder = "Search columns…" } = opts;
+  const { C, T } = useTheme();
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const on = headers.length > min;
+  const shown = on && needle ? headers.filter(h => String(h).toLowerCase().includes(needle)) : headers;
+  const search = !on ? null : (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+      <input
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        placeholder={placeholder}
+        style={{ flex: "0 1 240px", padding: "3px 7px", borderRadius: 3,
+          background: C.surface2, color: C.text, border: `1px solid ${C.border}`,
+          fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}
+      />
+      <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
+        {needle ? `${shown.length} of ${headers.length}` : `${headers.length} columns`}
+      </span>
+      {needle && (
+        <button onClick={() => setQ("")} style={{ padding: "2px 8px", background: "none",
+          border: `1px solid ${C.border2}`, borderRadius: 3, color: C.textDim, cursor: "pointer",
+          fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize }}>clear</button>
+      )}
+    </div>
+  );
+  return { shown, search, q: needle };
+}
+
 export function Lbl({ children, color, mb = 6 }) {
   const { C, T } = useTheme();
   return (

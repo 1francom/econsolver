@@ -12,7 +12,9 @@ import { generatePythonScript } from "../../services/export/pythonScript.js";
 import { generateStataScript }  from "../../services/export/stataScript.js";
 import { downloadReplicationBundle } from "../../services/export/replicationBundle.js";
 import { isLogVarName } from "../../core/validation/logVarDetection.js";
+import { buildCoefGroups, visibleCoefNames } from "./coefGroups.js";
 import { stripGroundRect } from "../../services/export/plotExporter.js";
+import { qt, qnorm } from "../../math/calcEngine.js";
 
 export function Lbl({ children, color }) {
   const { C, T } = useTheme();
@@ -136,12 +138,37 @@ export function RegressionEquation({ varNames, beta, yVar }) {
 }
 
 // ─── FOREST PLOT ─────────────────────────────────────────────────────────────
-export function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", filename = "coefficient_plot.svg" }) {
+export function ForestPlot({
+  varNames, beta, se, pVals, svgId = "forest-plot",
+  filename = "coefficient_plot.svg", factorVars = [],
+  // Optional controlled mode: a caller that ALSO renders a table or a LaTeX
+  // export from the same result passes these so the figure and the table cannot
+  // disagree about which levels are shown. Uncontrolled (internal state) when
+  // omitted, which is what the per-estimator panels use.
+  expanded: expandedProp = null, onExpandedChange = null,
+}) {
   const { C, T } = useTheme();
+  // Nuisance factor levels (93 municipality dummies) are collapsed by default —
+  // see coefGroups.js. `expanded` holds the bases the user opened.
+  const { groups, levelOf } = useMemo(
+    () => buildCoefGroups(varNames, factorVars),
+    [varNames, factorVars],
+  );
+  const [expandedLocal, setExpandedLocal] = useState(() => new Set());
+  const controlled = expandedProp != null;
+  const expanded = controlled ? expandedProp : expandedLocal;
+  const setExpanded = controlled
+    ? (fn => onExpandedChange?.(fn(expandedProp)))
+    : setExpandedLocal;
+  const shownNames = useMemo(
+    () => new Set(visibleCoefNames(varNames, levelOf, expanded)),
+    [varNames, levelOf, expanded],
+  );
+
   const items = varNames
     .map((v, i) => ({ v, b: beta[i], s: se[i], p: pVals[i] }))
-    .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s));
-  if (!items.length) return null;
+    .filter(d => d.v !== "(Intercept)" && isFinite(d.b) && isFinite(d.s) && shownNames.has(d.v));
+  if (!items.length && !groups.length) return null;
 
   const rowH = 34, PAD = { l: 148, r: 76, t: 22, b: 26 }, W = 600;
   const iW = W - PAD.l - PAD.r;
@@ -185,9 +212,44 @@ export function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", f
           onMouseLeave={e => { e.currentTarget.style.borderColor = C.border2; e.currentTarget.style.color = C.textMuted; }}
         >↓ SVG</button>
       </div>
-      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", display: "flex", justifyContent: "center" }}>
+      {groups.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
+                      padding: "0.4rem 0.9rem", background: C.surface2, borderBottom: `1px solid ${C.border}` }}>
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.code.fontFamily }}>
+            Factor levels:
+          </span>
+          {groups.map(g => {
+            const on = expanded.has(g.base);
+            return (
+              <button key={g.base}
+                onClick={() => setExpanded(prev => {
+                  const next = new Set(prev);
+                  if (next.has(g.base)) next.delete(g.base); else next.add(g.base);
+                  return next;
+                })}
+                title={on ? `Collapse the ${g.levels.length} levels of ${g.base}`
+                          : `Show all ${g.levels.length} levels of ${g.base}`}
+                style={{ padding: "2px 9px", fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+                  background: on ? `${C.teal}22` : "none",
+                  border: `1px solid ${on ? C.teal : C.border2}`, borderRadius: 3,
+                  color: on ? C.teal : C.textDim, cursor: "pointer" }}>
+                {`${on ? "▾" : "▸"} ${g.base} · ${g.levels.length}`}
+              </button>
+            );
+          })}
+          <span style={{ fontSize: T.caption.fontSize, color: C.textMuted, fontFamily: T.body.fontFamily }}>
+            {"— collapsed by default; they are parameters, not findings."}
+          </span>
+        </div>
+      )}
+      {/* The viewBox grows with the row count, so a maxHeight here would scale
+          the WHOLE drawing down to fit (aspect ratio is preserved) — 93 rows
+          became an illegible sliver. Let the SVG take its natural height and
+          scroll the container instead, as PlotBuilder's facets already do. */}
+      <div style={{ background: C.bg, padding: "0.5rem", overflowX: "auto", overflowY: "auto",
+                    maxHeight: "60vh", display: "flex", justifyContent: "center" }}>
         <svg id={svgId} viewBox={`0 0 ${W} ${H}`}
-          style={{ width: "100%", maxWidth: 700, minWidth: 360, height: "auto", maxHeight: "45vh", display: "block", fontFamily: T.code.fontFamily }}>
+          style={{ width: "100%", maxWidth: 700, minWidth: 360, height: "auto", flexShrink: 0, display: "block", fontFamily: T.code.fontFamily }}>
           <rect width={W} height={H} fill={C.bg} />
           {items.map((_, i) => (
             <rect key={i} x={PAD.l} y={PAD.t + i * rowH} width={iW} height={rowH}
@@ -247,22 +309,14 @@ export function ForestPlot({ varNames, beta, se, pVals, svgId = "forest-plot", f
 }
 
 // ─── COEFFICIENT TABLE ────────────────────────────────────────────────────────
+// Exact t quantile, as R's confint.lm and Stata's regress report it. The old
+// lookup table returned 1.96 for every df >= 120 and interpolated linearly
+// below that, so intervals sat visibly off Stata (1.9647 at df = 500).
+// z-statistic models (logit/probit/Poisson) use the normal quantile, as
+// Stata and R do for them.
 function ciMultiplier(df) {
-  if (!df || df >= 120) return 1.96;
-  const table = {
-    1:12.706,2:4.303,3:3.182,4:2.776,5:2.571,6:2.447,7:2.365,
-    8:2.306,9:2.262,10:2.228,15:2.131,20:2.086,25:2.060,30:2.042,
-    40:2.021,60:2.000,80:1.990,100:1.984,120:1.980,
-  };
-  const keys = Object.keys(table).map(Number).sort((a, b) => a - b);
-  for (let k = keys.length - 1; k >= 0; k--) {
-    if (df >= keys[k]) {
-      const lo = keys[k], hi = keys[k + 1];
-      if (!hi) return table[lo];
-      return table[lo] + ((df - lo) / (hi - lo)) * (table[hi] - table[lo]);
-    }
-  }
-  return 1.96;
+  if (!df || !Number.isFinite(df) || df <= 0) return qnorm(0.975);
+  return qt(0.975, df);
 }
 
 export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLabel = "t", meMap = null, dict = {}, rows = [], binaryVars = [], irr = null, factorMap = null }) {
@@ -271,7 +325,8 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
   const [open, setOpen] = useState(null);
   const [copied, setCopied] = useState(null);
   const [showIrr, setShowIrr] = useState(false);
-  const z    = ciMultiplier(df);
+  const ciDf = statLabel === "z" ? null : df;
+  const z    = ciMultiplier(ciDf);
   const irrMode = showIrr && irr?.length > 0;
 
   function toLatex() {
@@ -451,7 +506,13 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                   const tag   = v.match(/\(([^)]*)\)\s*$/);
                   const isATT = tag != null && /\bATT\b/i.test(tag[1]);
                   const core  = v.replace(/\s*\([^)]*\)\s*$/, "").trim();
-                  const parts = core.split(/\s*[×·*]\s*|_x_| x /i).map(s => s.trim()).filter(Boolean);
+                  // `:` is how expandInteractions actually names its product columns
+                  // (`${c1}:${c2}` in helpers.js) — it was missing from this list, so a
+                  // real Litux interaction never split, `isInteraction` stayed false, and
+                  // every one of them fell through to the generic "a one-unit increase in
+                  // female:ggi" reading. The other separators cover synthetic display
+                  // labels like "Post × Treated (ATT)".
+                  const parts = core.split(/\s*[×·*:]\s*|_x_| x /i).map(s => s.trim()).filter(Boolean);
                   const isInteraction = parts.length >= 2;
 
                   if (isInteraction || isATT) {
@@ -501,19 +562,29 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
                       const slopeWhen1 = typeof cBeta === "number" ? (cBeta + b) : null;
                       return (
                         <>
-                          Continuous × dummy interaction (<span style={{ color: C.text }}>{dummyName}</span> is binary).
-                          When <span style={{ color: C.text }}>{dummyName}</span> = 1, the marginal effect of{" "}
-                          <span style={{ color: C.text }}>{contName}</span> on <span style={{ color: C.text }}>{yVar}</span> shifts by{" "}
-                          <span style={{ color: b >= 0 ? C.green : C.red }}>{b >= 0 ? "+" : ""}{b.toFixed(4)}</span>
+                          The additional change in <span style={{ color: C.text }}>{yVar}</span> from a
+                          one-unit increase in <span style={{ color: C.text }}>{contName}</span> is{" "}
+                          <span style={{ color: b >= 0 ? C.green : C.red }}>{b >= 0 ? "+" : ""}{b.toFixed(4)}</span>{" "}
+                          when <span style={{ color: C.text }}>{dummyName}</span> = 1, compared with{" "}
+                          <span style={{ color: C.text }}>{dummyName}</span> = 0
                           {slopeWhen1 != null
-                            ? <> (slope becomes <span style={{ color: C.text }}>{slopeWhen1.toFixed(4)}</span>)</>
+                            ? <> — so the slope of <span style={{ color: C.text }}>{contName}</span> goes from{" "}
+                                <span style={{ color: C.text }}>{cBeta.toFixed(4)}</span> to{" "}
+                                <span style={{ color: C.text }}>{slopeWhen1.toFixed(4)}</span></>
                             : null}.{" "}
-                          Equivalently, the effect of <span style={{ color: C.text }}>{dummyName}</span> (0→1) on{" "}
-                          <span style={{ color: C.text }}>{yVar}</span> equals{" "}
+                          Read the other way round, the effect of{" "}
+                          <span style={{ color: C.text }}>{dummyName}</span> (0→1) on{" "}
+                          <span style={{ color: C.text }}>{yVar}</span> is{" "}
                           <span style={{ color: C.text }}>
                             {typeof dBeta === "number" ? dBeta.toFixed(4) : `β(${dummyName})`} {b >= 0 ? "+" : "−"} {Math.abs(b).toFixed(4)}·{contName}
                           </span>
                           {" "}— it depends on the level of <span style={{ color: C.text }}>{contName}</span>, ceteris paribus.{" "}
+                          {typeof dBeta !== "number" && (
+                            <span style={{ color: C.textMuted }}>
+                              ({dummyName} has no coefficient of its own here — it is absorbed by the fixed effects,
+                              so only this conditional slope is identified.)
+                            </span>
+                          )}
                         </>
                       );
                     }
@@ -677,7 +748,7 @@ export function CoeffTable({ varNames, beta, se, tStats, pVals, yVar, df, statLa
       }}>
         <span>● significant at 5% · SE in parentheses</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span>95% CI = β̂ ± {z.toFixed(3)} × SE{df ? ` (t-dist, df=${df})` : " (z≈1.96)"}</span>
+          <span>95% CI = β̂ ± {z.toFixed(3)} × SE{ciDf ? ` (t-dist, df=${ciDf})` : " (normal)"}</span>
           {(["latex", "md"]).map(fmt => (
             <button key={fmt} onClick={() => copyFmt(fmt)} style={{
               background: "none", border: `1px solid ${C.border}`, borderRadius: 3,

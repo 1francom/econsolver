@@ -147,7 +147,7 @@ export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar
             { id: "rdd",    label: "RDD Plot",
               node: <RDDPlot result={r.rddData ?? {}} yLabel={yVar} xLabel={runningVar} /> },
             { id: "forest", label: "Coefficient plot",
-              node: <ForestPlot varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-fuzzyrdd" filename="fuzzyrdd_coefficients.svg" /> },
+              node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={r.varNames} beta={r.beta} se={r.se} pVals={r.pVals} svgId="forest-fuzzyrdd" filename="fuzzyrdd_coefficients.svg" /> },
             { id: "mccrary", label: "McCrary density",
               node: <McCraryPlot
                 result={r.mcCrary ?? (r.rddData?.cutoff != null ? runMcCrary(rows, runningVar, r.rddData.cutoff) : null)}
@@ -176,7 +176,7 @@ export default function FuzzyRDDResults({ result, yVar, treatVarName, runningVar
           <FuzzyLatexExport stage="first" result={r} yVar={yVar} fsVarNames={fsVarNames} treatVarName={treatVarName} runningVar={runningVar} />
           <PlotSelector accentColor={C.gold} defaultId="fs_forest" plots={[
             { id: "fs_forest", label: "Coefficient plot",
-              node: <ForestPlot varNames={fsVarNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} svgId="forest-fuzzyrdd-fs" filename="fuzzyrdd_first_stage.svg" /> },
+              node: <ForestPlot factorVars={result.spec?.factorVars ?? []} varNames={fsVarNames} beta={fs.beta} se={fs.se} pVals={fs.pVals} svgId="forest-fuzzyrdd-fs" filename="fuzzyrdd_first_stage.svg" /> },
           ]} />
         </>
       )}
