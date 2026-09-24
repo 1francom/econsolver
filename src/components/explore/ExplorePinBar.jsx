@@ -137,15 +137,34 @@ function PlotCompare({ items, renderPlot }) {
 }
 
 // ── Pin card ──────────────────────────────────────────────────────────────────
-function PinCard({ item, selected, onToggle, onRemove }) {
+// A pin carries the QuickFilter it was created on, so the chip has to say what
+// that scope is — otherwise "5 countries" and "all countries" look identical.
+export function describeFilters(conds) {
+  if (!conds?.length) return "all rows";
+  return conds.map(c => {
+    const v = Array.isArray(c.val) ? `${c.val.length} selected` : String(c.val ?? "");
+    return `${c.col} ${String(c.op ?? "").replace(/_/g, " ")} ${v}`.trim();
+  }).join(" · ");
+}
+
+function sameFilters(a, b) {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+function PinCard({ item, selected, onToggle, onRemove, activeFilters, onSetFilters }) {
   const { C, T } = useTheme();
   const icon = KIND_ICON[item.kind] ?? "⬡";
   const shortLabel = item.label.length > 36 ? item.label.slice(0, 34) + "…" : item.label;
+  const scope       = describeFilters(item.filters);
+  const canAdopt    = !!onSetFilters && !sameFilters(item.filters, activeFilters?.length ? activeFilters : null);
+  const filterTitle = `Drawn on: ${scope}` + (canAdopt ? `
+Click ⟲ to use the filter now in the bar (${describeFilters(activeFilters)})` : "");
 
   return (
     <div
       onClick={() => onToggle(item.id)}
-      title={item.label}
+      title={`${item.label}
+Rows: ${scope}`}
       style={{
         display: "flex",
         alignItems: "center",
@@ -163,6 +182,31 @@ function PinCard({ item, selected, onToggle, onRemove }) {
       <span style={{ fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize, color: selected ? C.teal : C.textDim }}>
         {shortLabel}
       </span>
+      {item.filters?.length > 0 && (
+        <span
+          title={filterTitle}
+          style={{
+            fontFamily: T.code.fontFamily, fontSize: T.caption.fontSize,
+            color: C.gold, border: `1px solid ${C.gold}55`, borderRadius: 2,
+            padding: "0 4px", whiteSpace: "nowrap", maxWidth: 160,
+            overflow: "hidden", textOverflow: "ellipsis",
+          }}
+        >⊘ {scope}</span>
+      )}
+      {canAdopt && (
+        <span
+          onClick={e => { e.stopPropagation(); onSetFilters(item.id, activeFilters ?? []); }}
+          title={`Use the filter now in the bar: ${describeFilters(activeFilters)}`}
+          style={{ color: C.textMuted, cursor: "pointer", fontSize: T.caption.fontSize, lineHeight: 1, padding: "0 2px" }}
+        >⟲</span>
+      )}
+      {item.filters?.length > 0 && onSetFilters && (
+        <span
+          onClick={e => { e.stopPropagation(); onSetFilters(item.id, []); }}
+          title="Drop this pin's filter — redraw over the whole dataset"
+          style={{ color: C.textMuted, cursor: "pointer", fontSize: T.caption.fontSize, lineHeight: 1, padding: "0 2px" }}
+        >⊘✕</span>
+      )}
       <span
         onClick={e => { e.stopPropagation(); onRemove(item.id); }}
         style={{
@@ -180,7 +224,7 @@ function PinCard({ item, selected, onToggle, onRemove }) {
 }
 
 // ── Row (one kind-group bar) ──────────────────────────────────────────────────
-function PinRow({ label, items, selected, onToggle, onRemove, canCompare, onCompare }) {
+function PinRow({ label, items, selected, onToggle, onRemove, canCompare, onCompare, activeFilters, onSetFilters }) {
   const { C, T } = useTheme();
   if (!items.length) return null;
 
@@ -200,6 +244,8 @@ function PinRow({ label, items, selected, onToggle, onRemove, canCompare, onComp
       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", flex: 1 }}>
         {items.map(it => (
           <PinCard
+            activeFilters={activeFilters}
+            onSetFilters={onSetFilters}
             key={it.id}
             item={it}
             selected={selected.includes(it.id)}
@@ -241,7 +287,7 @@ const SUBTAB_KINDS = {
 };
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function ExplorePinBar({ items, info, subtab, renderPlot, onRemove }) {
+export default function ExplorePinBar({ items, info, subtab, renderPlot, onRemove, activeFilters = null, onSetFilters = null }) {
   const { C, T } = useTheme();
   const [selected, setSelected]         = useState([]);
   const [compareKind, setCompareKind]   = useState(null); // "plots" | "tables" | null
@@ -325,6 +371,8 @@ export default function ExplorePinBar({ items, info, subtab, renderPlot, onRemov
 
       {/* Plots row */}
       <PinRow
+        activeFilters={activeFilters}
+        onSetFilters={onSetFilters}
         label="Plots"
         items={plots}
         selected={selected}
@@ -336,6 +384,8 @@ export default function ExplorePinBar({ items, info, subtab, renderPlot, onRemov
 
       {/* Tables row */}
       <PinRow
+        activeFilters={activeFilters}
+        onSetFilters={onSetFilters}
         label="Tables"
         items={tables}
         selected={selected}

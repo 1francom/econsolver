@@ -29,7 +29,7 @@ import { generateWorkspaceScript, toDfVar, toStataFile } from "../../pipeline/ex
 import { rModelCode, rModelPackages } from "./rScript.js";
 import { stataModelLines } from "./stataScript.js";
 import { pythonModelLines, pythonModelPackages } from "./pythonScript.js";
-import { transpileExploreStat } from "./exploreStatScript.js";
+import { transpileExploreStat, filterScopeBlock } from "./exploreStatScript.js";
 import { buildGgplot, buildMatplotlibPlot, buildStataPlot } from "./plotScript.js";
 import { exportSpecExtras } from "./exportSpecExtras.js";
 
@@ -209,16 +209,24 @@ export function buildUnifiedScript({ lang, datasets = {}, globalPipeline = [], i
         out.push("restore");
       } else out.push(code);
     } else if (it.kind === "plot") {
+      // A saved plot records the row scope it was drawn on — emit it, exactly as
+      // a pinned Explore stat does, or the script plots a wider sample.
+      const scope = filterScopeBlock(it.entry?.filters, lang, dfVar, {
+        varName: lang === "python" ? "_plot_d" : ".plot_d",
+      });
       if (lang === "stata") {
         const code = buildStataPlot(it.entry, { dataVar: dfVar });
         out.push("preserve");
         if (ds) out.push(useLine(ds));
+        out.push(...scope.pre);
         out.push(code || `${cm} (no Stata translation for this plot)`);
         out.push("restore");
       } else if (lang === "r") {
-        out.push(buildGgplot(it.entry, { dfVar }) || `${cm} (no R translation for this plot)`);
+        out.push(...scope.pre);
+        out.push(buildGgplot(it.entry, { dfVar: scope.df }) || `${cm} (no R translation for this plot)`);
       } else {
-        out.push(buildMatplotlibPlot(it.entry, { dfVar }) || `${cm} (no Python translation for this plot)`);
+        out.push(...scope.pre);
+        out.push(buildMatplotlibPlot(it.entry, { dfVar: scope.df }) || `${cm} (no Python translation for this plot)`);
       }
     } else {
       out.push(it.code ?? `${cm} (empty)`);

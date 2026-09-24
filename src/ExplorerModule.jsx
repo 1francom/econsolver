@@ -1,7 +1,7 @@
 // ─── ECON STUDIO · ExplorerModule.jsx ────────────────────────────────────────
 // Evidence Explorer: EDA, distributions, correlation heatmap, AI insights.
 // Consumes cleanedData emitted by WranglingModule.
-import { useState, useMemo, useRef, useEffect, Fragment } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from "react";
 import { extractAllRows, queryDuckDB, getTablePage } from "./services/data/duckdb.js";
 import { fetchColumnInfoSQL, fetchSummaryStatsSQL, runDuckSQL } from "./services/data/duckdbExplore.js";
 import { useTheme } from "./ThemeContext.jsx";
@@ -2672,10 +2672,16 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     () => (duckTable && sqlInfo) ? sqlInfo : buildInfo(headers, rows),
     [duckTable, sqlInfo, headers, rows]);
   const totalRows = duckTable ? (duckRowCount || rows.length) : rows.length;
-  const filteredRows = useMemo(()=>{
-    if(!filterConds.length) return rows;
-    return rows.filter(row=>filterConds.every(cond=>matchCond(row,cond)));
-  },[rows,filterConds]);
+  // Single owner of "apply a QuickFilter condition list to rows" — the live bar
+  // and every pinned artifact must scope rows the same way, or a pin shows a
+  // different sample from the one it was created on.
+  const applyConds = useCallback((src, conds) => (
+    !conds?.length ? src : src.filter(row => conds.every(cond => matchCond(row, cond)))
+  ), []);
+  const filteredRows = useMemo(
+    () => applyConds(rows, filterConds),
+    [rows, filterConds, applyConds]
+  );
   // Numeric columns available to the group-contrast panel below Group Summarize.
   const numericCols = useMemo(
     () => headers.filter(h => info[h]?.isNum && info[h]?.mean != null),
@@ -2724,20 +2730,35 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     });
     // `dataset` binds the pin to the data it was computed on (the unified script
     // and the project export need it; params stay exactly what re-renders it).
-    setPinnedItems(prev => [...prev, { id: Date.now(), kind: params.kind, label, params, dataset: filename ?? null }]);
+    // `filters` freezes the row scope the pin was created on. Without it a pin
+    // redrew through whatever filter happened to be active later, so clearing
+    // the bar silently widened every pinned plot (and disagreed with the
+    // exported script, which has always compiled the pin's own filter).
+    setPinnedItems(prev => [...prev, {
+      id: Date.now(), kind: params.kind, label, params,
+      dataset: filename ?? null,
+      filters: filterConds.length ? JSON.parse(JSON.stringify(filterConds)) : null,
+    }]);
   };
   const removePin = (id) => setPinnedItems(prev => prev.filter(p => p.id !== id));
+  // Deliberate re-scoping: adopt the filter now in the bar, or drop the pin's
+  // filter so it covers the whole dataset.
+  const setPinFilters = (id, conds) => setPinnedItems(prev => prev.map(p => (
+    p.id === id ? { ...p, filters: conds?.length ? JSON.parse(JSON.stringify(conds)) : null } : p
+  )));
 
   // Re-render a pinned descriptive plot from its params + the current rows, so the
   // ExplorePinBar "Compare" panel shows the actual charts side by side (not just
   // params). Returns null for kinds without a chart (the bar falls back to text).
   const renderPinnedPlot = (item) => {
     const p = item?.params || {};
+    // The pin's OWN filter, not the bar's current one.
+    const pinRows = applyConds(rows, item?.filters);
     // Pinned charts redraw from row objects; on a DuckDB table that has not been
     // loaded that would be the preview, so show the text summary instead.
     if (!rowsReady) return null;
     if (item?.kind === "histogram") {
-      let vals = filteredRows.map(r => Number(r[p.col])).filter(Number.isFinite);
+      let vals = pinRows.map(r => Number(r[p.col])).filter(Number.isFinite);
       if (p.transform === "log")        vals = vals.filter(v => v > 0).map(Math.log);
       else if (p.transform === "log10") vals = vals.filter(v => v > 0).map(Math.log10);
       else if (p.transform === "sqrt")  vals = vals.filter(v => v >= 0).map(Math.sqrt);
@@ -2746,19 +2767,19 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
     }
     if (item?.kind === "barchart") {
       const counts = {};
-      filteredRows.forEach(r => { const k = String(r[p.col] ?? ""); counts[k] = (counts[k] || 0) + 1; });
+      pinRows.forEach(r => { const k = String(r[p.col] ?? ""); counts[k] = (counts[k] || 0) + 1; });
       let bars = Object.entries(counts).map(([label, count]) => ({ label, count }));
       if (p.order === "count") bars.sort((a, b) => b.count - a.count);
       return <SvgBarChart items={bars.slice(0, 15)} color={p.color} fillMode={p.fillMode ?? "filled"} title={p.title ?? ""} xLabel={p.xLabel ?? p.col} scale={p.scale ?? "linear"} />;
     }
     if (item?.kind === "spaghetti") {
-      return <SvgSpaghetti rows={filteredRows} entityCol={p.entityCol} timeCol={p.timeCol} col={p.col} sampleN={15} />;
+      return <SvgSpaghetti rows={pinRows} entityCol={p.entityCol} timeCol={p.timeCol} col={p.col} sampleN={15} />;
     }
     if (item?.kind === "timeseries") {
-      return <SvgMiniTimeSeries series={aggregateTimeSeries(filteredRows, p.timeCol, p.yCol, p.groupCol || "", p.agg || "mean")} />;
+      return <SvgMiniTimeSeries series={aggregateTimeSeries(pinRows, p.timeCol, p.yCol, p.groupCol || "", p.agg || "mean")} />;
     }
     if (item?.kind === "correlation") {
-      return <CorrHeatmap headers={p.cols ?? []} rows={filteredRows} info={info} />;
+      return <CorrHeatmap headers={p.cols ?? []} rows={pinRows} info={info} />;
     }
     return null;
   };
@@ -3009,9 +3030,10 @@ export default function ExplorerModule({cleanedData, onBack, onProceed, onSaveDa
           </div>
         )}
         {tab==="timeseries"&&<TimeSeriesTab rows={filteredRows} headers={headers} info={info} panel={panel} onPin={pinExplore} duckTable={filterConds.length ? null : duckTable} totalRows={totalRows}/>}
-        {tab==="plot"&&<ExplorePlotTab headers={headers} rows={filteredRows} panel={panel} numericCols={numericCols} pid={pid} histPid={histPid} filename={filename} scriptPreamble={plotScriptPreamble} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{height:"70vh", minHeight:520}}/>}
+        {tab==="plot"&&<ExplorePlotTab headers={headers} rows={filteredRows} baseRows={rows} activeFilters={filterConds} applyFilters={applyConds} panel={panel} numericCols={numericCols} pid={pid} histPid={histPid} filename={filename} scriptPreamble={plotScriptPreamble} onRequestDataset={onRequestDataset} initialPendingPlotId={pendingPlot?.plotId ?? null} onConsumePendingPlot={onConsumePendingPlot} style={{height:"70vh", minHeight:520}}/>}
       </div>
-      <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot} onRemove={removePin} />
+      <ExplorePinBar items={pinnedItems} info={info} subtab={tab} renderPlot={renderPinnedPlot}
+        onRemove={removePin} activeFilters={filterConds} onSetFilters={setPinFilters} />
     </div>
   );
 }

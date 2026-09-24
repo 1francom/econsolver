@@ -172,31 +172,44 @@ export function pinFilterNode(filters) {
   return children.length === 1 ? children[0] : { type: "and", children };
 }
 
+// Compile a row scope (the Explore filter bar's conditions) into the lines that
+// reproduce it, for a pin OR a saved plot — both are artifacts that record the
+// rows they were drawn on, so they must emit the same filter the same way.
+// Returns { pre, post, df }: `df` is the frame the caller's own code must read.
+// The work is done on a COPY so the block cannot change what the next one sees;
+// in Stata that means keep-if, wrapped in preserve/restore when the caller is
+// not already inside one.
+export function filterScopeBlock(filters, language = "r", dfVar = "df", { varName = null, wrapStata = false } = {}) {
+  const node = pinFilterNode(filters);
+  if (!node) return { pre: [], post: [], df: dfVar };
+  const cm = language === "stata" ? "*" : "#";
+  try {
+    if (language === "stata") {
+      const keep = `keep if ${predicateToStata(node)}`;
+      return wrapStata
+        ? { pre: ["preserve", keep], post: ["restore"], df: dfVar }
+        : { pre: [keep], post: [], df: dfVar };
+    }
+    if (language === "python") {
+      const v = varName || "_pin_d";
+      return { pre: [`${v} = ${dfVar}[${predicateToPython(node, { df: dfVar })}]`], post: [], df: v };
+    }
+    const v = varName || ".pin_d";
+    return { pre: [`${v} <- dplyr::filter(${dfVar}, ${predicateToR(node)})`], post: [], df: v };
+  } catch (e) {
+    // An operator no compiler can express must not silently widen the sample.
+    return {
+      pre: [`${cm} NOTE: this filter could not be translated (${e.message}) — re-apply it before running.`],
+      post: [], df: dfVar,
+    };
+  }
+}
+
 export function transpileExploreStat(params = {}, language = "r", dfVar = "df") {
   // A filtered pin works on its own copy of the data, so the block cannot change
   // what the next one sees. In Stata that means `keep if` — the caller runs pins
   // inside preserve/restore (services/export/unifiedScript.js).
-  let df = dfVar;
-  let pre = [];
-  const node = pinFilterNode(params.filters);
-  if (node) {
-    try {
-      if (language === "stata") {
-        pre = [`keep if ${predicateToStata(node)}`];
-      } else if (language === "python") {
-        df = "_pin_d";
-        pre = [`_pin_d = ${dfVar}[${predicateToPython(node, { df: dfVar })}]`];
-      } else {
-        df = ".pin_d";
-        pre = [`.pin_d <- dplyr::filter(${dfVar}, ${predicateToR(node)})`];
-      }
-    } catch (e) {
-      // An operator no compiler can express must not silently widen the sample.
-      const cm = language === "stata" ? "*" : "#";
-      df = dfVar;
-      pre = [`${cm} NOTE: this pin's Explore filter could not be translated (${e.message}) — re-apply it before running.`];
-    }
-  }
+  const { pre, df } = filterScopeBlock(params.filters, language, dfVar);
   const code = language === "python" ? pyExplore(params, df)
              : language === "stata"  ? stataExplore(params)
              :                         rExplore(params, df);
